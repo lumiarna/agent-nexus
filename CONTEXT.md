@@ -27,16 +27,28 @@ _Avoid_: Per-agent config, local-only file
 ## Workspace
 
 **Project**:
-一个被 Agent Nexus 收录的 Git repository root。它是 `Session`、`project Skill` 和 project-bound `Sync` 任务的上下文边界，而不是任意目录。
+一个被 Agent Nexus 收录的 Git repository root。它是 `Session`、`project Skill` 和 project-bound `Sync` 任务的上下文边界，而不是任意目录；当扫描发现仓库路径变化但 `Project Key` 相同时，应续认为同一个 `Project`，而不是创建新项目。
 _Avoid_: Folder, workspace path, arbitrary directory
+
+**Project Path**:
+`Project` 当前解析到的本地仓库路径。它是可变属性，不构成 `Project` 身份；当仓库移动或重命名时，系统可以在 `Project Key` 不变的前提下更新它。
+_Avoid_: Stable identity, project key
+
+**Stale Project**:
+一个已经存在 `Project` 记录、但当前 `Project Path` 不存在，且扫描阶段未能续认到同 `Project Key` 新路径的项目状态。它应被视为待处置状态，而不是立即删除的脏数据。
+_Avoid_: Auto-deleted project, healthy project, identity loss
+
+**Project Status**:
+`Project` 在列表中的一级可见状态。MVP 中只包括 `active`、`stale` 和 `hidden`；其中 `moved`、`renamed` 等仅作为事件或提示，不提升为一级状态。
+_Avoid_: Event-as-status, overly granular state machine
 
 **Git Base Folder**:
 用于自动发现 `Project` 的扫描根目录。它不是 `Project` 本身，只是 `Project discovery` 的输入范围。
 _Avoid_: Project, workspace
 
 **Project Key**:
-用于跨设备归并同一 `Project` 的稳定身份键。它默认从 canonical Git remote 派生，可手工覆写，并用于 `Session` 的 WebDAV 归档与聚合。无 remote 时可退回项目目录名；存在多个 remote 且无法确定 canonical remote 时，需要用户确认或覆写，不自动退回目录名。
-_Avoid_: Local path, folder name, remote guess
+用于跨设备归并同一 `Project` 的稳定身份键。MVP 中它默认取项目目录名，创建时必须明显提示可手工编辑；一旦首次创建并保存后即冻结，不随目录名变化自动改写。它用于 `Session` 的 WebDAV 归档与聚合。
+_Avoid_: Local path, mutable folder name, remote guess
 
 ## Assets
 
@@ -55,6 +67,26 @@ _Avoid_: Chat log only, backup artifact only
 **Provider**:
 一个提供 quota 信息与 credential source 的外部服务身份。`Provider` 在本项目中是全局资源，不做 project-level quota 归因。
 _Avoid_: Project provider, account manager
+
+**Provider Connection Params**:
+为 `Provider` 的 quota 观测补充的连接参数，例如 workspace identifier 或请求所需材料。它服务于观测能力，不表示 Agent Nexus 接管第三方身份生命周期。
+_Avoid_: Account ownership, login manager, credential lifecycle
+
+**Provider Display Preferences**:
+用户对 `Provider` 展示方式的显式偏好，例如卡片排序、隐藏与次级表面显示选项。它影响界面呈现，不改变 `Provider` 身份或 quota 语义。
+_Avoid_: Provider identity, quota data, credential config
+
+**Surface Preference**:
+针对某个具体展示表面的可见性或呈现偏好。它从属于特定 surface，例如 Windows 任务栏，不应与 `Provider` 的全局观测配置混为一体。
+_Avoid_: Global provider identity, connection params
+
+**Card Visibility**:
+`Provider` 在主页面卡片视图中的显示偏好。它只影响该主页面 surface，不自动影响其他 surface 的显示与否。
+_Avoid_: Global hide, tray visibility
+
+**Tray Metric Mode**:
+Windows 任务栏对 `Provider quota` 采用的统一主展示口径。MVP 中它在整个任务栏范围内全局统一配置，而不是按 `Provider` 分别覆盖。
+_Avoid_: Per-provider tray metric, mixed tray semantics
 
 ## Identity
 
@@ -87,6 +119,10 @@ _Avoid_: Owner, primary target
 **Target Agent**:
 在 `Agent Matrix` 中接收资产传播关系的 agent。对 `Skill` 和 `Prompt`，其目标路径由系统按 agent 与上下文自动计算。
 _Avoid_: Secondary source, duplicate source
+
+**Agent Capability Surface**:
+某个 `Agent` 在当前产品中实际参与的资产与页面范围。`Agent` 的领域身份可以完整存在，但其可操作 surface 可以分阶段开放；当前已确认 `Copilot` 在 MVP 中同时参与 `Skill` 与 `Prompt`。
+_Avoid_: Partial agent identity, ad hoc special case
 
 ## Sync
 

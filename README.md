@@ -1,8 +1,3 @@
----
-created: 2026-06-15T00:10:00
-updated: 2026-06-15T12:56:00
----
-
 ## Hero
 
 - 标题：`A Nexus for Shared Agent Assets`
@@ -26,6 +21,10 @@ updated: 2026-06-15T12:56:00
 	- `${CODEX_AUTH_FILE}`：`${CODEX_CONFIG_DIR}/auth.json`
 	- `${CODEX_SKILLS_DIR}`: `${CODEX_CONFIG_DIR}/skills`
 	- `${CODEX_PROMPT_FILE}`: `${CODEX_CONFIG_DIR}/AGENTS.md`
+- Copilot
+	- `${COPILOT_CONFIG_DIR}`: `~/.agents`
+	- `${COPILOT_SKILLS_DIR}`: `${COPILOT_CONFIG_DIR}/skills`
+	- `${COPILOT_PROMPT_FILE}`: `${COPILOT_CONFIG_DIR}/AGENTS.md`
 - OpenCode
 	- `${OPENCODE_CONFIG_DIR}`: `~/.config/opencode`
 	- `${OPENCODE_AUTH_FILE}`：`~/.local/share/opencode/auth.json`
