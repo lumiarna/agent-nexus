@@ -47,8 +47,8 @@ _Avoid_: Event-as-status, overly granular state machine
 _Avoid_: Project, workspace
 
 **Project Key**:
-用于跨设备归并同一 `Project` 的稳定身份键。MVP 中它默认取项目目录名，创建时必须明显提示可手工编辑；一旦首次创建并保存后即冻结，不随目录名变化自动改写。它用于 `Session` 的 WebDAV 归档与聚合。
-_Avoid_: Local path, mutable folder name, remote guess
+用于跨设备归并同一 `Project` 的稳定身份键。MVP 中它默认取项目目录名，但 UI 不提供编辑入口；目录名只是默认值，不应被等同为身份语义本身。未来若支持显式覆写或迁移，应通过受控流程维持同一 `Project` 身份，而不是把目录改名天然视为新项目。它用于 `Session` 的 WebDAV 归档与聚合。
+_Avoid_: Local path, mutable folder name as identity, remote guess
 
 ## Assets
 
@@ -109,7 +109,7 @@ _Avoid_: Type, category
 _Avoid_: Two-way sync, replication mesh
 
 **Agent Matrix**:
-`Skill` 和 `Prompt` 页面中的关系矩阵视图。行表示资产，列表示 agent，单元格表示 `source / target / none` 这类传播关系；每一行必须且只能有一个 `source`。
+`Skill` 和 `Prompt` 页面中的传播关系模型。它表达某个资产在不同 agent 上的 `source / target / none` 关系；每一行必须且只能有一个 `source`。MVP 中该模型可以用紧凑行与 Agent 图标组呈现，而不要求固定采用每个 agent 单独占一列的显式宽矩阵。
 _Avoid_: Agent tree, config table, task grid
 
 **Source Agent**:
@@ -127,19 +127,23 @@ _Avoid_: Partial agent identity, ad hoc special case
 ## Sync
 
 **Sync**:
-Agent Nexus 的任务与预设工作域。它统一承载 `Distribution`、`Backup` 和 `Restore/Pull` 的底层执行与可观测性，但不承担资产主视图。`Backup` 与 `Restore/Pull` 是两个显式的单向任务方向，不合并成一个双向任务。
+Agent Nexus 的任务与预设工作域。它统一承载 `Distribution`、`Backup` 和 `Restore/Pull` 的底层执行与可观测性，但不承担资产主视图。MVP 中它以自定义 `Task Group` / `Task` 工作台为主，系统默认任务降为次级观察区。`Backup` 与 `Restore/Pull` 是两个显式的单向任务方向，不合并成一个双向任务。
 _Avoid_: Asset page, file manager, two-way sync engine
 
 **Sync Task**:
-一个具体的单向执行任务，遵守 `single source -> multiple targets` 规则。它是运行对象，不是模板，也不是资产本体；如果需要从 WebDAV 拉回本地，应创建独立的 `Restore/Pull` 任务，而不是反转既有 `Backup` 任务。
-_Avoid_: Template, relationship only, background daemon
+一个具体的单向执行任务，遵守 `single source -> multiple targets` 规则。它是运行对象，不是模板，也不是资产本体；如果需要从 WebDAV 拉回本地，应创建独立的 `Restore/Pull` 任务，而不是反转既有 `Backup` 任务。`Backup` / `Distribution` / `Restore/Pull` 的方向与类型都定义在 `Task` 层。`Task` 可独立配置 `manual` 或 `CRON` 调度，并由 Agent Nexus 内建执行。
+_Avoid_: Template, relationship only, background daemon, task group as execution type
+
+**Task Group**:
+一个包含一个或多个 `Sync Task` 的组织与编排容器。它用于创建、排序、批量查看与批量触发，但不承载 `Backup` / `Distribution` / `Restore/Pull` 等执行方向语义。MVP 中 `Create custom task` 的默认创建单位是 `Task Group`，单任务只是单元素 group。
+_Avoid_: Execution type, workflow engine, task type
 
 **Template**:
-用于快速创建 `Generic File Distribution/Backup` 任务的预设定义。它是创建加速器，实例化后不回流控制既有任务。
+用于快速创建 `Task Group` 的预设定义。它是创建加速器，实例化后不回流控制既有任务。
 _Avoid_: Task, live config, inherited instance
 
 **Instance**:
-由 `Template` 或手工操作创建出的具体 `Sync Task`。它创建后独立存在，不自动跟随模板变更。
+由 `Template` 或手工操作创建出的具体 `Task Group` 或 `Sync Task` 实例。它创建后独立存在，不自动跟随模板变更。
 _Avoid_: Template copy with inheritance, managed child config
 
 **Generic File Distribution/Backup**:
@@ -173,7 +177,7 @@ _Avoid_: Reverse sync, cloud source by default
 _Avoid_: Cloud cache, merged archive
 
 **Cloud Session**:
-来自 WebDAV 汇总归档的会话集合。它代表跨设备聚合后的会话视图，是 `Session` 页在 `Cloud` 来源下的真相源。这里的聚合是只读视图聚合，不表示多源合并同步、冲突解决或远端默认成为通用 source。
+来自 WebDAV 汇总归档的会话集合。它代表跨设备聚合后的会话视图，是 `Session` 页在 `Cloud` 来源下的真相源。这里的聚合是只读视图聚合，不表示多源合并同步、冲突解决或远端默认成为通用 source。`WebDAV` 属于设置与实现层术语；在主内容界面中应优先使用 `Cloud`。
 _Avoid_: Local session, mixed source view
 
 **Session Directory**:
@@ -189,6 +193,10 @@ _Avoid_: Login flow, account management, token writer
 **Quick Action**:
 在 `Session` 或 `Provider` 等上下文页中就近提供的轻量动作。它缩短操作路径，但不替代 `Sync` 的完整任务定义能力。
 _Avoid_: Full configuration surface, task editor
+
+**Display Order**:
+一种用户可显式调整的列表顺序偏好。MVP 中 `Provider` 卡片、`Task Group` 列表以及 `Task Group` 内的 `Task` 列表都支持拖拽排序；而 agent 相关展示顺序则采用固定 canonical order：`Claude Code / CodeX / Copilot / OpenCode`。
+_Avoid_: Implicit heuristic order, mixed agent order
 
 **Global Resource**:
 不应被 project-level 归因或切分的资源。当前 `Provider quota` 是典型的 `Global Resource`。

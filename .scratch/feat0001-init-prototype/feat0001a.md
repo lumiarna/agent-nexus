@@ -1,4 +1,4 @@
-# 初版原型反馈
+# 原型反馈 A
 
 - 每个一级功能拆分成独立的 HTML 文件
 - Provider 需要手动配置两类内容：一类是 quota 观测所需的连接参数，如 OpenCode Go Workspace ID / Auth Cookie；另一类是展示偏好，如卡片隐藏/排序，以及是否显示在 Windows 任务栏。任务栏图标的 `used/remaining` 采用全局统一配置，默认 `remaining`
