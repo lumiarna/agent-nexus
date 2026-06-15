@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;}
+    html,body{margin:0;height:100%;}
+    body{background:#f3ece3;}
+    a{text-decoration:none;color:inherit;}
+    input{font-family:inherit;}
+    ::-webkit-scrollbar{width:11px;height:11px;}
+    ::-webkit-scrollbar-thumb{background:rgba(90,70,45,.16);border-radius:6px;border:3px solid transparent;background-clip:content-box;}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(90,70,45,.28);background-clip:content-box;}
+    @keyframes ann-pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+    @keyframes ann-rise{from{opacity:0;transform:translateY(8px) translateX(-50%);}to{opacity:1;transform:translateY(0) translateX(-50%);}}
+    @keyframes ann-fade{from{opacity:0;}to{opacity:1;}}
+  </style>
+</helmet>
+<div style="position:fixed;inset:0;display:flex;flex-direction:column;background:#f3ece3;font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,sans-serif;color:#3a302a;font-size:13px;-webkit-font-smoothing:antialiased;overflow:hidden;">
+
+  <div style="height:40px;flex:0 0 auto;display:flex;align-items:center;padding:0 14px;background:#ece2d5;border-bottom:1px solid #e0d4c2;position:relative;">
+    <div style="display:flex;gap:7px;align-items:center;">
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+    </div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#5a4d42;">
+      <span style="display:inline-block;width:14px;height:14px;border-radius:5px;background:#9d7a64;"></span>
+      Agent Nexus
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;color:#a99a89;font-size:11.5px;">
+      <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;">Search assets <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#b8a890;border:1px solid #e7ddce;border-radius:4px;padding:0 4px;">⌘K</span></span>
+      <a href="Settings.dc.html" title="Settings" style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;background:#fcf9f4;border:1px solid #e7ddce;color:#8a7a68;font-size:14px;" style-hover="background:#f6efe5;color:#9d7a64;">⚙</a>
+    </div>
+  </div>
+
+  <div style="flex:0 0 auto;display:flex;align-items:center;gap:4px;padding:9px 14px;background:#f3ece3;border-bottom:1px solid #e7ddce;">
+    <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="6">
+      <a href="{{ tab.href }}" style="{{ tab.style }}">{{ tab.label }}</a>
+    </sc-for>
+  </div>
+
+  <div style="flex:1;min-height:0;overflow:auto;">
+
+    <!-- ===== LIST ===== -->
+    <sc-if value="{{ isList }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Project" style="padding:24px 28px 60px;max-width:1180px;margin:0 auto;">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+          <div>
+            <h1 style="margin:0;font-size:23px;font-weight:800;letter-spacing:-.02em;color:#2a2520;">Project</h1>
+            <p style="margin:6px 0 0;color:#9a8f80;font-size:13px;">Recorded Git repositories · workspace context entry</p>
+          </div>
+          <div style="display:flex;gap:9px;">
+            <div onClick="{{ scanFolder }}" style="padding:9px 15px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#f6efe5;">Add Git Base Folder</div>
+            <div onClick="{{ openAdd }}" style="padding:9px 17px;background:#9d7a64;color:#fff;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">Add Project</div>
+          </div>
+        </div>
+
+        <div style="margin-top:20px;background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;overflow:hidden;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+          <div style="display:grid;grid-template-columns:1.5fr 1.5fr 1.1fr 210px;gap:16px;padding:12px 20px;background:#f6efe5;border-bottom:1px solid #f0e8db;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b3a999;">
+            <div>Project</div><div>Repo path</div><div>Project key</div><div style="text-align:right;">Assets</div>
+          </div>
+          <sc-for list="{{ activeProjects }}" as="pr" hint-placeholder-count="5">
+            <div onClick="{{ pr.openClick }}" style="display:grid;grid-template-columns:1.5fr 1.5fr 1.1fr 210px;gap:16px;padding:16px 20px;border-bottom:1px solid #f3eee5;cursor:pointer;align-items:center;" style-hover="background:#fbf6ef;">
+              <div style="min-width:0;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:14.5px;font-weight:700;color:#2a2520;">{{ pr.name }}</span>
+                  <span style="font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:{{ pr.statusFg }};background:{{ pr.statusBg }};border-radius:5px;padding:2px 7px;">{{ pr.statusLabel }}</span>
+                </div>
+                <div style="margin-top:3px;font-size:11px;color:#b3a999;font-family:ui-monospace,Menlo,monospace;">{{ pr.sessionsDir }}{{ pr.sessionsNote }}</div>
+              </div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#8a8073;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ pr.path }}</div>
+              <div style="min-width:0;">
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span style="font-size:11px;color:#c3b9a8;flex:0 0 auto;" title="Frozen after first save">🔒</span>
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#6a6055;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ pr.key }}</span>
+                </div>
+                <sc-if value="{{ pr.hasKeyNote }}" hint-placeholder-val="{{ true }}">
+                  <div style="margin-top:3px;display:inline-block;font-size:10px;font-weight:600;color:#9a6f0a;background:#f7eccb;border:1px solid #ecd9a8;border-radius:5px;padding:1px 6px;">{{ pr.keyNote }}</div>
+                </sc-if>
+              </div>
+              <div style="display:flex;gap:7px;justify-content:flex-end;">
+                <sc-for list="{{ pr.counts }}" as="c" hint-placeholder-count="3">
+                  <div style="display:flex;flex-direction:column;align-items:center;min-width:48px;padding:6px 0;background:#f3ece3;border-radius:10px;">
+                    <span style="font-size:14px;font-weight:800;color:#3a302a;">{{ c.n }}</span><span style="font-size:9px;color:#b3a999;letter-spacing:.03em;">{{ c.label }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+
+          <!-- Stale rows -->
+          <sc-for list="{{ staleProjects }}" as="pr" hint-placeholder-count="1">
+            <div style="display:grid;grid-template-columns:1.5fr 1.5fr 1.1fr 210px;gap:16px;padding:16px 20px;border-bottom:1px solid #f3eee5;align-items:center;background:#faf3e8;">
+              <div style="min-width:0;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:14.5px;font-weight:700;color:#6a6055;">{{ pr.name }}</span>
+                  <span style="font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#9a6f0a;background:#f7eccb;border-radius:5px;padding:2px 7px;">Stale</span>
+                </div>
+                <div style="margin-top:3px;font-size:11px;color:#bca37a;">Repo path no longer resolves — same Project Key not found in scan</div>
+              </div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#bca37a;text-decoration:line-through;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ pr.path }}</div>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-size:11px;color:#c3b9a8;flex:0 0 auto;">🔒</span>
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#8a8073;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ pr.key }}</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+                <div onClick="{{ pr.relocateClick }}" style="font-size:11.5px;font-weight:600;color:#fff;background:#9d7a64;border-radius:999px;padding:5px 12px;cursor:pointer;" style-hover="background:#8c6b56;">Relocate repo</div>
+                <div style="display:flex;gap:6px;">
+                  <div onClick="{{ pr.hideClick }}" style="font-size:11px;font-weight:600;color:#7a6f60;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;padding:4px 10px;cursor:pointer;" style-hover="background:#f3ece3;">Keep hidden</div>
+                  <div onClick="{{ pr.deleteClick }}" style="font-size:11px;font-weight:600;color:#b55440;background:#fcf9f4;border:1px solid #ecd0c6;border-radius:999px;padding:4px 10px;cursor:pointer;" style-hover="background:#f8ebe6;">Delete…</div>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <!-- hidden strip -->
+        <sc-if value="{{ hasHidden }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px;background:#f0e8db;border:1px dashed #ddccb6;border-radius:14px;">
+            <span style="font-size:12px;font-weight:700;color:#7a6f60;">Hidden projects</span>
+            <sc-for list="{{ hiddenProjects }}" as="h" hint-placeholder-count="1">
+              <div onClick="{{ h.unhideClick }}" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#6a6055;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;padding:5px 12px;cursor:pointer;" style-hover="background:#f6efe5;">{{ h.name }} <span style="color:#a99a89;">· unhide</span></div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <p style="margin-top:14px;font-size:11.5px;color:#b3a999;">The list page stays light — project-bound Sync creation happens inside Project detail. Status set is <b style="color:#9a8f80;">active / stale / hidden</b>.</p>
+      </div>
+    </sc-if>
+
+    <!-- ===== DETAIL ===== -->
+    <sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Project detail" style="padding:22px 28px 60px;max-width:1180px;margin:0 auto;">
+        <div onClick="{{ backToList }}" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#9a8f80;cursor:pointer;margin-bottom:14px;" style-hover="color:#9d7a64;">← Project</div>
+
+        <div style="background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;padding:22px;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+            <div style="min-width:0;">
+              <h1 style="margin:0;font-size:21px;font-weight:800;letter-spacing:-.02em;color:#2a2520;">{{ dp.name }}</h1>
+              <div style="margin-top:10px;display:flex;flex-wrap:wrap;column-gap:24px;row-gap:8px;font-size:12px;">
+                <div><span style="color:#b3a999;">Repo&nbsp;&nbsp;</span><span style="font-family:ui-monospace,Menlo,monospace;color:#6a6055;">{{ dp.path }}</span></div>
+                <div style="display:inline-flex;align-items:center;gap:5px;"><span style="color:#b3a999;">Key&nbsp;&nbsp;</span><span style="color:#c3b9a8;">🔒</span><span style="font-family:ui-monospace,Menlo,monospace;color:#6a6055;">{{ dp.key }}</span><span style="font-size:10px;color:#bca37a;">frozen</span></div>
+                <div><span style="color:#b3a999;">Session dir&nbsp;&nbsp;</span><span style="font-family:ui-monospace,Menlo,monospace;color:#6a6055;">{{ dp.sessionsDir }}</span></div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <div onClick="{{ dp.archiveClick }}" style="padding:8px 14px;background:#9d7a64;color:#fff;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">Archive now</div>
+              <div onClick="{{ dp.pullClick }}" style="padding:8px 14px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#f3ece3;">Pull now</div>
+              <div onClick="{{ dp.backupClick }}" style="padding:8px 14px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#f3ece3;">Create Session Backup</div>
+              <div onClick="{{ dp.genericClick }}" style="padding:8px 14px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#f3ece3;">Create Generic File Task</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+          <!-- Skill summary -->
+          <div style="background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;padding:20px;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+              <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9d7a64;">Skill</span>
+              <span style="font-size:11px;color:#b3a999;">project scope</span>
+            </div>
+            <sc-if value="{{ dp.hasSkills }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:12px;">
+                <sc-for list="{{ dp.skills }}" as="s" hint-placeholder-count="2">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                    <div style="min-width:0;">
+                      <div style="font-size:13px;font-weight:700;color:#3a302a;">{{ s.name }}</div>
+                      <div style="font-size:11px;color:#b3a999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ s.desc }}</div>
+                    </div>
+                    <div style="display:flex;gap:4px;flex:0 0 auto;">
+                      <sc-for list="{{ s.icons }}" as="ic" hint-placeholder-count="4">
+                        <span title="{{ ic.title }}" style="{{ ic.style }}">{{ ic.abbr }}</span>
+                      </sc-for>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ dp.noSkills }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:16px;text-align:center;color:#b3a999;font-size:12px;background:#f6efe5;border:1px dashed #e7ddce;border-radius:12px;">No project skills recorded for this repository.</div>
+            </sc-if>
+          </div>
+
+          <!-- Prompt refs -->
+          <div style="background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;padding:20px;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+              <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9d7a64;">Prompt</span>
+              <span style="font-size:11px;color:#b3a999;">global · referenced</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:11px;">
+              <sc-for list="{{ dp.prompts }}" as="pm" hint-placeholder-count="2">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                  <div style="font-size:13px;font-weight:700;color:#3a302a;">{{ pm.name }}</div>
+                  <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#b3a999;">{{ pm.file }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="margin-top:12px;font-size:11px;color:#c3b9a8;">Prompts are global assets — shown here as references, not project prompts.</div>
+          </div>
+
+          <!-- Session panel -->
+          <div style="background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;padding:20px;grid-column:1 / -1;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+              <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9d7a64;">Session</span>
+              <div style="display:flex;background:#f0e8db;border-radius:999px;padding:3px;">
+                <div onClick="{{ dp.localClick }}" style="{{ dp.localStyle }}">Local</div>
+                <div onClick="{{ dp.cloudClick }}" style="{{ dp.cloudStyle }}">Cloud</div>
+              </div>
+            </div>
+            <sc-if value="{{ dp.hasSessions }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:2px;">
+                <sc-for list="{{ dp.sessions }}" as="se" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 11px;border-radius:10px;" style-hover="background:#f6efe5;">
+                    <div style="min-width:0;">
+                      <div style="font-size:12.5px;font-weight:700;font-family:ui-monospace,Menlo,monospace;color:#3a302a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ se.title }}</div>
+                      <div style="font-size:11px;color:#b3a999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ se.excerpt }}</div>
+                    </div>
+                    <div style="font-size:11px;color:#c3b9a8;white-space:nowrap;flex:0 0 auto;">{{ se.updated }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ dp.noSessions }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:18px;text-align:center;color:#b3a999;font-size:12px;background:#f6efe5;border:1px dashed #e7ddce;border-radius:12px;">{{ dp.sessionEmptyMsg }}</div>
+            </sc-if>
+            <a href="Session.dc.html" style="margin-top:12px;display:inline-flex;font-size:12px;color:#9d7a64;font-weight:600;" style-hover="text-decoration:underline;">Open in Session →</a>
+          </div>
+
+          <!-- Sync summary -->
+          <div style="background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;padding:20px;grid-column:1 / -1;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+            <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9d7a64;">Sync summary</span>
+            <div style="margin-top:14px;display:flex;flex-direction:column;gap:2px;">
+              <sc-for list="{{ dp.syncRows }}" as="sy" hint-placeholder-count="3">
+                <div style="display:grid;grid-template-columns:170px 1fr 120px;gap:14px;align-items:center;padding:11px;border-radius:10px;" style-hover="background:#f6efe5;">
+                  <div style="font-size:12.5px;font-weight:700;color:#3a302a;">{{ sy.label }}</div>
+                  <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#a99a89;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ sy.detail }}</div>
+                  <div style="justify-self:end;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:{{ sy.statusFg }};"><span style="{{ sy.statusDot }}"></span>{{ sy.statusLabel }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+
+  <!-- ===== Add Project modal ===== -->
+  <sc-if value="{{ addOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeAdd }}" style="position:fixed;inset:0;background:rgba(42,33,28,.34);display:flex;align-items:center;justify-content:center;z-index:60;animation:ann-fade .14s ease-out;padding:24px;">
+      <div onClick="{{ stop }}" style="width:480px;max-width:100%;background:#fcf9f4;border:1px solid #efe6da;border-radius:20px;box-shadow:0 24px 60px rgba(50,40,25,.28);">
+        <div style="padding:20px 22px;border-bottom:1px solid #f0e8db;">
+          <div style="font-size:17px;font-weight:800;letter-spacing:-.01em;color:#2a2520;">Add Project</div>
+          <div style="margin-top:4px;font-size:12px;color:#a99a89;">Pick a Git repository root to record</div>
+        </div>
+        <div style="padding:20px 22px;display:flex;flex-direction:column;gap:16px;">
+          <label style="display:block;">
+            <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Repository root</div>
+            <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;background:#f6efe5;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#6a6055;">D:/Workspace/new-service <span style="margin-left:auto;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;color:#9d7a64;font-weight:600;cursor:pointer;">Browse…</span></div>
+          </label>
+          <label style="display:block;">
+            <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Project Key</div>
+            <input value="{{ addKey }}" onInput="{{ setAddKey }}" style="width:100%;padding:9px 12px;border:1px solid #c9a98e;border-radius:10px;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+            <div style="margin-top:8px;padding:11px 13px;background:#f7eccb;border:1px solid #ecd9a8;border-radius:11px;font-size:11.5px;color:#9a6f0a;line-height:1.55;"><b>Edit it now if needed.</b> Defaults to the folder name. After you save, the key is <b>frozen</b> — it will not change if the folder is later renamed or moved.</div>
+          </label>
+        </div>
+        <div style="padding:16px 22px;border-top:1px solid #f0e8db;display:flex;justify-content:flex-end;gap:9px;">
+          <div onClick="{{ closeAdd }}" style="padding:9px 16px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-size:12.5px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#ece2d5;">Cancel</div>
+          <div onClick="{{ saveAdd }}" style="padding:9px 18px;background:#9d7a64;color:#fff;border-radius:999px;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">Save &amp; freeze key</div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== Delete confirm modal ===== -->
+  <sc-if value="{{ deleteOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeDelete }}" style="position:fixed;inset:0;background:rgba(42,33,28,.40);display:flex;align-items:center;justify-content:center;z-index:60;animation:ann-fade .14s ease-out;padding:24px;">
+      <div onClick="{{ stop }}" style="width:460px;max-width:100%;background:#fcf9f4;border:1px solid #efe6da;border-radius:20px;box-shadow:0 24px 60px rgba(50,40,25,.30);">
+        <div style="padding:20px 22px;border-bottom:1px solid #f0e8db;">
+          <div style="font-size:17px;font-weight:800;letter-spacing:-.01em;color:#b55440;">Delete {{ del.name }} permanently?</div>
+          <div style="margin-top:4px;font-size:12px;color:#a99a89;">This cannot be undone. The following associated data will be removed:</div>
+        </div>
+        <div style="padding:18px 22px;">
+          <div style="display:flex;flex-direction:column;gap:2px;background:#f8ebe6;border:1px solid #ecd0c6;border-radius:12px;padding:8px;">
+            <sc-for list="{{ del.items }}" as="d" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 11px;">
+                <span style="font-size:12.5px;color:#6a5550;">{{ d.label }}</span>
+                <span style="font-size:12.5px;font-weight:700;color:#b55440;">{{ d.value }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <label onClick="{{ del.toggleAck }}" style="margin-top:14px;display:flex;align-items:center;gap:9px;cursor:pointer;">
+            <span style="{{ del.checkStyle }}">{{ del.checkGlyph }}</span>
+            <span style="font-size:12.5px;color:#6a6055;">I understand this permanently deletes the project and its data.</span>
+          </label>
+        </div>
+        <div style="padding:16px 22px;border-top:1px solid #f0e8db;display:flex;justify-content:flex-end;gap:9px;">
+          <div onClick="{{ closeDelete }}" style="padding:9px 16px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-size:12.5px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#ece2d5;">Cancel</div>
+          <div onClick="{{ del.confirmClick }}" style="{{ del.confirmStyle }}">Delete permanently</div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ toastShown }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#2a2520;color:#f3ece3;padding:11px 18px;border-radius:999px;font-size:12.5px;font-weight:600;box-shadow:0 10px 30px rgba(50,40,25,.32);animation:ann-rise .18s ease-out;z-index:80;">{{ toast }}</div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  agents = ['Claude Code','CodeX','OpenCode','Copilot'];
+  agentColors = { 'Claude Code':'#c2410c', 'CodeX':'#4f7a6a', 'OpenCode':'#7a5c9e', 'Copilot':'#5a7894' };
+  agentAbbr = { 'Claude Code':'CC', 'CodeX':'CX', 'OpenCode':'OC', 'Copilot':'CP' };
+
+  projectsData = [
+    { id:'oll-context', name:'oll-context', status:'active', path:'D:/Workspace/oll-context', key:'github.com/acme/oll-context', sessionsDir:'__sessions', skills:2, sessions:18, sync:6 },
+    { id:'tap', name:'tap', status:'active', path:'D:/Workspace/tap', key:'tap', keyNote:'folder-name default', sessionsDir:'__sessions', skills:1, sessions:7, sync:3 },
+    { id:'tap-kit', name:'tap-kit', status:'active', path:'D:/Workspace/tap-kit', key:'github.com/acme/tap-kit', sessionsDir:'__sessions', skills:0, sessions:3, sync:2 },
+    { id:'awesome-vibe-coding', name:'awesome-vibe-coding', status:'active', path:'D:/Workspace/awesome-vibe-coding', key:'github.com/acme/awesome-vibe-coding', sessionsDir:'docs/__sessions', sessionsNote:' · override', skills:1, sessions:5, sync:2 },
+    { id:'agent-nexus', name:'agent-nexus', status:'active', path:'D:/Workspace/agent-nexus', key:'agent-nexus', keyNote:'folder-name default', sessionsDir:'__sessions', skills:3, sessions:12, sync:4 },
+    { id:'legacy-cli', name:'legacy-cli', status:'stale', path:'E:/Old/legacy-cli', key:'legacy-cli', sessionsDir:'__sessions', skills:1, sessions:9, sync:2 },
+    { id:'sandbox', name:'sandbox', status:'hidden', path:'D:/Workspace/sandbox', key:'sandbox', sessionsDir:'__sessions', skills:0, sessions:2, sync:0 }
+  ];
+
+  skillsData = [
+    { id:'sk6', name:'tap-builder', projectId:'oll-context', desc:'Project-scoped TAP scaffolder', cells:{'Claude Code':'source','CodeX':'target','OpenCode':'none','Copilot':'target'} },
+    { id:'sk7', name:'test-runner', projectId:'oll-context', desc:'Run and summarize the test suite', cells:{'Claude Code':'none','CodeX':'source','OpenCode':'none','Copilot':'none'} },
+    { id:'sk8', name:'release-notes', projectId:'tap', desc:'Draft release notes from merged PRs', cells:{'Claude Code':'source','CodeX':'none','OpenCode':'none','Copilot':'target'} },
+    { id:'sk9', name:'vibe-lint', projectId:'awesome-vibe-coding', desc:'Lint vibe-coding examples', cells:{'Claude Code':'none','CodeX':'none','OpenCode':'source','Copilot':'none'} },
+    { id:'sk10', name:'context-doctor', projectId:'agent-nexus', desc:'Maintain CONTEXT.md domain docs', cells:{'Claude Code':'source','CodeX':'target','OpenCode':'none','Copilot':'none'} }
+  ];
+  promptsData = [ { id:'pr1', name:'Global Instructions', file:'CLAUDE.md' }, { id:'pr2', name:'Agent Conventions', file:'AGENTS.md' } ];
+
+  sessionsData = [
+    { id:'s1', title:'260615-1059-Agent Nexus需求审视', project:'agent-nexus', updated:'2026-06-15 13:19', source:'both', excerpt:'审视新项目需求边界、实体模型与范围优先级。' },
+    { id:'s2', title:'260615-1624-初版原型反馈设计访谈', project:'agent-nexus', updated:'2026-06-15 17:18', source:'local', excerpt:'围绕初版原型反馈澄清领域语义、信息架构与交互边界。' },
+    { id:'s3', title:'260615-1430-prototype-build-notes', project:'agent-nexus', updated:'2026-06-15 14:30', source:'local', excerpt:'Working notes while wiring up the six primary screens.' },
+    { id:'s4', title:'260612-1432-tap-builder-refactor', project:'oll-context', updated:'2026-06-12 14:32', source:'both', excerpt:'Refactored the TAP builder skill and re-symlinked into CodeX.' },
+    { id:'s8', title:'260611-0815-local-scratch', project:'tap', updated:'2026-06-11 08:15', source:'local', excerpt:'Quick local scratch notes, not yet archived to WebDAV.' }
+  ];
+
+  C = { good:'#8a9a5b', warn:'#c2913f', crit:'#b55440', accent:'#9d7a64', muted:'#a99a89' };
+
+  state = { screen:'list', detailId:'oll-context', detailSource:'local', addOpen:false, addKey:'new-service', deleteId:null, deleteAck:false, hiddenIds:[], toast:'' };
+
+  dot(c){ return {display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:c,flex:'0 0 auto'}; }
+  toast(m){ this.setState({toast:m}); clearTimeout(this._t); this._t=setTimeout(()=>this.setState({toast:''}),2200); }
+  agentIcon(state, agent){
+    const col = this.agentColors[agent];
+    const base = { display:'inline-flex', alignItems:'center', justifyContent:'center', width:'22px', height:'22px', borderRadius:'7px', fontSize:'9px', fontWeight:800, letterSpacing:'.02em', flex:'0 0 auto' };
+    if(state==='source') return Object.assign({},base,{ background:col, color:'#fff', boxShadow:'0 0 0 2px '+col+'33' });
+    if(state==='target') return Object.assign({},base,{ background:col+'20', color:col, border:'1px solid '+col+'55' });
+    return Object.assign({},base,{ background:'transparent', color:'#cabfae', border:'1px dashed #ddccb6' });
+  }
+
+  renderVals(){
+    const s=this.state;
+    const navDef=[['provider','Provider','Agent%20Nexus.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
+    const tabs=navDef.map(([key,label,href])=>{const active=key==='project';return {key,label,href,style:{padding:'7px 15px',borderRadius:'999px',fontSize:'13px',fontWeight:active?700:600,cursor:'pointer',color:active?'#9d7a64':'#9a8f80',background:active?'#fcf9f4':'transparent',border:active?'1px solid #e7ddce':'1px solid transparent',boxShadow:active?'0 1px 2px rgba(50,40,25,.05)':'none',transition:'all .12s'}};});
+    const v={tabs,toast:s.toast,toastShown:!!s.toast,stop:(e)=>{e.stopPropagation&&e.stopPropagation();},isList:s.screen==='list',isDetail:s.screen==='detail'};
+
+    const hidden = (id)=>s.hiddenIds.includes(id);
+    const active = this.projectsData.filter(p=>p.status==='active' && !hidden(p.id));
+    const stale  = this.projectsData.filter(p=>p.status==='stale' && !hidden(p.id));
+    const hiddenP= this.projectsData.filter(p=>p.status==='hidden' || hidden(p.id));
+
+    v.activeProjects = active.map(p=>({
+      key:p.id, name:p.name, path:p.path, key2:p.key, ['key']:p.key, sessionsDir:p.sessionsDir, sessionsNote:p.sessionsNote||'',
+      statusLabel:'Active', statusFg:'#5f7a3e', statusBg:'#e9eed8',
+      hasKeyNote:!!p.keyNote, keyNote:p.keyNote||'',
+      counts:[{label:'SKILL',n:p.skills},{label:'SESSION',n:p.sessions},{label:'SYNC',n:p.sync}],
+      openClick:()=>this.setState({screen:'detail',detailId:p.id})
+    }));
+    v.staleProjects = stale.map(p=>({
+      key:p.id, name:p.name, path:p.path, ['key']:p.key,
+      relocateClick:()=>this.toast('Relocate '+p.name+' — pick the new repository root'),
+      hideClick:()=>{ this.setState(st=>({hiddenIds:st.hiddenIds.concat(p.id)})); this.toast(p.name+' kept but hidden'); },
+      deleteClick:()=>this.setState({deleteId:p.id,deleteAck:false})
+    }));
+    v.hasHidden = hiddenP.length>0;
+    v.hiddenProjects = hiddenP.map(p=>({key:p.id,name:p.name,unhideClick:()=>{ this.setState(st=>({hiddenIds:st.hiddenIds.filter(x=>x!==p.id)})); this.toast(p.name+' unhidden'); }}));
+
+    v.scanFolder = ()=>this.toast('Scanning Git Base Folder for repositories…');
+    v.openAdd = ()=>this.setState({addOpen:true,addKey:'new-service'});
+    v.addOpen = s.addOpen; v.addKey = s.addKey;
+    v.setAddKey = (e)=>this.setState({addKey:e.target.value});
+    v.closeAdd = ()=>this.setState({addOpen:false});
+    v.saveAdd = ()=>{ this.setState({addOpen:false}); this.toast('Project added · key “'+s.addKey+'” frozen'); };
+
+    // delete modal
+    const dpd = this.projectsData.find(p=>p.id===s.deleteId);
+    v.deleteOpen = !!dpd;
+    if(dpd){
+      v.del = {
+        name:dpd.name,
+        items:[
+          {key:'sess',label:'Archived & local sessions',value:dpd.sessions+' files'},
+          {key:'sk',label:'Project skills',value:dpd.skills+''},
+          {key:'sy',label:'Sync tasks',value:dpd.sync+''},
+          {key:'bk',label:'Session backup record',value:'1'}
+        ],
+        toggleAck:()=>this.setState(st=>({deleteAck:!st.deleteAck})),
+        checkGlyph:s.deleteAck?'✓':'',
+        checkStyle:{display:'inline-flex',alignItems:'center',justifyContent:'center',width:'18px',height:'18px',borderRadius:'5px',flex:'0 0 auto',background:s.deleteAck?'#b55440':'#fff',border:'1px solid '+(s.deleteAck?'#b55440':'#d9c4b8'),color:'#fff',fontSize:'11px',fontWeight:800},
+        confirmStyle:{padding:'9px 18px',borderRadius:'999px',fontSize:'12.5px',fontWeight:700,color:'#fff',background:s.deleteAck?'#b55440':'#d9b6ab',cursor:s.deleteAck?'pointer':'not-allowed',boxShadow:s.deleteAck?'0 2px 8px rgba(181,84,64,.32)':'none'},
+        confirmClick:()=>{ if(!s.deleteAck) return; this.setState(st=>({deleteId:null,deleteAck:false,hiddenIds:st.hiddenIds})); this.toast(dpd.name+' permanently deleted'); }
+      };
+    }
+    v.closeDelete = ()=>this.setState({deleteId:null,deleteAck:false});
+
+    // detail
+    const dp = this.projectsData.find(p=>p.id===s.detailId) || this.projectsData[0];
+    const dpSkills = this.skillsData.filter(k=>k.projectId===dp.id);
+    const src = s.detailSource;
+    const dpSessions = this.sessionsData.filter(se=>se.project===dp.id && (se.source===src||se.source==='both'));
+    const seg=(on)=>({padding:'5px 14px',borderRadius:'999px',fontSize:'12px',fontWeight:on?700:600,cursor:'pointer',color:on?'#9d7a64':'#a99a89',background:on?'#fcf9f4':'transparent',boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none',transition:'all .12s'});
+    const srcAgentOf=(k)=>{ for(const a of this.agents) if(k.cells[a]==='source') return a; return this.agents[0]; };
+    v.dp = {
+      name:dp.name, path:dp.path, ['key']:dp.key, sessionsDir:dp.sessionsDir,
+      hasSkills:dpSkills.length>0, noSkills:dpSkills.length===0,
+      skills:dpSkills.map(k=>({key:k.id,name:k.name,desc:k.desc,icons:this.agents.map(a=>({key:a,abbr:this.agentAbbr[a],title:a+' · '+k.cells[a],style:this.agentIcon(k.cells[a],a)}))})),
+      prompts:this.promptsData.map(p=>({key:p.id,name:p.name,file:p.file})),
+      hasSessions:dpSessions.length>0, noSessions:dpSessions.length===0,
+      sessionEmptyMsg: src==='cloud'?'No archived sessions on WebDAV for this project yet.':'No local sessions in the session directory.',
+      sessions:dpSessions.map(se=>({key:se.id,title:se.title,excerpt:se.excerpt,updated:se.updated})),
+      localStyle:seg(src==='local'), cloudStyle:seg(src==='cloud'),
+      localClick:()=>this.setState({detailSource:'local'}), cloudClick:()=>this.setState({detailSource:'cloud'}),
+      archiveClick:()=>this.toast('Archive now → '+dp.name+' (one-way Backup)'),
+      pullClick:()=>this.toast('Pull now → '+dp.name+' (one-way Restore/Pull)'),
+      backupClick:()=>this.toast('Create Session Backup for '+dp.name),
+      genericClick:()=>this.toast('Create Generic File Task for '+dp.name),
+      syncRows:[
+        {key:'sd',label:'Skill Distribution',detail:dpSkills.length+' managed relations from the Skill matrix',statusLabel:'Linked',statusFg:'#5f7a3e',statusDot:this.dot(this.C.good)},
+        {key:'sb',label:'Session Backup',detail:'webdav://nas/agent-nexus/'+dp.key,statusLabel:'Healthy',statusFg:'#5f7a3e',statusDot:this.dot(this.C.good)},
+        {key:'gf',label:'Generic File',detail:dp.id==='tap'?'TAP symlinks · 2 targets':'No generic tasks bound',statusLabel:dp.id==='tap'?'OK':'None',statusFg:dp.id==='tap'?'#5f7a3e':'#a99a89',statusDot:this.dot(dp.id==='tap'?this.C.good:'#d9c9b3')}
+      ]
+    };
+    v.backToList = ()=>this.setState({screen:'list'});
+
+    return v;
+  }
+}
+</script>
+</body>
+</html>

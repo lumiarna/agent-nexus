@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;}
+    html,body{margin:0;height:100%;}
+    body{background:#f3ece3;}
+    a{text-decoration:none;color:inherit;}
+    input{font-family:inherit;}
+    ::-webkit-scrollbar{width:11px;height:11px;}
+    ::-webkit-scrollbar-thumb{background:rgba(90,70,45,.16);border-radius:6px;border:3px solid transparent;background-clip:content-box;}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(90,70,45,.28);background-clip:content-box;}
+    @keyframes ann-rise{from{opacity:0;transform:translateY(8px) translateX(-50%);}to{opacity:1;transform:translateY(0) translateX(-50%);}}
+    @keyframes ann-fade{from{opacity:0;}to{opacity:1;}}
+  </style>
+</helmet>
+<div style="position:fixed;inset:0;display:flex;flex-direction:column;background:#f3ece3;font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,sans-serif;color:#3a302a;font-size:13px;-webkit-font-smoothing:antialiased;overflow:hidden;">
+
+  <div style="height:40px;flex:0 0 auto;display:flex;align-items:center;padding:0 14px;background:#ece2d5;border-bottom:1px solid #e0d4c2;position:relative;">
+    <div style="display:flex;gap:7px;align-items:center;">
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+    </div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#5a4d42;">
+      <span style="display:inline-block;width:14px;height:14px;border-radius:5px;background:#9d7a64;"></span>
+      Agent Nexus
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;color:#a99a89;font-size:11.5px;">
+      <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;">Search assets <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#b8a890;border:1px solid #e7ddce;border-radius:4px;padding:0 4px;">⌘K</span></span>
+      <a href="Settings.dc.html" title="Settings" style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;background:#fcf9f4;border:1px solid #e7ddce;color:#8a7a68;font-size:14px;" style-hover="background:#f6efe5;color:#9d7a64;">⚙</a>
+    </div>
+  </div>
+
+  <div style="flex:0 0 auto;display:flex;align-items:center;gap:4px;padding:9px 14px;background:#f3ece3;border-bottom:1px solid #e7ddce;">
+    <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="6">
+      <a href="{{ tab.href }}" style="{{ tab.style }}">{{ tab.label }}</a>
+    </sc-for>
+  </div>
+
+  <div data-screen-label="Sync" style="flex:1;min-height:0;overflow:auto;">
+    <div style="padding:24px 28px 60px;max-width:1180px;margin:0 auto;">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div>
+          <h1 style="margin:0;font-size:23px;font-weight:800;letter-spacing:-.02em;color:#2a2520;">Sync</h1>
+          <p style="margin:6px 0 0;color:#9a8f80;font-size:13px;">Task center · one-way tasks grouped into Task Groups · single source → multiple targets</p>
+        </div>
+        <div onClick="{{ openCreate }}" style="padding:9px 17px;background:#9d7a64;color:#fff;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">+ Create custom task</div>
+      </div>
+
+      <!-- ===== Task Groups (user-created) ===== -->
+      <div style="margin-top:22px;display:flex;align-items:center;gap:10px;">
+        <h2 style="margin:0;font-size:15px;font-weight:800;color:#2a2520;white-space:nowrap;">Your Task Groups</h2>
+        <span style="font-size:11px;color:#b3a999;">Generic file distribution &amp; backup · created by you</span>
+      </div>
+
+      <div style="margin-top:14px;display:flex;flex-direction:column;gap:14px;">
+        <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+          <div style="background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;overflow:hidden;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+            <div style="display:flex;align-items:center;gap:12px;padding:15px 20px;border-bottom:1px solid #f3eee5;flex-wrap:wrap;">
+              <div style="font-size:14.5px;font-weight:800;color:#2a2520;">{{ g.name }}</div>
+              <span style="font-size:10px;font-weight:700;color:{{ g.dirFg }};background:{{ g.dirBg }};border-radius:6px;padding:2px 9px;">{{ g.direction }}</span>
+              <span style="font-size:11px;color:#b3a999;">{{ g.action }} · {{ g.taskCountLabel }}</span>
+              <div style="margin-left:auto;display:flex;gap:7px;">
+                <div onClick="{{ g.runAllClick }}" style="font-size:11.5px;font-weight:700;color:#fff;background:#9d7a64;border-radius:999px;padding:5px 13px;cursor:pointer;white-space:nowrap;" style-hover="background:#8c6b56;">Run group</div>
+                <div onClick="{{ g.addTaskClick }}" style="font-size:11.5px;font-weight:600;color:#7a6f60;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;padding:5px 12px;cursor:pointer;white-space:nowrap;" style-hover="background:#ece2d5;">Add task</div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1.4fr 1.6fr 110px 130px;gap:14px;padding:9px 20px;background:#f8f3ea;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#c3b9a8;">
+              <div>Source</div><div>Target</div><div>Last run</div><div style="text-align:right;">Action</div>
+            </div>
+            <sc-for list="{{ g.tasks }}" as="t" hint-placeholder-count="2">
+              <div style="display:grid;grid-template-columns:1.4fr 1.6fr 110px 130px;gap:14px;padding:12px 20px;border-top:1px solid #f3eee5;align-items:center;">
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#6a6055;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t.source }}</div>
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#8a8073;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t.target }}</div>
+                <div style="font-size:11px;color:#b3a999;">{{ t.lastRun }}</div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;align-items:center;">
+                  <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:{{ t.statusFg }};"><span style="{{ t.statusDot }}"></span>{{ t.statusLabel }}</span>
+                  <span onClick="{{ t.runClick }}" style="font-size:11px;color:#9d7a64;cursor:pointer;font-weight:700;" style-hover="text-decoration:underline;">Run</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+        <sc-if value="{{ noGroups }}" hint-placeholder-val="{{ false }}">
+          <div style="background:#fcf9f4;border:1px dashed #e7ddce;border-radius:18px;padding:40px 24px;text-align:center;">
+            <div style="font-size:14px;font-weight:700;color:#7a6f60;">No task groups yet</div>
+            <div style="margin-top:6px;font-size:12.5px;color:#b3a999;">Create a custom task to start a group. Templates live inside the create flow.</div>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- ===== System default sections (collapsed) ===== -->
+      <div style="margin-top:32px;display:flex;align-items:center;gap:10px;">
+        <h2 style="margin:0;font-size:13px;font-weight:700;color:#9a8f80;letter-spacing:.02em;">System-managed records</h2>
+        <span style="font-size:11px;color:#c3b9a8;">Default behaviors · generated from Skill / Prompt / Session — collapsed by default</span>
+      </div>
+
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
+        <sc-for list="{{ sysSections }}" as="sec" hint-placeholder-count="3">
+          <div style="background:#f8f3ea;border:1px solid #efe6da;border-radius:14px;overflow:hidden;">
+            <div onClick="{{ sec.toggle }}" style="display:flex;align-items:center;gap:11px;padding:13px 18px;cursor:pointer;" style-hover="background:#f4ede1;">
+              <span style="{{ sec.caret }}">▸</span>
+              <span style="font-size:13.5px;font-weight:700;color:#6a6055;">{{ sec.title }}</span>
+              <span style="font-size:10px;font-weight:700;color:#9d7a64;background:rgba(157,122,100,.12);border-radius:6px;padding:2px 8px;">{{ sec.managedBy }}</span>
+              <span style="margin-left:auto;font-size:11.5px;color:#b3a999;">{{ sec.countLabel }}</span>
+            </div>
+            <sc-if value="{{ sec.open }}" hint-placeholder-val="{{ false }}">
+              <div style="border-top:1px solid #efe6da;background:#fcf9f4;">
+                <div style="display:grid;grid-template-columns:1.2fr 1.5fr 1.6fr 120px;gap:14px;padding:9px 18px;background:#f8f3ea;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#c3b9a8;">
+                  <div>Asset</div><div>Relation</div><div>Target path</div><div style="text-align:right;">Status</div>
+                </div>
+                <sc-for list="{{ sec.rows }}" as="r" hint-placeholder-count="3">
+                  <div style="display:grid;grid-template-columns:1.2fr 1.5fr 1.6fr 120px;gap:14px;padding:11px 18px;border-top:1px solid #f3eee5;align-items:center;">
+                    <div style="font-size:12.5px;font-weight:700;color:#3a302a;">{{ r.asset }}</div>
+                    <div style="font-size:11.5px;color:#6a6055;">{{ r.relation }}</div>
+                    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#a99a89;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ r.path }}</div>
+                    <div style="justify-self:end;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:{{ r.statusFg }};"><span style="{{ r.statusDot }}"></span>{{ r.statusLabel }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Create custom task modal ===== -->
+  <sc-if value="{{ createOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeCreate }}" style="position:fixed;inset:0;background:rgba(42,33,28,.34);display:flex;align-items:center;justify-content:center;z-index:60;animation:ann-fade .14s ease-out;padding:24px;">
+      <div onClick="{{ stop }}" style="width:560px;max-width:100%;max-height:90vh;overflow:auto;background:#fcf9f4;border:1px solid #efe6da;border-radius:20px;box-shadow:0 24px 60px rgba(50,40,25,.28);">
+        <div style="padding:20px 22px;border-bottom:1px solid #f0e8db;">
+          <div style="font-size:17px;font-weight:800;letter-spacing:-.01em;color:#2a2520;">Create custom task</div>
+          <div style="margin-top:4px;font-size:12px;color:#a99a89;">A Task Group holds one or more one-way tasks · single source → multiple targets</div>
+        </div>
+        <div style="padding:20px 22px;display:flex;flex-direction:column;gap:20px;">
+          <!-- templates -->
+          <div>
+            <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9d7a64;margin-bottom:10px;">Start from a template</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <sc-for list="{{ templateChips }}" as="t" hint-placeholder-count="4">
+                <div onClick="{{ t.onClick }}" title="{{ t.desc }}" style="{{ t.style }}">{{ t.name }}</div>
+              </sc-for>
+            </div>
+          </div>
+          <!-- name -->
+          <label style="display:block;">
+            <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Task group name</div>
+            <input value="{{ form.name }}" onInput="{{ setName }}" placeholder="e.g. Warp Config" style="width:100%;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:13px;color:#3a302a;background:#fff;outline:none;" />
+          </label>
+          <!-- direction + action -->
+          <div style="display:flex;gap:16px;flex-wrap:wrap;">
+            <div>
+              <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Direction</div>
+              <div style="display:flex;background:#f0e8db;border-radius:999px;padding:3px;">
+                <div onClick="{{ setDistribution }}" style="{{ distStyle }}">Distribution</div>
+                <div onClick="{{ setBackup }}" style="{{ backupStyle }}">Backup</div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Action</div>
+              <div style="display:flex;background:#f0e8db;border-radius:999px;padding:3px;">
+                <div onClick="{{ setSymlink }}" style="{{ symlinkStyle }}">symlink</div>
+                <div onClick="{{ setCopy }}" style="{{ copyStyle }}">copy</div>
+              </div>
+            </div>
+          </div>
+          <!-- source -->
+          <label style="display:block;">
+            <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Source <span style="color:#b3a999;font-weight:500;">(single)</span></div>
+            <input value="{{ form.source }}" onInput="{{ setSource }}" placeholder="~/.config/warp/" style="width:100%;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+          </label>
+          <!-- targets -->
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <div style="font-size:12px;font-weight:600;color:#6a6055;">Targets <span style="color:#b3a999;font-weight:500;">(one or more)</span></div>
+              <div onClick="{{ addTarget }}" style="font-size:11.5px;font-weight:700;color:#9d7a64;cursor:pointer;" style-hover="text-decoration:underline;">+ Add target</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <sc-for list="{{ form.targets }}" as="t" hint-placeholder-count="2">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input value="{{ t.value }}" onInput="{{ t.onInput }}" placeholder="webdav://nas/config/warp/" style="flex:1;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+                  <div onClick="{{ t.remove }}" style="flex:0 0 auto;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e7ddce;border-radius:9px;color:#b3a999;cursor:pointer;font-size:15px;" style-hover="background:#f3ece3;color:#b55440;">−</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="padding:11px 13px;background:#f3ece3;border:1px solid #efe6da;border-radius:11px;font-size:11.5px;color:#8a7a68;line-height:1.5;">One-way only. To bring files back from WebDAV, create a separate <b style="color:#6a6055;">Pull</b> task — Backup is never reversed in place.</div>
+        </div>
+        <div style="padding:16px 22px;border-top:1px solid #f0e8db;display:flex;justify-content:flex-end;gap:9px;">
+          <div onClick="{{ closeCreate }}" style="padding:9px 16px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-size:12.5px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#ece2d5;">Cancel</div>
+          <div onClick="{{ submitCreate }}" style="padding:9px 18px;background:#9d7a64;color:#fff;border-radius:999px;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">Create task group</div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ toastShown }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#2a2520;color:#f3ece3;padding:11px 18px;border-radius:999px;font-size:12.5px;font-weight:600;box-shadow:0 10px 30px rgba(50,40,25,.32);animation:ann-rise .18s ease-out;z-index:80;">{{ toast }}</div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  C = { good:'#8a9a5b', warn:'#c2913f', crit:'#b55440', accent:'#9d7a64' };
+
+  templates = [
+    { id:'blank', name:'Blank', desc:'Start from scratch', dir:'Backup', action:'copy', source:'', targets:[''] },
+    { id:'ssh', name:'SSH Backup', desc:'Copy ~/.ssh to a WebDAV destination (one-way)', dir:'Backup', action:'copy', source:'~/.ssh/', targets:['webdav://nas/backups/ssh/'] },
+    { id:'zed', name:'Zed Config', desc:'Distribute Zed settings across machines', dir:'Backup', action:'copy', source:'%APPDATA%/Zed/', targets:['webdav://nas/config/zed/'] },
+    { id:'warp', name:'Warp Config', desc:'Distribute Warp settings + keybindings', dir:'Backup', action:'copy', source:'~/.config/warp/', targets:['webdav://nas/config/warp/'] }
+  ];
+
+  state = {
+    createOpen:false,
+    openSec:{ skill:false, prompt:false, backup:false },
+    tpl:'blank',
+    form:{ name:'', dir:'Backup', action:'copy', source:'', targets:[''] },
+    groups:[
+      { id:'g1', name:'Warp Config', direction:'Backup', action:'copy', tasks:[
+        { id:'t1', source:'~/.config/warp/settings.toml', target:'webdav://nas/config/warp/', lastRun:'06-15 05:00', status:'ok' },
+        { id:'t2', source:'~/.config/warp/keybindings.yaml', target:'webdav://nas/config/warp/', lastRun:'06-15 05:00', status:'ok' }
+      ] },
+      { id:'g2', name:'TAP symlinks', direction:'Distribution', action:'symlink', tasks:[
+        { id:'t3', source:'D:/Workspace/tap/src', target:'oll-context/backend/', lastRun:'06-14 18:02', status:'ok' },
+        { id:'t4', source:'D:/Workspace/tap/src', target:'oll-context/frontend/', lastRun:'06-14 18:02', status:'ok' }
+      ] },
+      { id:'g3', name:'SSH Backup', direction:'Backup', action:'copy', tasks:[
+        { id:'t5', source:'~/.ssh/', target:'webdav://nas/backups/ssh/', lastRun:'—', status:'never' }
+      ] }
+    ]
+  };
+
+  dot(c){ return {display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:c,flex:'0 0 auto'}; }
+  toast(m){ this.setState({toast:m}); clearTimeout(this._t); this._t=setTimeout(()=>this.setState({toast:''}),2200); }
+  dirColors(d){ return d==='Backup'?{fg:'#9a6f0a',bg:'#f7eccb'}:{fg:'#4a6a8a',bg:'#e2ebf2'}; }
+  statusOf(st){ return st==='ok'?{label:'OK',fg:'#5f7a3e',dot:this.C.good}:st==='pending'?{label:'Pending',fg:'#9a6f0a',dot:this.C.warn}:{label:'Never',fg:'#a99a89',dot:'#d9c9b3'}; }
+
+  renderVals(){
+    const s=this.state;
+    const navDef=[['provider','Provider','Agent%20Nexus.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
+    const tabs=navDef.map(([key,label,href])=>{const active=key==='sync';return {key,label,href,style:{padding:'7px 15px',borderRadius:'999px',fontSize:'13px',fontWeight:active?700:600,cursor:'pointer',color:active?'#9d7a64':'#9a8f80',background:active?'#fcf9f4':'transparent',border:active?'1px solid #e7ddce':'1px solid transparent',boxShadow:active?'0 1px 2px rgba(50,40,25,.05)':'none',transition:'all .12s'}};});
+    const v={tabs,toast:s.toast,toastShown:!!s.toast,stop:(e)=>{e.stopPropagation&&e.stopPropagation();}};
+
+    // groups
+    v.noGroups = s.groups.length===0;
+    v.groups = s.groups.map(g=>{
+      const dc=this.dirColors(g.direction);
+      return { key:g.id, name:g.name, direction:g.direction, dirFg:dc.fg, dirBg:dc.bg, action:g.action,
+        taskCountLabel:g.tasks.length+(g.tasks.length===1?' task':' tasks'),
+        runAllClick:()=>this.toast('Run group · '+g.name+' ('+g.tasks.length+' tasks)'),
+        addTaskClick:()=>this.toast('Add task to '+g.name),
+        tasks:g.tasks.map(t=>{ const st=this.statusOf(t.status); return {key:t.id,source:t.source,target:t.target,lastRun:t.lastRun,statusLabel:st.label,statusFg:st.fg,statusDot:this.dot(st.dot),runClick:()=>this.toast('Run · '+t.source+' → '+t.target)}; }) };
+    });
+
+    // system sections
+    const caret=(open)=>({display:'inline-block',fontSize:'10px',color:'#a99a89',transform:open?'rotate(90deg)':'rotate(0deg)',transition:'transform .12s'});
+    const skillRows=[
+      {key:'a',asset:'tap-builder',relation:'Claude Code → CodeX',path:'~/.codex/skills/tap-builder',status:'ok'},
+      {key:'b',asset:'commit-helper',relation:'Claude Code → OpenCode',path:'~/.config/opencode/skills/commit-helper',status:'pending'},
+      {key:'c',asset:'commit-helper',relation:'Claude Code → Copilot',path:'~/.agents/skills/commit-helper',status:'ok'}
+    ];
+    const promptRows=[
+      {key:'a',asset:'Global Instructions',relation:'Claude Code → CodeX',path:'~/.codex/AGENTS.md',status:'ok'},
+      {key:'b',asset:'Global Instructions',relation:'Claude Code → Copilot',path:'~/.agents/AGENTS.md',status:'ok'}
+    ];
+    const backupRows=[
+      {key:'a',asset:'oll-context',relation:'__sessions → WebDAV',path:'webdav://nas/agent-nexus/oll-context',status:'ok'},
+      {key:'b',asset:'agent-nexus',relation:'__sessions → WebDAV',path:'webdav://nas/agent-nexus/agent-nexus',status:'pending'},
+      {key:'c',asset:'tap',relation:'__sessions → WebDAV',path:'webdav://nas/agent-nexus/tap',status:'never'}
+    ];
+    const mk=(rows)=>rows.map(r=>{const st=this.statusOf(r.status);return Object.assign({},r,{statusLabel:st.label,statusFg:st.fg,statusDot:this.dot(st.dot)});});
+    v.sysSections=[
+      { key:'skill', title:'Skill Distribution', managedBy:'Managed by Skill', countLabel:skillRows.length+' records', open:s.openSec.skill, caret:caret(s.openSec.skill), rows:mk(skillRows), toggle:()=>this.setState(st=>({openSec:Object.assign({},st.openSec,{skill:!st.openSec.skill})})) },
+      { key:'prompt', title:'Prompt Distribution', managedBy:'Managed by Prompt', countLabel:promptRows.length+' records', open:s.openSec.prompt, caret:caret(s.openSec.prompt), rows:mk(promptRows), toggle:()=>this.setState(st=>({openSec:Object.assign({},st.openSec,{prompt:!st.openSec.prompt})})) },
+      { key:'backup', title:'Session Backup', managedBy:'Managed by Session', countLabel:backupRows.length+' projects', open:s.openSec.backup, caret:caret(s.openSec.backup), rows:mk(backupRows), toggle:()=>this.setState(st=>({openSec:Object.assign({},st.openSec,{backup:!st.openSec.backup})})) }
+    ];
+
+    // create modal
+    v.createOpen=s.createOpen;
+    v.openCreate=()=>this.setState({createOpen:true,tpl:'blank',form:{name:'',dir:'Backup',action:'copy',source:'',targets:['']}});
+    v.closeCreate=()=>this.setState({createOpen:false});
+    const chip=(on)=>({padding:'7px 13px',borderRadius:'999px',fontSize:'12px',fontWeight:on?700:600,cursor:'pointer',color:on?'#fff':'#7a6f60',background:on?this.C.accent:'#fcf9f4',border:'1px solid '+(on?this.C.accent:'#e7ddce')});
+    v.templateChips=this.templates.map(t=>({key:t.id,name:t.name,desc:t.desc,style:chip(s.tpl===t.id),onClick:()=>this.setState({tpl:t.id,form:{name:t.id==='blank'?'':t.name,dir:t.dir,action:t.action,source:t.source,targets:t.targets.slice()}})}));
+    v.form={ name:s.form.name, source:s.form.source, targets:s.form.targets.map((val,i)=>({key:i,value:val,onInput:(e)=>{const tg=s.form.targets.slice();tg[i]=e.target.value;this.setState({form:Object.assign({},s.form,{targets:tg})});},remove:()=>{const tg=s.form.targets.filter((_,j)=>j!==i);this.setState({form:Object.assign({},s.form,{targets:tg.length?tg:['']})});}})) };
+    v.setName=(e)=>this.setState({form:Object.assign({},s.form,{name:e.target.value})});
+    v.setSource=(e)=>this.setState({form:Object.assign({},s.form,{source:e.target.value})});
+    v.addTarget=()=>this.setState({form:Object.assign({},s.form,{targets:s.form.targets.concat([''])})});
+    const segS=(on)=>({padding:'6px 14px',borderRadius:'999px',fontSize:'12px',fontWeight:on?700:600,cursor:'pointer',color:on?'#9d7a64':'#a99a89',background:on?'#fcf9f4':'transparent',boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none'});
+    v.distStyle=segS(s.form.dir==='Distribution'); v.backupStyle=segS(s.form.dir==='Backup');
+    v.setDistribution=()=>this.setState({form:Object.assign({},s.form,{dir:'Distribution'})});
+    v.setBackup=()=>this.setState({form:Object.assign({},s.form,{dir:'Backup'})});
+    v.symlinkStyle=segS(s.form.action==='symlink'); v.copyStyle=segS(s.form.action==='copy');
+    v.setSymlink=()=>this.setState({form:Object.assign({},s.form,{action:'symlink'})});
+    v.setCopy=()=>this.setState({form:Object.assign({},s.form,{action:'copy'})});
+    v.submitCreate=()=>{
+      const f=s.form; const name=f.name.trim()||'Untitled group';
+      const tgs=f.targets.map(t=>t.trim()).filter(Boolean);
+      const tasks=(tgs.length?tgs:['(target)']).map((tg,i)=>({id:'n'+Date.now()+i,source:f.source||'(source)',target:tg,lastRun:'—',status:'never'}));
+      const ng={id:'g'+Date.now(),name,direction:f.dir,action:f.action,tasks};
+      this.setState(st=>({groups:st.groups.concat([ng]),createOpen:false}));
+      this.toast('Task group “'+name+'” created with '+tasks.length+(tasks.length===1?' task':' tasks'));
+    };
+
+    return v;
+  }
+}
+</script>
+</body>
+</html>

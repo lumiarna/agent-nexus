@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;}
+    html,body{margin:0;height:100%;}
+    body{background:#f3ece3;}
+    a{text-decoration:none;color:inherit;}
+    input{font-family:inherit;}
+    ::-webkit-scrollbar{width:11px;height:11px;}
+    ::-webkit-scrollbar-thumb{background:rgba(90,70,45,.16);border-radius:6px;border:3px solid transparent;background-clip:content-box;}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(90,70,45,.28);background-clip:content-box;}
+    @keyframes ann-rise{from{opacity:0;transform:translateY(8px) translateX(-50%);}to{opacity:1;transform:translateY(0) translateX(-50%);}}
+  </style>
+</helmet>
+<div style="position:fixed;inset:0;display:flex;flex-direction:column;background:#f3ece3;font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,sans-serif;color:#3a302a;font-size:13px;-webkit-font-smoothing:antialiased;overflow:hidden;">
+
+  <div style="height:40px;flex:0 0 auto;display:flex;align-items:center;padding:0 14px;background:#ece2d5;border-bottom:1px solid #e0d4c2;position:relative;">
+    <div style="display:flex;gap:7px;align-items:center;">
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+    </div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#5a4d42;">
+      <span style="display:inline-block;width:14px;height:14px;border-radius:5px;background:#9d7a64;"></span>
+      Agent Nexus
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;color:#a99a89;font-size:11.5px;">
+      <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;">Search assets <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#b8a890;border:1px solid #e7ddce;border-radius:4px;padding:0 4px;">⌘K</span></span>
+      <span title="Settings" style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;background:#f0e8db;border:1px solid #e0d4c2;color:#9d7a64;font-size:14px;">⚙</span>
+    </div>
+  </div>
+
+  <div style="flex:0 0 auto;display:flex;align-items:center;gap:4px;padding:9px 14px;background:#f3ece3;border-bottom:1px solid #e7ddce;">
+    <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="6">
+      <a href="{{ tab.href }}" style="{{ tab.style }}">{{ tab.label }}</a>
+    </sc-for>
+  </div>
+
+  <div data-screen-label="Settings" style="flex:1;min-height:0;overflow:auto;">
+    <div style="padding:24px 28px 60px;max-width:880px;margin:0 auto;">
+      <a href="Agent%20Nexus.dc.html" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#9a8f80;margin-bottom:12px;" style-hover="color:#9d7a64;">← Back to app</a>
+      <h1 style="margin:0;font-size:23px;font-weight:800;letter-spacing:-.02em;color:#2a2520;">Settings</h1>
+      <p style="margin:6px 0 0;color:#9a8f80;font-size:13px;">Global configuration · WebDAV, taskbar surface, and agent config roots</p>
+
+      <!-- WebDAV -->
+      <div style="margin-top:22px;background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;padding:22px;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <h2 style="margin:0;font-size:15px;font-weight:800;color:#2a2520;">WebDAV</h2>
+          <span style="font-size:11px;color:#b3a999;">Cloud destination for Session backup &amp; aggregation</span>
+          <span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:{{ webdav.statusFg }};"><span style="{{ webdav.statusDot }}"></span>{{ webdav.statusLabel }}</span>
+        </div>
+        <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <label style="display:block;grid-column:1 / -1;">
+            <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Endpoint URL</div>
+            <input value="{{ webdav.url }}" onInput="{{ setUrl }}" placeholder="https://nas.local/webdav/agent-nexus" style="width:100%;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+          </label>
+          <label style="display:block;">
+            <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Username</div>
+            <input value="{{ webdav.user }}" onInput="{{ setUser }}" placeholder="nexus" style="width:100%;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+          </label>
+          <label style="display:block;">
+            <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Password / App token</div>
+            <input value="{{ webdav.pass }}" onInput="{{ setPass }}" placeholder="••••••••" style="width:100%;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+          </label>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:9px;align-items:center;">
+          <div onClick="{{ testWebdav }}" style="padding:9px 16px;background:#9d7a64;color:#fff;border-radius:999px;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">Test connection</div>
+          <div onClick="{{ saveWebdav }}" style="padding:9px 16px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-size:12.5px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#ece2d5;">Save</div>
+          <span style="font-size:11px;color:#c3b9a8;">Archive layout: <span style="font-family:ui-monospace,Menlo,monospace;">&lt;endpoint&gt;/&lt;project key&gt;/</span></span>
+        </div>
+      </div>
+
+      <!-- Tray surface -->
+      <div style="margin-top:16px;background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;padding:22px;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <h2 style="margin:0;font-size:15px;font-weight:800;color:#2a2520;">Windows taskbar</h2>
+          <span style="font-size:11px;color:#b3a999;">Surface preference · applies to the tray monitor, not the Provider cards</span>
+        </div>
+        <div style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+          <div style="max-width:460px;">
+            <div style="font-size:13px;font-weight:700;color:#3a302a;">Quota metric shown in the tray icon</div>
+            <div style="margin-top:3px;font-size:11.5px;color:#a99a89;line-height:1.5;">Applied globally across all providers so side-by-side icons read consistently. Per-provider override is intentionally not offered.</div>
+          </div>
+          <div style="display:flex;background:#f0e8db;border-radius:999px;padding:3px;flex:0 0 auto;">
+            <div onClick="{{ setUsed }}" style="{{ usedStyle }}">Used</div>
+            <div onClick="{{ setRemaining }}" style="{{ remainingStyle }}">Remaining</div>
+          </div>
+        </div>
+        <div style="margin-top:14px;padding:11px 13px;background:#f3ece3;border:1px solid #efe6da;border-radius:11px;font-size:11.5px;color:#8a7a68;line-height:1.5;">Default is <b style="color:#6a6055;">Remaining</b>. Card visibility on the Provider page is controlled separately per provider — a provider can be hidden on the page yet still shown in the taskbar.</div>
+      </div>
+
+      <!-- Agents -->
+      <div style="margin-top:16px;background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;padding:22px;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <h2 style="margin:0;font-size:15px;font-weight:800;color:#2a2520;">Agent config roots</h2>
+          <span style="font-size:11px;color:#b3a999;">Where Skill &amp; Prompt placements are written per agent</span>
+        </div>
+        <div style="margin-top:16px;display:flex;flex-direction:column;gap:12px;">
+          <sc-for list="{{ agents }}" as="a" hint-placeholder-count="4">
+            <div style="border:1px solid #f0e8db;border-radius:14px;padding:14px 16px;background:#f8f3ea;">
+              <div style="display:flex;align-items:center;gap:9px;">
+                <span style="{{ a.badge }}">{{ a.abbr }}</span>
+                <span style="font-size:13.5px;font-weight:700;color:#2a2520;">{{ a.name }}</span>
+                <sc-if value="{{ a.isNew }}" hint-placeholder-val="{{ false }}">
+                  <span style="font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#5f7a3e;background:#e9eed8;border-radius:5px;padding:1px 6px;">New in MVP</span>
+                </sc-if>
+              </div>
+              <div style="margin-top:11px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                <sc-for list="{{ a.dirs }}" as="d" hint-placeholder-count="3">
+                  <div>
+                    <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;font-weight:600;letter-spacing:.04em;color:#c3b9a8;">{{ d.envKey }}</div>
+                    <div style="margin-top:3px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#6a6055;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ d.value }}</div>
+                    <sc-if value="{{ d.derived }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:2px;font-size:9.5px;color:#bca37a;">derived from root</div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <sc-if value="{{ toastShown }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#2a2520;color:#f3ece3;padding:11px 18px;border-radius:999px;font-size:12.5px;font-weight:600;box-shadow:0 10px 30px rgba(50,40,25,.32);animation:ann-rise .18s ease-out;z-index:80;">{{ toast }}</div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  agentColors = { 'Claude Code':'#c2410c', 'CodeX':'#4f7a6a', 'OpenCode':'#7a5c9e', 'Copilot':'#5a7894' };
+  agentAbbr = { 'Claude Code':'CC', 'CodeX':'CX', 'OpenCode':'OC', 'Copilot':'CP' };
+
+  agentDefs = [
+    { name:'Claude Code', dirs:[ {envKey:'CLAUDE_CONFIG_DIR',value:'~/.claude'}, {envKey:'CLAUDE_SKILLS_DIR',value:'~/.claude/skills',derived:true}, {envKey:'CLAUDE_PROMPT_FILE',value:'~/.claude/CLAUDE.md',derived:true} ] },
+    { name:'CodeX', dirs:[ {envKey:'CODEX_CONFIG_DIR',value:'~/.codex'}, {envKey:'CODEX_SKILLS_DIR',value:'~/.codex/skills',derived:true}, {envKey:'CODEX_PROMPT_FILE',value:'~/.codex/AGENTS.md',derived:true} ] },
+    { name:'OpenCode', dirs:[ {envKey:'OPENCODE_CONFIG_DIR',value:'~/.config/opencode'}, {envKey:'OPENCODE_SKILLS_DIR',value:'~/.config/opencode/skills',derived:true}, {envKey:'OPENCODE_PROMPT_FILE',value:'~/.config/opencode/AGENTS.md',derived:true} ] },
+    { name:'Copilot', isNew:true, dirs:[ {envKey:'COPILOT_CONFIG_DIR',value:'~/.agents'}, {envKey:'COPILOT_SKILLS_DIR',value:'~/.agents/skills',derived:true}, {envKey:'COPILOT_PROMPT_FILE',value:'~/.agents/AGENTS.md',derived:true} ] }
+  ];
+
+  C = { good:'#8a9a5b', warn:'#c2913f', accent:'#9d7a64' };
+  state = { url:'https://nas.local/webdav/agent-nexus', user:'nexus', pass:'', trayMetric:'Remaining', webdavStatus:'ok', toast:'' };
+  dot(c){ return {display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:c,flex:'0 0 auto'}; }
+  toast(m){ this.setState({toast:m}); clearTimeout(this._t); this._t=setTimeout(()=>this.setState({toast:''}),2200); }
+
+  renderVals(){
+    const s=this.state;
+    const navDef=[['provider','Provider','Agent%20Nexus.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
+    const tabs=navDef.map(([key,label,href])=>({key,label,href,style:{padding:'7px 15px',borderRadius:'999px',fontSize:'13px',fontWeight:600,cursor:'pointer',color:'#9a8f80',background:'transparent',border:'1px solid transparent',transition:'all .12s'}}));
+    const v={tabs,toast:s.toast,toastShown:!!s.toast};
+
+    const ws = s.webdavStatus==='ok'?{label:'Connected',fg:'#5f7a3e',dot:this.C.good}:s.webdavStatus==='testing'?{label:'Testing…',fg:'#9d7a64',dot:this.C.accent}:{label:'Not tested',fg:'#a99a89',dot:'#d9c9b3'};
+    v.webdav={ url:s.url, user:s.user, pass:s.pass, statusLabel:ws.label, statusFg:ws.fg, statusDot:this.dot(ws.dot) };
+    v.setUrl=(e)=>this.setState({url:e.target.value,webdavStatus:'untested'});
+    v.setUser=(e)=>this.setState({user:e.target.value});
+    v.setPass=(e)=>this.setState({pass:e.target.value});
+    v.testWebdav=()=>{ this.setState({webdavStatus:'testing'}); this.toast('Testing WebDAV connection…'); setTimeout(()=>this.setState({webdavStatus:'ok'}),1100); };
+    v.saveWebdav=()=>this.toast('WebDAV settings saved');
+
+    const seg=(on)=>({padding:'7px 18px',borderRadius:'999px',fontSize:'13px',fontWeight:on?700:600,cursor:'pointer',color:on?'#9d7a64':'#a99a89',background:on?'#fcf9f4':'transparent',boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none',transition:'all .12s'});
+    v.usedStyle=seg(s.trayMetric==='Used'); v.remainingStyle=seg(s.trayMetric==='Remaining');
+    v.setUsed=()=>{ this.setState({trayMetric:'Used'}); this.toast('Tray metric set to Used (global)'); };
+    v.setRemaining=()=>{ this.setState({trayMetric:'Remaining'}); this.toast('Tray metric set to Remaining (global)'); };
+
+    v.agents=this.agentDefs.map(a=>({
+      key:a.name, name:a.name, abbr:this.agentAbbr[a.name], isNew:!!a.isNew,
+      badge:{display:'inline-flex',alignItems:'center',justifyContent:'center',width:'24px',height:'24px',borderRadius:'7px',fontSize:'9px',fontWeight:800,background:this.agentColors[a.name],color:'#fff'},
+      dirs:a.dirs.map((d,i)=>({key:i,envKey:d.envKey,value:d.value,derived:!!d.derived}))
+    }));
+
+    return v;
+  }
+}
+</script>
+</body>
+</html>
