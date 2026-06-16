@@ -1,14 +1,17 @@
 import { useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dot, Input } from "@/components/ui/primitives";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
+import { useProjectSymlinksQuery } from "@/lib/query/sync";
 import { nexus } from "@/lib/mock";
 import { palette } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type {
+  ProjectSymlink,
   SystemSyncRow,
   Task,
   TaskAction,
@@ -24,6 +27,8 @@ const CRON_PRESETS = [
   { label: "Weekly Sun 03:00", expr: "0 3 * * 0" },
 ];
 const TASK_COLS = "24px 132px 1.3fr 1.4fr 132px 116px";
+const LINK_COLS =
+  "minmax(90px,1.05fr) minmax(0,1.25fr) minmax(90px,1.05fr) minmax(0,1.25fr) 92px";
 
 function dirColors(d: TaskDirection): { fg: string; bg: string } {
   if (d === "Backup") return { fg: "#9a6f0a", bg: "#f7eccb" };
@@ -35,6 +40,25 @@ function statusOf(st: TaskStatus): { label: string; fg: string; dot: string } {
   if (st === "ok") return { label: "OK", fg: "#5f7a3e", dot: palette.good };
   if (st === "pending") return { label: "Pending", fg: "#9a6f0a", dot: palette.warn };
   return { label: "Never", fg: "#a99a89", dot: "#d9c9b3" };
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return "Unexpected error";
+}
+
+function symlinkStatusOf(st: ProjectSymlink["status"]): { label: string; fg: string; dot: string } {
+  if (st === "ok") return { label: "OK", fg: "#5f7a3e", dot: palette.good };
+  return { label: "Missing", fg: "#9a6f0a", dot: palette.warn };
 }
 
 function cronHuman(expr: string): string {
@@ -92,6 +116,7 @@ interface SchedState {
 }
 
 export function SyncPage() {
+  const projectSymlinksQuery = useProjectSymlinksQuery();
   const [groups, setGroups] = useState<TaskGroup[]>(() => nexus.taskGroups());
   const [templates] = useState(() => nexus.templates());
   const [system] = useState(() => nexus.systemSync());
@@ -102,6 +127,10 @@ export function SyncPage() {
   const [sched, setSched] = useState<SchedState | null>(null);
   const [dragGroupId, setDragGroupId] = useState<string | null>(null);
   const [dragTask, setDragTask] = useState<{ groupId: string; taskId: string } | null>(null);
+  const projectSymlinks = projectSymlinksQuery.data ?? [];
+  const projectSymlinkError = projectSymlinksQuery.error
+    ? getErrorMessage(projectSymlinksQuery.error)
+    : null;
 
   // ── mutations ──
   function updateTask(groupId: string, taskId: string, patch: Partial<Task>) {
@@ -356,6 +385,83 @@ export function SyncPage() {
               </div>
             </div>
           ) : null}
+        </div>
+
+        <div className="mt-8 flex flex-wrap items-center gap-2.5">
+          <h2 className="m-0 whitespace-nowrap text-[15px] font-extrabold text-nexus-ink">
+            Project Symlinks
+          </h2>
+          <span className="text-[11px] text-[#b3a999]">
+            Auto-scanned from registered Project paths · target path is the symlink placement
+          </span>
+          <Button
+            variant="subtle"
+            size="sm"
+            className="ml-auto"
+            onClick={() => void projectSymlinksQuery.refetch()}
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </Button>
+        </div>
+
+        <div className="mt-3 overflow-hidden rounded-[18px] border border-nexus-border bg-nexus-card shadow-[0_1px_14px_rgba(50,40,25,.05)]">
+          <div
+            className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
+            style={{ gridTemplateColumns: LINK_COLS }}
+          >
+            <div>Source Project</div>
+            <div>Source Path</div>
+            <div>Target Project</div>
+            <div>Target Path</div>
+            <div className="text-right">Status</div>
+          </div>
+          {projectSymlinksQuery.isLoading ? (
+            <div className="px-5 py-6 text-[12.5px] text-[#9a8f80]">Scanning Project symlinks...</div>
+          ) : projectSymlinkError ? (
+            <div className="px-5 py-6 text-[12.5px] font-semibold text-nexus-crit">
+              {projectSymlinkError}
+            </div>
+          ) : projectSymlinks.length === 0 ? (
+            <div className="px-5 py-6">
+              <div className="text-[13px] font-bold text-[#7a6f60]">No Project symlinks found</div>
+              <div className="mt-1 text-[12px] text-[#b3a999]">
+                Registered Project directories do not currently contain symlink placements.
+              </div>
+            </div>
+          ) : (
+            projectSymlinks.map((link) => {
+              const st = symlinkStatusOf(link.status);
+              return (
+                <div
+                  key={link.id}
+                  className="grid items-center gap-3 border-t border-[#f3eee5] px-5 py-3"
+                  style={{ gridTemplateColumns: LINK_COLS }}
+                >
+                  <div className="min-w-0">
+                    <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">
+                      {link.sourceProjectName ?? "External"}
+                    </div>
+                    <div className="mt-[3px] text-[10px] font-bold uppercase tracking-[.04em] text-[#c3b9a8]">
+                      {link.linkKind}
+                    </div>
+                  </div>
+                  <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]">
+                    {link.sourcePath}
+                  </div>
+                  <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">
+                    {link.targetProjectName ?? "External"}
+                  </div>
+                  <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]">
+                    {link.targetPath}
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 justify-self-end text-[11px] font-bold" style={{ color: st.fg }}>
+                    <Dot color={st.dot} /> {st.label}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
         <div className="mt-8 flex items-center gap-2.5">

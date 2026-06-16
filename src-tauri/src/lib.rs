@@ -26,6 +26,7 @@ pub fn run() {
             commands::projects::remove_git_base_folder,
             commands::projects::scan_git_base_folder,
             commands::projects::scan_git_base_folders,
+            commands::sync::list_project_symlinks,
         ])
         .on_window_event(|window, event| {
             if window.label() == "main"

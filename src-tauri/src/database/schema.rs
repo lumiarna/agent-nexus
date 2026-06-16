@@ -212,6 +212,10 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         INSERT INTO settings (key, value) VALUES ('webdav_url', '');
         INSERT INTO settings (key, value) VALUES ('webdav_user', '');
         INSERT INTO settings (key, value) VALUES ('webdav_pass', '');
+        INSERT INTO settings (key, value)
+        VALUES ('sync_project_symlink_ignored_dirs', '.git
+.venv
+node_modules');
 
         COMMIT;
         "#,

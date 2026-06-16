@@ -158,6 +158,21 @@ export interface SystemSync {
   backup: SystemSyncRow[];
 }
 
+export type ProjectSymlinkStatus = "ok" | "missing";
+export type ProjectSymlinkKind = "directory" | "file" | "other" | "missing";
+
+export interface ProjectSymlink {
+  id: string;
+  sourcePath: string;
+  sourceProjectId?: string;
+  sourceProjectName?: string;
+  targetPath: string;
+  targetProjectId?: string;
+  targetProjectName?: string;
+  linkKind: ProjectSymlinkKind;
+  status: ProjectSymlinkStatus;
+}
+
 // ─── Settings ───────────────────────────────────────────────────────────────
 
 export type TrayMetric = "Used" | "Remaining";
