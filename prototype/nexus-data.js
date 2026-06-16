@@ -58,7 +58,10 @@
   PROJECTS.forEach(function (p) { p.key = p.name; });
 
   /* ---- Discoverable repos for "Add Git Base Folder" scan --- */
-  var SCAN_BASE = "D:/Workspace";
+  var GIT_BASE_FOLDERS = [
+    { path: "D:/Workspace", addedAt: "2026-06-10" }
+  ];
+  var SCAN_BASE = GIT_BASE_FOLDERS[0].path;
   var SCAN_RESULTS = [
     { path: "D:/Workspace/oll-context", key: "oll-context", state: "recorded" },
     { path: "D:/Workspace/tap", key: "tap", state: "recorded" },
@@ -214,6 +217,7 @@
     palette: clone(C),
     quotaColor: quotaColor,
     scanBase: SCAN_BASE,
+    gitBaseFolders: function () { return clone(GIT_BASE_FOLDERS); },
 
     providers: function () { return clone(PROVIDERS); },
     projects: function () { return clone(PROJECTS); },

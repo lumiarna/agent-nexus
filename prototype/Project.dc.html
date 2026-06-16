@@ -66,11 +66,12 @@
         </div>
 
         <div style="margin-top:20px;background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;overflow:hidden;box-shadow:0 1px 14px rgba(50,40,25,.05);">
-          <div style="display:grid;grid-template-columns:1.5fr 1.6fr 1fr 210px;gap:16px;padding:12px 20px;background:#f6efe5;border-bottom:1px solid #f0e8db;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b3a999;">
-            <div>Project</div><div>Repo path</div><div>Project key</div><div style="text-align:right;">Assets</div>
+          <div style="display:grid;grid-template-columns:20px 1.5fr 1.8fr 220px 36px;gap:16px;padding:12px 20px;background:#f6efe5;border-bottom:1px solid #f0e8db;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b3a999;">
+            <div></div><div>Project</div><div>Repo path</div><div style="text-align:right;">Assets</div><div></div>
           </div>
           <sc-for list="{{ activeProjects }}" as="pr" hint-placeholder-count="5">
-            <div onClick="{{ pr.openClick }}" style="display:grid;grid-template-columns:1.5fr 1.6fr 1fr 210px;gap:16px;padding:16px 20px;border-bottom:1px solid #f3eee5;cursor:pointer;align-items:center;" style-hover="background:#fbf6ef;">
+            <div onClick="{{ pr.openClick }}" style="display:grid;grid-template-columns:20px 1.5fr 1.8fr 220px 36px;gap:16px;padding:16px 20px;border-bottom:1px solid #f3eee5;cursor:pointer;align-items:center;" style-hover="background:#fbf6ef;">
+              <div style="display:flex;align-items:center;justify-content:center;cursor:grab;color:#d0c4b4;font-size:11px;letter-spacing:1px;" title="Drag to reorder">⋮⋮</div>
               <div style="min-width:0;">
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span style="font-size:14.5px;font-weight:700;color:#2a2520;">{{ pr.name }}</span>
@@ -79,7 +80,6 @@
                 <div style="margin-top:3px;font-size:11px;color:#b3a999;font-family:ui-monospace,Menlo,monospace;">{{ pr.sessionsDir }}{{ pr.sessionsNote }}</div>
               </div>
               <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#8a8073;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ pr.path }}</div>
-              <div style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#6a6055;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ pr.key }}</div>
               <div style="display:flex;gap:7px;justify-content:flex-end;">
                 <sc-for list="{{ pr.counts }}" as="c" hint-placeholder-count="3">
                   <div style="display:flex;flex-direction:column;align-items:center;min-width:48px;padding:6px 0;background:#f3ece3;border-radius:10px;">
@@ -87,27 +87,23 @@
                   </div>
                 </sc-for>
               </div>
+              <div onClick="{{ pr.menuClick }}" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:#a99a89;letter-spacing:2px;" style-hover="background:#f0e8db;color:#7a6f60;">⋯</div>
             </div>
           </sc-for>
 
           <sc-for list="{{ staleProjects }}" as="pr" hint-placeholder-count="1">
-            <div style="display:grid;grid-template-columns:1.5fr 1.6fr 1fr 210px;gap:16px;padding:16px 20px;border-bottom:1px solid #f3eee5;align-items:center;background:#faf3e8;">
+            <div style="display:grid;grid-template-columns:20px 1.5fr 1.8fr 220px 36px;gap:16px;padding:16px 20px;border-bottom:1px solid #f3eee5;align-items:center;background:#faf3e8;">
+              <div style="display:flex;align-items:center;justify-content:center;cursor:grab;color:#d9ccb8;font-size:11px;letter-spacing:1px;" title="Drag to reorder">⋮⋮</div>
               <div style="min-width:0;">
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span style="font-size:14.5px;font-weight:700;color:#6a6055;">{{ pr.name }}</span>
                   <span style="font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#9a6f0a;background:#f7eccb;border-radius:5px;padding:2px 7px;">Stale</span>
                 </div>
-                <div style="margin-top:3px;font-size:11px;color:#bca37a;">Repo path no longer resolves — same Project Key not found in scan</div>
+                <div style="margin-top:3px;font-size:11px;color:#bca37a;">Repo path no longer resolves</div>
               </div>
               <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#bca37a;text-decoration:line-through;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ pr.path }}</div>
-              <div style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#8a8073;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ pr.key }}</div>
-              <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-                <div onClick="{{ pr.relocateClick }}" style="font-size:11.5px;font-weight:600;color:#fff;background:#9d7a64;border-radius:999px;padding:5px 12px;cursor:pointer;" style-hover="background:#8c6b56;">Relocate repo</div>
-                <div style="display:flex;gap:6px;">
-                  <div onClick="{{ pr.hideClick }}" style="font-size:11px;font-weight:600;color:#7a6f60;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;padding:4px 10px;cursor:pointer;" style-hover="background:#f3ece3;">Keep hidden</div>
-                  <div onClick="{{ pr.deleteClick }}" style="font-size:11px;font-weight:600;color:#b55440;background:#fcf9f4;border:1px solid #ecd0c6;border-radius:999px;padding:4px 10px;cursor:pointer;" style-hover="background:#f8ebe6;">Delete…</div>
-                </div>
-              </div>
+              <div></div>
+              <div onClick="{{ pr.menuClick }}" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:#a99a89;letter-spacing:2px;" style-hover="background:#f0e8db;color:#7a6f60;">⋯</div>
             </div>
           </sc-for>
         </div>
@@ -121,7 +117,7 @@
           </div>
         </sc-if>
 
-        <p style="margin-top:14px;font-size:11.5px;color:#b3a999;">Project Key is always the project folder name — a stable identity for cross-device merge. Status set is <b style="color:#9a8f80;">active / stale / hidden</b>.</p>
+        <p style="margin-top:14px;font-size:11.5px;color:#b3a999;">Project identity is the folder name — used as a stable key for cross-device merge. Status set is <b style="color:#9a8f80;">active / stale / hidden</b>.</p>
       </div>
     </sc-if>
 
@@ -310,6 +306,18 @@
     </div>
   </sc-if>
 
+  <!-- ===== Overflow menu (project row) ===== -->
+  <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeMenu }}" style="position:fixed;inset:0;z-index:50;"></div>
+    <div style="position:fixed;top:{{ menuY }}px;right:{{ menuRight }}px;z-index:51;background:#fcf9f4;border:1px solid #e7ddce;border-radius:12px;box-shadow:0 8px 24px rgba(50,40,25,.18);padding:5px;min-width:148px;animation:ann-fade .1s ease-out;">
+      <sc-if value="{{ menuIsStale }}" hint-placeholder-val="{{ false }}">
+        <div onClick="{{ menuRelocate }}" style="padding:9px 14px;border-radius:8px;font-size:12.5px;font-weight:600;color:#6a6055;cursor:pointer;" style-hover="background:#f3ece3;">Relocate repo</div>
+      </sc-if>
+      <div onClick="{{ menuHide }}" style="padding:9px 14px;border-radius:8px;font-size:12.5px;font-weight:600;color:#6a6055;cursor:pointer;" style-hover="background:#f3ece3;">Hide</div>
+      <div onClick="{{ menuDelete }}" style="padding:9px 14px;border-radius:8px;font-size:12.5px;font-weight:600;color:#b55440;cursor:pointer;" style-hover="background:#f8ebe6;">Delete…</div>
+    </div>
+  </sc-if>
+
   <!-- ===== Delete confirm modal ===== -->
   <sc-if value="{{ deleteOpen }}" hint-placeholder-val="{{ false }}">
     <div onClick="{{ closeDelete }}" style="position:fixed;inset:0;background:rgba(42,33,28,.40);display:flex;align-items:center;justify-content:center;z-index:60;animation:ann-fade .14s ease-out;padding:24px;">
@@ -352,7 +360,8 @@ class Component extends DCLogic {
     ready: false, projects: null, skills: null,
     screen: 'list', detailId: 'oll-context', detailSource: 'local',
     addOpen: false, scanOpen: false, scanned: false, scanSel: {},
-    deleteId: null, deleteAck: false, hiddenIds: [], toast: ''
+    deleteId: null, deleteAck: false, hiddenIds: [], toast: '',
+    menuId: null, menuY: 0, menuRight: 0
   };
 
   componentDidMount() {
@@ -401,7 +410,7 @@ class Component extends DCLogic {
 
   renderVals() {
     const s = this.state;
-    const v = { tabs: this.navTabs('project'), toast: s.toast, toastShown: !!s.toast, stop: (e) => { e.stopPropagation && e.stopPropagation(); }, isList: s.screen === 'list', isDetail: s.screen === 'detail' };
+    const v = { tabs: this.navTabs('project'), toast: s.toast, toastShown: !!s.toast, stop: (e) => { e.stopPropagation && e.stopPropagation(); }, isList: s.screen === 'list', isDetail: s.screen === 'detail', menuOpen: !!s.menuId, menuY: s.menuY, menuRight: s.menuRight, menuIsStale: s.menuId && s.projects ? (s.projects.find(x => x.id === s.menuId) || {}).status === 'stale' : false, closeMenu: () => this.setState({ menuId: null }), menuRelocate: () => { const p = s.projects.find(x => x.id === s.menuId); this.setState({ menuId: null }); if (p) this.toast('Relocate ' + p.name + ' — pick the new repository root'); }, menuHide: () => { const p = s.projects.find(x => x.id === s.menuId); this.setState(st => ({ menuId: null, hiddenIds: st.hiddenIds.concat(s.menuId) })); if (p) this.toast(p.name + ' hidden'); }, menuDelete: () => { this.setState({ menuId: null, deleteId: s.menuId, deleteAck: false }); } };
     if (!s.ready) return v;
     const D = window.NexusData;
     const agents = D.AGENT_ORDER;
@@ -415,13 +424,12 @@ class Component extends DCLogic {
     v.activeProjects = active.map(p => ({
       key: p.id, name: p.name, path: p.path, ['key']: p.key, sessionsDir: p.sessionsDir, sessionsNote: p.sessionsNote || '',
       counts: [{ label:'SKILL', n:p.skills }, { label:'SESSION', n:p.sessions }, { label:'SYNC', n:p.sync }],
-      openClick: () => this.setState({ screen:'detail', detailId:p.id })
+      openClick: () => this.setState({ screen:'detail', detailId:p.id }),
+      menuClick: (e) => { e.stopPropagation && e.stopPropagation(); const r = (e.currentTarget || e.target).getBoundingClientRect(); this.setState({ menuId: p.id, menuY: r.bottom + 4, menuRight: Math.max(16, window.innerWidth - r.right) }); }
     }));
     v.staleProjects = stale.map(p => ({
       key: p.id, name: p.name, path: p.path, ['key']: p.key,
-      relocateClick: () => this.toast('Relocate ' + p.name + ' — pick the new repository root'),
-      hideClick: () => { this.setState(st => ({ hiddenIds: st.hiddenIds.concat(p.id) })); this.toast(p.name + ' kept but hidden'); },
-      deleteClick: () => this.setState({ deleteId: p.id, deleteAck: false })
+      menuClick: (e) => { e.stopPropagation && e.stopPropagation(); const r = (e.currentTarget || e.target).getBoundingClientRect(); this.setState({ menuId: p.id, menuY: r.bottom + 4, menuRight: Math.max(16, window.innerWidth - r.right) }); }
     }));
     v.hasHidden = hiddenP.length > 0;
     v.hiddenProjects = hiddenP.map(p => ({ key: p.id, name: p.name, unhideClick: () => { this.setState(st => ({ hiddenIds: st.hiddenIds.filter(x => x !== p.id) })); this.toast(p.name + ' unhidden'); } }));

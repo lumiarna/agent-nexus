@@ -83,6 +83,26 @@
 
       <div style="margin-top:16px;background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;padding:22px;box-shadow:0 1px 14px rgba(50,40,25,.05);">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <h2 style="margin:0;font-size:15px;font-weight:800;color:#2a2520;">Git Base Folders</h2>
+          <span style="font-size:11px;color:#b3a999;">Directories scanned to discover Git repositories as Projects</span>
+          <div onClick="{{ addBaseFolder }}" style="margin-left:auto;padding:7px 14px;background:#9d7a64;color:#fff;border-radius:999px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">Add folder</div>
+        </div>
+        <div style="margin-top:14px;display:flex;flex-direction:column;gap:2px;">
+          <sc-for list="{{ baseFolders }}" as="bf" hint-placeholder-count="1">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 14px;border:1px solid #f0e8db;border-radius:12px;background:#f8f3ea;">
+              <div style="min-width:0;">
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#3a302a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ bf.path }}</div>
+                <div style="margin-top:2px;font-size:10.5px;color:#b3a999;">Added {{ bf.addedAt }}</div>
+              </div>
+              <div onClick="{{ bf.removeClick }}" style="flex:0 0 auto;padding:6px 12px;font-size:11.5px;font-weight:600;color:#b55440;background:#fcf9f4;border:1px solid #ecd0c6;border-radius:999px;cursor:pointer;" style-hover="background:#f8ebe6;">Remove</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:#b3a999;">A base folder is only a discovery input — removing it does not delete any recorded Projects.</div>
+      </div>
+
+      <div style="margin-top:16px;background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;padding:22px;box-shadow:0 1px 14px rgba(50,40,25,.05);">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <h2 style="margin:0;font-size:15px;font-weight:800;color:#2a2520;">Windows taskbar</h2>
           <span style="font-size:11px;color:#b3a999;">Surface preference · applies to the tray monitor, not the Provider cards</span>
         </div>
@@ -140,7 +160,7 @@
 </x-dc>
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
-  state = { ready: false, url: '', user: '', pass: '', trayMetric: 'Remaining', webdavStatus: 'ok', toast: '' };
+  state = { ready: false, url: '', user: '', pass: '', trayMetric: 'Remaining', webdavStatus: 'ok', toast: '', baseFolders: [] };
 
   componentDidMount() {
     this._tryInit();
@@ -150,7 +170,7 @@ class Component extends DCLogic {
   _tryInit() {
     const D = window.NexusData; if (!D || this.state.ready) return;
     const st = D.settings();
-    this.setState({ ready: true, url: st.webdav.url, user: st.webdav.user, pass: st.webdav.pass, trayMetric: st.trayMetric, webdavStatus: st.webdav.status });
+    this.setState({ ready: true, url: st.webdav.url, user: st.webdav.user, pass: st.webdav.pass, trayMetric: st.trayMetric, webdavStatus: st.webdav.status, baseFolders: D.gitBaseFolders() });
   }
 
   navTabs() {
@@ -188,6 +208,12 @@ class Component extends DCLogic {
       badge: { display:'inline-flex', alignItems:'center', justifyContent:'center', width:'24px', height:'24px', borderRadius:'7px', fontSize:'9px', fontWeight:800, background:D.agentColor(a.name), color:'#fff' },
       dirs: a.dirs.map((d, i) => ({ key: i, envKey: d.envKey, value: d.value, derived: !!d.derived }))
     }));
+
+    v.baseFolders = s.baseFolders.map(bf => ({
+      key: bf.path, path: bf.path, addedAt: bf.addedAt,
+      removeClick: () => { this.setState(st => ({ baseFolders: st.baseFolders.filter(x => x.path !== bf.path) })); this.toast('Removed base folder · ' + bf.path); }
+    }));
+    v.addBaseFolder = () => { const newPath = 'E:/Projects'; if (s.baseFolders.some(x => x.path === newPath)) { this.toast('Already registered'); return; } this.setState(st => ({ baseFolders: st.baseFolders.concat({ path: newPath, addedAt: new Date().toISOString().slice(0,10) }) })); this.toast('Added base folder · ' + newPath); };
 
     return v;
   }
