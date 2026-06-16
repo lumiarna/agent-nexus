@@ -19,8 +19,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app::get_desktop_health,
+            commands::projects::list_git_base_folders,
             commands::projects::list_projects,
+            commands::projects::record_git_base_folder,
             commands::projects::record_project,
+            commands::projects::remove_git_base_folder,
+            commands::projects::scan_git_base_folder,
+            commands::projects::scan_git_base_folders,
         ])
         .on_window_event(|window, event| {
             if window.label() == "main"

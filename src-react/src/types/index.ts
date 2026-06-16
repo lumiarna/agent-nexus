@@ -62,6 +62,7 @@ export interface Project {
 }
 
 export interface GitBaseFolder {
+  id: string;
   path: string;
   addedAt: string;
 }

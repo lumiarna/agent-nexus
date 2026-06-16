@@ -103,6 +103,22 @@ agent-nexus/
 └── package.json
 ```
 
+### 主要功能模块参考映射
+
+下表只列“可直接打开对照”的模块级参考。若 Agent Nexus 某个概念在参考仓库中没有同名实现，则明确标注为“组合参考”，避免误判为可以直接照抄。
+
+| 功能模块 | 主要参考路径 | 参考技术栈 / 模式 | 备注 |
+|------|--------------|------------------|------|
+| Provider 管理与切换 | `cc-switch/src-tauri/src/commands/provider.rs`；`cc-switch/src-tauri/src/provider.rs`；`cc-switch/src/components/providers/*`；`cc-switch/src/hooks/useProviderActions.ts`；`cc-switch/src/lib/api/providers.ts`；`cc-switch/src/lib/query/{queries,mutations}.ts` | Tauri 2 command + Rust provider domain + React 18 + TanStack Query + typed `invoke()` 封装 | Agent Nexus 的 Provider CRUD、切换、健康检查可直接沿用这一分层 |
+| Provider quota、托盘与 flyout | `cc-switch/src-tauri/src/services/usage_cache.rs`；`cc-switch/src/lib/query/mutations.ts`；`agent-quota-monitor/src/window.rs`；`agent-quota-monitor/src/tray_icon.rs`；`agent-quota-monitor/src/flyout.rs`；`agent-quota-monitor/src/providers/*` | cc-switch 的“按需刷新 + 节流 + 进程内缓存”模型；agent-quota-monitor 的 Rust `windows` crate + 隐藏消息窗口 + 定时轮询 + GDI 图标绘制 + `ureq`/`native-tls` | 算法参考来自 cc-switch，Windows 壳层细节参考 agent-quota-monitor；Agent Nexus 自身仍采用 Tauri 第二窗口渲染 flyout |
+| Skill 管理（SSOT、导入、symlink/copy） | `cc-switch/src-tauri/src/commands/skill.rs`；`cc-switch/src-tauri/src/services/skill.rs`；`cc-switch/src-tauri/src/database/dao/skills.rs`；`cc-switch/src/components/skills/*`；`cc-switch/src/hooks/useSkills.ts`；`cc-switch/src/lib/api/skills.ts` | Tauri command + `SkillService` + rusqlite DAO + 文件系统 `symlink/copy` + React 管理页 | 与 Agent Nexus 的 Skill 域重叠度最高，是最强参考模块 |
+| Prompt 管理 | `cc-switch/src-tauri/src/commands/prompt.rs`；`cc-switch/src-tauri/src/services/prompt.rs`；`cc-switch/src-tauri/src/database/dao/prompts.rs`；`cc-switch/src/components/prompts/*`；`cc-switch/src/hooks/usePromptActions.ts`；`cc-switch/src/lib/api/prompts.ts` | Tauri command + Rust service + SQLite DAO + React 表单/列表 | 适合作为 Prompt CRUD、启停、导入的直接蓝本 |
+| Session 发现、读取与删除 | `cc-switch/src-tauri/src/commands/session_manager.rs`；`cc-switch/src-tauri/src/session_manager/mod.rs`；`cc-switch/src-tauri/src/session_manager/providers/*`；`cc-switch/src/components/sessions/*`；`cc-switch/src/hooks/useSessionSearch.ts`；`cc-switch/src/lib/api/sessions.ts` | `spawn_blocking` + 本地会话文件扫描/解析 + React Query + 消息面板 | Agent Nexus 的 Session 域应优先复用其 provider-specific scanner 思路，而不是先抽象统一 parser |
+| Project / 本地资产发现（组合参考） | `cc-switch/src-tauri/src/commands/workspace.rs`；`cc-switch/src-tauri/src/services/skill.rs`（`scan_unmanaged`、SSOT 路径、`symlink/copy`）；`cc-switch/src/components/workspace/*`；`cc-switch/src/lib/api/workspace.ts` | Rust `std::fs` / `std::path` + Tauri opener / invoke + React 文件面板 | cc-switch 无 1:1 Project 模块；Git base folder 扫描、项目资产归属和项目详情页需要在此基础上补一层项目语义 |
+| WebDAV 同步与自动同步 | `cc-switch/src-tauri/src/commands/webdav_sync.rs`；`cc-switch/src-tauri/src/services/webdav.rs`；`cc-switch/src-tauri/src/services/webdav_sync.rs`；`cc-switch/src-tauri/src/services/webdav_auto_sync.rs`；`cc-switch/src-tauri/src/services/sync_protocol.rs`；`cc-switch/src/components/settings/WebdavSyncSection.tsx` | `reqwest` + Tokio + manifest snapshot 协议 + SQLite change hook / 防抖上传 + 设置页 surface | 前端入口在 Settings 而非独立 Sync 页面；Agent Nexus 可沿用协议，但保持单向 `Sync Task` 语义 |
+| 设置、目录、导入导出 | `cc-switch/src-tauri/src/commands/settings.rs`；`cc-switch/src-tauri/src/commands/import_export.rs`；`cc-switch/src-tauri/src/database/dao/settings.rs`；`cc-switch/src/components/settings/*`；`cc-switch/src/hooks/useSettings*.ts`；`cc-switch/src/lib/api/settings.ts` | Tauri command + settings DAO + React 分区设置页 | 适合作为 Settings 页分区组织、目录选择和导入导出流程参考 |
+| SQLite 持久化与迁移 | `cc-switch/src-tauri/src/database/schema.rs`；`cc-switch/src-tauri/src/database/migration.rs`；`cc-switch/src-tauri/src/database/dao/*`；`cc-switch/src-tauri/src/database/backup.rs` | rusqlite（bundled）+ schema versioning + DAO + backup/restore | 这是 Agent Nexus 各领域落库时的底座参考，而非单独 UI 模块 |
+
 ## 核心架构模式
 
 ### 1. Command / Service 分离（参考 cc-switch）
@@ -238,6 +254,7 @@ type View = "provider" | "project" | "skill" | "prompt" | "session" | "sync" | "
 | 参考 | 路径 | 用途 |
 |------|------|------|
 | cc-switch | `D:\Sample\cc-switch\` | 整体架构、WebDAV sync、SQLite DAO、service 分层、前端模式、Provider quota 刷新模型 |
+| cc-switch AGENTS | `AGENTS.md` | 高信号仓库布局、命令清单与模块入口导航 |
 | cc-switch sync protocol | `src-tauri/src/services/sync_protocol.rs` | manifest 同步协议设计 |
 | cc-switch schema | `src-tauri/src/database/schema.rs` | 迁移模式、表设计参考 |
 | agent-quota-monitor | `D:\Workspace\agent-quota-monitor\` | Windows 托盘、flyout、图标渲染 |

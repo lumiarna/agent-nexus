@@ -1,6 +1,10 @@
 use tauri::State;
 
-use crate::{error::AppResult, services::projects::Project, store::AppState};
+use crate::{
+    error::AppResult,
+    services::projects::{DiscoveredRepo, GitBaseFolder, Project},
+    store::AppState,
+};
 
 #[tauri::command]
 pub fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<Project>> {
@@ -10,4 +14,35 @@ pub fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<Project>> {
 #[tauri::command]
 pub fn record_project(state: State<'_, AppState>, path: String) -> AppResult<Project> {
     state.projects.record_project(path)
+}
+
+#[tauri::command]
+pub fn list_git_base_folders(state: State<'_, AppState>) -> AppResult<Vec<GitBaseFolder>> {
+    state.projects.list_git_base_folders()
+}
+
+#[tauri::command]
+pub fn record_git_base_folder(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<GitBaseFolder> {
+    state.projects.record_git_base_folder(path)
+}
+
+#[tauri::command]
+pub fn remove_git_base_folder(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    state.projects.remove_git_base_folder(id)
+}
+
+#[tauri::command]
+pub fn scan_git_base_folder(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<Vec<DiscoveredRepo>> {
+    state.projects.scan_git_base_folder(path)
+}
+
+#[tauri::command]
+pub fn scan_git_base_folders(state: State<'_, AppState>) -> AppResult<Vec<DiscoveredRepo>> {
+    state.projects.scan_git_base_folders()
 }

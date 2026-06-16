@@ -1,4 +1,6 @@
 use std::{
+    collections::HashSet,
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -27,6 +29,22 @@ pub struct Project {
     pub sessions: i64,
     pub sync: i64,
     pub key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBaseFolder {
+    pub id: String,
+    pub path: String,
+    pub added_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredRepo {
+    pub path: String,
+    pub key: String,
+    pub state: String,
 }
 
 #[derive(Clone)]
@@ -60,6 +78,23 @@ impl ProjectService {
         )?;
 
         let rows = stmt.query_map([], project_from_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn list_git_base_folders(&self) -> AppResult<Vec<GitBaseFolder>> {
+        let conn = self.db.connection()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                id,
+                path,
+                COALESCE(strftime('%Y-%m-%d', added_at, 'unixepoch'), '') AS added_at
+            FROM git_base_folders
+            ORDER BY added_at, path
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], git_base_folder_from_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -133,31 +168,142 @@ impl ProjectService {
         tx.commit()?;
         Ok(project)
     }
+
+    pub fn record_git_base_folder(&self, path: String) -> AppResult<GitBaseFolder> {
+        let canonical_path = validate_directory_path(&path, "git base folder path")?;
+        let path = path_to_string(&canonical_path)?;
+        let now = now_epoch_seconds()?;
+
+        let mut conn = self.db.connection()?;
+        let tx = conn.transaction()?;
+
+        let existing_id = tx
+            .query_row(
+                "SELECT id FROM git_base_folders WHERE path = ?1",
+                params![path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+
+        let id = match existing_id {
+            Some(id) => {
+                tx.execute(
+                    "UPDATE git_base_folders SET added_at = ?2 WHERE id = ?1",
+                    params![id, now],
+                )?;
+                id
+            }
+            None => {
+                let id = Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO git_base_folders (id, path, added_at) VALUES (?1, ?2, ?3)",
+                    params![id, path, now],
+                )?;
+                id
+            }
+        };
+
+        let folder = tx.query_row(
+            r#"
+            SELECT
+                id,
+                path,
+                COALESCE(strftime('%Y-%m-%d', added_at, 'unixepoch'), '') AS added_at
+            FROM git_base_folders
+            WHERE id = ?1
+            "#,
+            params![id],
+            git_base_folder_from_row,
+        )?;
+
+        tx.commit()?;
+        Ok(folder)
+    }
+
+    pub fn remove_git_base_folder(&self, id: String) -> AppResult<()> {
+        if id.trim().is_empty() {
+            return Err(AppError::Validation(
+                "git base folder id is required".to_string(),
+            ));
+        }
+
+        let conn = self.db.connection()?;
+        conn.execute(
+            "DELETE FROM git_base_folders WHERE id = ?1",
+            params![id.trim()],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn scan_git_base_folder(&self, path: String) -> AppResult<Vec<DiscoveredRepo>> {
+        let base = validate_directory_path(&path, "git base folder path")?;
+        self.mark_recorded_repositories(discover_git_repositories(&base)?)
+    }
+
+    pub fn scan_git_base_folders(&self) -> AppResult<Vec<DiscoveredRepo>> {
+        let folders = self.list_git_base_folders()?;
+        let mut repositories = Vec::new();
+
+        for folder in folders {
+            repositories.extend(discover_git_repositories(Path::new(&folder.path))?);
+        }
+
+        self.mark_recorded_repositories(repositories)
+    }
+
+    fn mark_recorded_repositories(
+        &self,
+        repositories: Vec<DiscoveredRepo>,
+    ) -> AppResult<Vec<DiscoveredRepo>> {
+        let conn = self.db.connection()?;
+        let mut stmt = conn.prepare("SELECT key FROM projects")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let recorded_keys = rows.collect::<Result<HashSet<_>, _>>()?;
+
+        Ok(repositories
+            .into_iter()
+            .map(|repo| DiscoveredRepo {
+                state: if recorded_keys.contains(&repo.key) {
+                    "recorded".to_string()
+                } else {
+                    "new".to_string()
+                },
+                ..repo
+            })
+            .collect())
+    }
 }
 
 fn validate_git_project_root(path: &str) -> AppResult<PathBuf> {
+    let raw_path = validate_directory_path(path, "project path")?;
+
+    if !raw_path.join(".git").exists() {
+        return Err(AppError::Validation(format!(
+            "project path is not a Git repository root: {}",
+            raw_path.display()
+        )));
+    }
+
+    Ok(raw_path.canonicalize()?)
+}
+
+fn validate_directory_path(path: &str, label: &str) -> AppResult<PathBuf> {
     if path.trim().is_empty() {
-        return Err(AppError::Validation("project path is required".to_string()));
+        return Err(AppError::Validation(format!("{label} is required")));
     }
 
     let raw_path = Path::new(path.trim());
     if !raw_path.exists() {
         return Err(AppError::Validation(format!(
-            "project path does not exist: {}",
+            "{label} does not exist: {}",
             raw_path.display()
         )));
     }
 
     if !raw_path.is_dir() {
         return Err(AppError::Validation(format!(
-            "project path is not a directory: {}",
-            raw_path.display()
-        )));
-    }
-
-    if !raw_path.join(".git").exists() {
-        return Err(AppError::Validation(format!(
-            "project path is not a Git repository root: {}",
+            "{label} is not a directory: {}",
             raw_path.display()
         )));
     }
@@ -179,6 +325,34 @@ fn path_to_string(path: &Path) -> AppResult<String> {
         .ok_or_else(|| AppError::Validation("project path must be valid UTF-8".to_string()))
 }
 
+fn discover_git_repositories(base: &Path) -> AppResult<Vec<DiscoveredRepo>> {
+    let mut repositories = Vec::new();
+
+    for entry in fs::read_dir(base)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if !path.is_dir() || !path.join(".git").exists() {
+            continue;
+        }
+
+        let canonical_path = path.canonicalize()?;
+        repositories.push(DiscoveredRepo {
+            key: project_key(&canonical_path)?,
+            path: path_to_string(&canonical_path)?,
+            state: "new".to_string(),
+        });
+    }
+
+    repositories.sort_by(|left, right| {
+        left.key
+            .cmp(&right.key)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+
+    Ok(repositories)
+}
+
 fn now_epoch_seconds() -> AppResult<i64> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -198,5 +372,13 @@ fn project_from_row(row: &Row<'_>) -> rusqlite::Result<Project> {
         sessions: row.get(7)?,
         sync: row.get(8)?,
         key: row.get(9)?,
+    })
+}
+
+fn git_base_folder_from_row(row: &Row<'_>) -> rusqlite::Result<GitBaseFolder> {
+    Ok(GitBaseFolder {
+        id: row.get(0)?,
+        path: row.get(1)?,
+        added_at: row.get(2)?,
     })
 }

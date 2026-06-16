@@ -54,3 +54,81 @@ fn recording_same_project_key_updates_path_without_duplicate() {
         fs::canonicalize(new_repo).unwrap().to_string_lossy()
     );
 }
+
+#[test]
+fn records_git_base_folder_and_lists_canonical_path() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+
+    let recorded = service
+        .record_git_base_folder(root.path().to_string_lossy().into_owned())
+        .expect("record git base folder");
+    let folders = service
+        .list_git_base_folders()
+        .expect("list git base folders");
+
+    assert_eq!(
+        recorded.path,
+        fs::canonicalize(root.path()).unwrap().to_string_lossy()
+    );
+    assert_eq!(folders, vec![recorded]);
+}
+
+#[test]
+fn scans_registered_base_folders_and_marks_recorded_projects() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let existing_repo = git_repo(&root, "existing");
+    let new_repo = git_repo(&root, "new");
+    fs::create_dir_all(root.path().join("notes")).expect("create non-git directory");
+
+    service
+        .record_project(existing_repo.clone())
+        .expect("record existing project");
+    service
+        .record_git_base_folder(root.path().to_string_lossy().into_owned())
+        .expect("record git base folder");
+
+    let scan = service
+        .scan_git_base_folders()
+        .expect("scan git base folders");
+
+    assert_eq!(scan.len(), 2);
+    assert_eq!(scan[0].key, "existing");
+    assert_eq!(
+        scan[0].path,
+        fs::canonicalize(existing_repo).unwrap().to_string_lossy()
+    );
+    assert_eq!(scan[0].state, "recorded");
+    assert_eq!(scan[1].key, "new");
+    assert_eq!(
+        scan[1].path,
+        fs::canonicalize(new_repo).unwrap().to_string_lossy()
+    );
+    assert_eq!(scan[1].state, "new");
+}
+
+#[test]
+fn removes_git_base_folder_without_deleting_projects() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "kept-project");
+
+    service.record_project(repo).expect("record project");
+    let folder = service
+        .record_git_base_folder(root.path().to_string_lossy().into_owned())
+        .expect("record git base folder");
+
+    service
+        .remove_git_base_folder(folder.id)
+        .expect("remove git base folder");
+
+    assert!(service
+        .list_git_base_folders()
+        .expect("list git base folders")
+        .is_empty());
+    assert_eq!(service.list_projects().expect("list projects").len(), 1);
+}

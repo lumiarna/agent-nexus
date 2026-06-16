@@ -8,10 +8,18 @@ import { SkillRow } from "@/components/skill/SkillRow";
 import { ScreenScroll } from "@/components/shell/screen";
 import { useNav } from "@/lib/nav";
 import { nexus } from "@/lib/mock";
-import { useProjectsQuery, useRecordProjectMutation } from "@/lib/query/projects";
+import {
+  useGitBaseFoldersQuery,
+  useProjectsQuery,
+  useRecordGitBaseFolderMutation,
+  useRecordProjectMutation,
+  useRecordProjectsMutation,
+  useRemoveGitBaseFolderMutation,
+  useScanGitBaseFoldersMutation,
+} from "@/lib/query/projects";
 import { palette, toggleCellRole } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
-import type { AgentName, GitBaseFolder, Project } from "@/types";
+import type { AgentName, Project } from "@/types";
 
 const LIST_COLS = "20px 1.5fr 1.8fr 220px 36px";
 type DetailSource = "local" | "cloud";
@@ -48,9 +56,18 @@ function deriveProjectKey(path: string): string {
 export function ProjectPage({ initialProjectId }: { initialProjectId?: string }) {
   const { go } = useNav();
   const projectsQuery = useProjectsQuery();
+  const baseFoldersQuery = useGitBaseFoldersQuery();
   const recordProject = useRecordProjectMutation();
+  const recordProjects = useRecordProjectsMutation();
+  const recordBaseFolder = useRecordGitBaseFolderMutation();
+  const removeBaseFolder = useRemoveGitBaseFolderMutation();
+  const scanBaseFolders = useScanGitBaseFoldersMutation();
   const projects = projectsQuery.data ?? [];
+  const baseFolders = baseFoldersQuery.data ?? [];
   const projectError = projectsQuery.error ? getErrorMessage(projectsQuery.error) : null;
+  const baseFoldersError = baseFoldersQuery.error
+    ? getErrorMessage(baseFoldersQuery.error)
+    : null;
   const [order, setOrder] = useState<string[]>([]);
   const [dragId, setDragId] = useState<string | null>(null);
   const [skills, setSkills] = useState(() => nexus.skills());
@@ -62,9 +79,9 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [baseFoldersOpen, setBaseFoldersOpen] = useState(false);
-  const [baseFolders, setBaseFolders] = useState<GitBaseFolder[]>(() => nexus.gitBaseFolders());
+  const [baseFolderPath, setBaseFolderPath] = useState("");
   const [addOpen, setAddOpen] = useState(false);
-  const [scanned, setScanned] = useState(false);
+  const [hasScanned, setHasScanned] = useState(false);
   const [scanSel, setScanSel] = useState<Record<string, boolean>>({});
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteAck, setDeleteAck] = useState(false);
@@ -128,7 +145,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   }
 
   // Scan modal derived state
-  const scanRes = scanned ? nexus.scanResults() : [];
+  const scanRes = hasScanned ? scanBaseFolders.data ?? [] : [];
   const newCount = scanRes.filter((r) => r.state === "new").length;
   const selCount = scanRes.filter((r) => r.state === "new" && scanSel[r.path]).length;
 
@@ -163,6 +180,75 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
     }
   }
 
+  async function submitGitBaseFolder() {
+    const path = baseFolderPath.trim();
+    if (!path) {
+      toast("Git base folder path is required");
+      return;
+    }
+
+    try {
+      await recordBaseFolder.mutateAsync(path);
+      setBaseFolderPath("");
+      setHasScanned(false);
+      setScanSel({});
+      scanBaseFolders.reset();
+      toast(`Added base folder · ${path}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function removeGitBaseFolder(id: string, path: string) {
+    try {
+      await removeBaseFolder.mutateAsync(id);
+      setHasScanned(false);
+      setScanSel({});
+      scanBaseFolders.reset();
+      toast(`Removed base folder · ${path}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function submitScanGitBaseFolders() {
+    if (baseFolders.length === 0) {
+      toast("Add a Git base folder before scanning");
+      return;
+    }
+
+    try {
+      const results = await scanBaseFolders.mutateAsync();
+      const selected: Record<string, boolean> = {};
+      results.forEach((repo) => {
+        if (repo.state === "new") selected[repo.path] = true;
+      });
+      setHasScanned(true);
+      setScanSel(selected);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function recordSelectedScanProjects() {
+    const paths = scanRes
+      .filter((repo) => repo.state === "new" && scanSel[repo.path])
+      .map((repo) => repo.path);
+
+    if (paths.length === 0) return;
+
+    try {
+      await recordProjects.mutateAsync(paths);
+      setBaseFoldersOpen(false);
+      setHasScanned(false);
+      setScanSel({});
+      scanBaseFolders.reset();
+      toast(`Recorded ${paths.length} ${paths.length === 1 ? "project" : "projects"}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
   const menuItem =
     "cursor-pointer rounded-[8px] px-3.5 py-[9px] text-[12.5px] font-semibold";
 
@@ -180,7 +266,15 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               </p>
             </div>
             <div className="flex gap-[9px]">
-              <Button variant="secondary" onClick={() => { setBaseFoldersOpen(true); setScanned(false); setScanSel({}); }}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setBaseFoldersOpen(true);
+                  setHasScanned(false);
+                  setScanSel({});
+                  scanBaseFolders.reset();
+                }}
+              >
                 Git Base Folders
               </Button>
               <Button variant="primary" onClick={() => setAddOpen(true)}>
@@ -580,25 +674,55 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
           <div>
             <div className="mb-2 flex items-center gap-2">
               <div className="text-[12px] font-bold text-[#6a6055]">Registered folders</div>
-              <button
-                onClick={() => {
-                  const newPath = "E:/Projects";
-                  if (baseFolders.some((x) => x.path === newPath)) { toast("Already registered"); return; }
-                  setBaseFolders((bf) => [...bf, { path: newPath, addedAt: new Date().toISOString().slice(0, 10) }]);
-                  toast(`Added base folder \u00b7 ${newPath}`);
+            </div>
+            <div className="mb-3 flex gap-2">
+              <input
+                value={baseFolderPath}
+                onChange={(event) => setBaseFolderPath(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !recordBaseFolder.isPending) {
+                    void submitGitBaseFolder();
+                  }
                 }}
-                className="ml-auto rounded-full border border-nexus-border2 bg-nexus-card px-2.5 py-1 text-[11px] font-semibold text-nexus-accent hover:bg-nexus-sand"
+                placeholder="/Users/lumiarna/Workspace"
+                className="min-w-0 flex-1 rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055] outline-none focus:border-nexus-accent"
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                className="rounded-[10px]"
+                onClick={() => void submitGitBaseFolder()}
+                disabled={recordBaseFolder.isPending || !baseFolderPath.trim()}
               >
-                + Add folder
-              </button>
+                {recordBaseFolder.isPending ? "Adding..." : "Add folder"}
+              </Button>
             </div>
             <div className="flex flex-col gap-0.5 overflow-hidden rounded-[12px] border border-nexus-border">
+              {baseFoldersQuery.isLoading ? (
+                <div className="px-3.5 py-[11px] text-[12px] text-[#b3a999]">
+                  Loading base folders...
+                </div>
+              ) : null}
+
+              {baseFoldersError ? (
+                <div className="px-3.5 py-[11px] text-[12px] text-nexus-crit">
+                  {baseFoldersError}
+                </div>
+              ) : null}
+
+              {!baseFoldersQuery.isLoading && !baseFoldersError && baseFolders.length === 0 ? (
+                <div className="px-3.5 py-[11px] text-[12px] text-[#b3a999]">
+                  No base folders registered.
+                </div>
+              ) : null}
+
               {baseFolders.map((bf, i) => (
                 <div
-                  key={bf.path}
+                  key={bf.id}
                   className={cn(
                     "flex items-center justify-between gap-3 px-3.5 py-[11px]",
-                    i > 0 && "border-t border-[#f3eee5]",
+                    (i > 0 || baseFoldersQuery.isLoading || baseFoldersError) &&
+                      "border-t border-[#f3eee5]",
                   )}
                 >
                   <div className="min-w-0">
@@ -608,11 +732,9 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                     <div className="mt-0.5 text-[10.5px] text-[#b3a999]">Added {bf.addedAt}</div>
                   </div>
                   <button
-                    onClick={() => {
-                      setBaseFolders((bfs) => bfs.filter((x) => x.path !== bf.path));
-                      toast(`Removed base folder \u00b7 ${bf.path}`);
-                    }}
-                    className="flex-none text-[11px] font-semibold text-nexus-crit hover:underline"
+                    onClick={() => void removeGitBaseFolder(bf.id, bf.path)}
+                    disabled={removeBaseFolder.isPending}
+                    className="flex-none text-[11px] font-semibold text-nexus-crit hover:underline disabled:cursor-wait disabled:opacity-60"
                   >
                     Remove
                   </button>
@@ -632,19 +754,20 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                 variant="primary"
                 size="sm"
                 className="ml-auto rounded-[10px]"
-                onClick={() => {
-                  const sel: Record<string, boolean> = {};
-                  nexus.scanResults().forEach((r) => { if (r.state === "new") sel[r.path] = true; });
-                  setScanned(true);
-                  setScanSel(sel);
-                }}
+                onClick={() => void submitScanGitBaseFolders()}
+                disabled={scanBaseFolders.isPending || baseFolders.length === 0}
               >
-                Scan all folders
+                {scanBaseFolders.isPending ? "Scanning..." : "Scan all folders"}
               </Button>
             </div>
+            {scanBaseFolders.error ? (
+              <div className="mt-2 text-[11.5px] text-nexus-crit">
+                {getErrorMessage(scanBaseFolders.error)}
+              </div>
+            ) : null}
           </div>
 
-          {scanned ? (
+          {hasScanned ? (
             <div>
               <div className="mb-2 text-[12px] font-bold text-[#6a6055]">
                 Discovered repositories{" "}
@@ -654,6 +777,12 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                 </span>
               </div>
               <div className="flex flex-col gap-0.5 overflow-hidden rounded-[12px] border border-nexus-border">
+                {scanRes.length === 0 ? (
+                  <div className="px-3.5 py-[11px] text-[12px] text-[#b3a999]">
+                    No Git repositories found in registered base folders.
+                  </div>
+                ) : null}
+
                 {scanRes.map((r, i) => {
                   const isNew = r.state === "new";
                   const on = isNew && !!scanSel[r.path];
@@ -705,15 +834,15 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
           <Button variant="subtle" onClick={() => setBaseFoldersOpen(false)}>
             Close
           </Button>
-          {scanned && selCount > 0 && (
+          {hasScanned && selCount > 0 && (
             <Button
               variant="primary"
-              onClick={() => {
-                setBaseFoldersOpen(false);
-                toast(`Recorded ${selCount} ${selCount === 1 ? "project" : "projects"}`);
-              }}
+              onClick={() => void recordSelectedScanProjects()}
+              disabled={recordProjects.isPending}
             >
-              Record {selCount} {selCount === 1 ? "project" : "projects"}
+              {recordProjects.isPending
+                ? "Recording..."
+                : `Record ${selCount} ${selCount === 1 ? "project" : "projects"}`}
             </Button>
           )}
         </ModalFooter>

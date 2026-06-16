@@ -85,7 +85,9 @@ const PROJECTS: Project[] = [
   { id: "sandbox", name: "sandbox", status: "hidden", path: "D:/Workspace/sandbox", sessionsDir: "__sessions", skills: 0, sessions: 2, sync: 0, key: "sandbox" },
 ];
 
-const GIT_BASE_FOLDERS: GitBaseFolder[] = [{ path: "D:/Workspace", addedAt: "2026-06-10" }];
+const GIT_BASE_FOLDERS: GitBaseFolder[] = [
+  { id: "workspace", path: "D:/Workspace", addedAt: "2026-06-10" },
+];
 const SCAN_BASE = GIT_BASE_FOLDERS[0].path;
 const SCAN_RESULTS: ScanResult[] = [
   { path: "D:/Workspace/oll-context", key: "oll-context", state: "recorded" },

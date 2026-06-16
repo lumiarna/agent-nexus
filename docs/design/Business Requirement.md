@@ -67,6 +67,7 @@
 	- `${ROOT}/Workspace`
 	- `${ROOT}/Sample`
 - 也支持手动添加项目路径
+- 无需支持递归扫描
 
 ### Skill
 
