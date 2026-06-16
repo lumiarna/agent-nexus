@@ -1,29 +1,148 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { MatrixLegend } from "@/components/ui/agent-icon";
 import { Card, Input } from "@/components/ui/primitives";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { SkillRow } from "@/components/skill/SkillRow";
 import { ScreenScroll } from "@/components/shell/screen";
+import { skillsApi } from "@/lib/api/skills";
 import { nexus } from "@/lib/mock";
+import { useProjectsQuery } from "@/lib/query/projects";
+import {
+  useScanSkillsMutation,
+  useSetSkillDisabledMutation,
+  useSetSkillTargetMutation,
+  useSkillsQuery,
+} from "@/lib/query/skills";
+import { isTauriRuntime } from "@/lib/runtime";
 import { toggleCellRole } from "@/lib/tokens";
-import type { AgentName } from "@/types";
+import type { AgentName, Skill } from "@/types";
 
 type Scope = "global" | "project";
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return "Unexpected error";
+}
+
 export function SkillPage() {
-  const [skills, setSkills] = useState(() => nexus.skills());
+  const desktop = isTauriRuntime();
+  const skillsQuery = useSkillsQuery();
+  const projectsQuery = useProjectsQuery();
+  const scanSkills = useScanSkillsMutation();
+  const setSkillTarget = useSetSkillTargetMutation();
+  const setSkillDisabled = useSetSkillDisabledMutation();
+  const autoScanStarted = useRef(false);
+  const [mockSkills, setMockSkills] = useState(() => nexus.skills());
   const [scope, setScope] = useState<Scope>("global");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [projects] = useState(() => nexus.projects().filter((p) => p.status === "active"));
+  const mockProjects = useRef(nexus.projects().filter((p) => p.status === "active"));
+  const skills = desktop ? skillsQuery.data ?? [] : mockSkills;
+  const projects = desktop
+    ? (projectsQuery.data ?? []).filter((p) => p.status === "active")
+    : mockProjects.current;
+  const queryError =
+    desktop && skillsQuery.error ? getErrorMessage(skillsQuery.error) : null;
+  const scanError =
+    desktop && scanSkills.error ? getErrorMessage(scanSkills.error) : null;
+  const pageError = queryError ?? scanError;
+  const isLoading = desktop && (skillsQuery.isLoading || scanSkills.isPending);
 
-  const toggleCell = (id: string, agent: AgentName) =>
-    setSkills((s) =>
-      s.map((k) => (k.id === id ? { ...k, cells: toggleCellRole(k.cells, agent) } : k)),
-    );
-  const toggleDmi = (id: string) =>
-    setSkills((s) => s.map((k) => (k.id === id ? { ...k, disabled: !k.disabled } : k)));
+  useEffect(() => {
+    if (!desktop || autoScanStarted.current) return;
+    autoScanStarted.current = true;
+    void scanSkills.mutateAsync().catch((error) => toast(getErrorMessage(error)));
+  }, [desktop, scanSkills]);
+
+  async function scan() {
+    if (!desktop) {
+      toast("Desktop runtime required for scanning");
+      return;
+    }
+
+    try {
+      const rows = await scanSkills.mutateAsync();
+      toast(`Scanned ${rows.length} ${rows.length === 1 ? "skill" : "skills"}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function toggleCell(skill: Skill, agent: AgentName) {
+    if (skill.cells[agent] === "source") return;
+
+    if (!desktop) {
+      setMockSkills((s) =>
+        s.map((k) => (k.id === skill.id ? { ...k, cells: toggleCellRole(k.cells, agent) } : k)),
+      );
+      return;
+    }
+
+    try {
+      await setSkillTarget.mutateAsync({
+        skillId: skill.id,
+        agent,
+        enabled: skill.cells[agent] !== "target",
+      });
+      toast(skill.cells[agent] === "target" ? "Target removed" : "Target linked");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function toggleDmi(skill: Skill) {
+    if (!desktop) {
+      setMockSkills((s) =>
+        s.map((k) => (k.id === skill.id ? { ...k, disabled: !k.disabled } : k)),
+      );
+      return;
+    }
+
+    try {
+      await setSkillDisabled.mutateAsync({ id: skill.id, disabled: !skill.disabled });
+      toast(!skill.disabled ? "Model invocation disabled" : "Model invocation enabled");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function openSource(skill: Skill) {
+    if (!desktop) {
+      toast(`Open source · ${skill.path}`);
+      return;
+    }
+
+    try {
+      await skillsApi.openSource(skill.id);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function revealPath(skill: Skill) {
+    if (!desktop) {
+      toast(`Reveal in file manager · ${skill.path}`);
+      return;
+    }
+
+    try {
+      await skillsApi.revealPath(skill.id);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
 
   const isProj = scope === "project";
   const q = search.trim().toLowerCase();
@@ -59,14 +178,25 @@ export function SkillPage() {
             Shared capability assets · Agent Matrix drives distribution
           </p>
         </div>
-        <Segmented<Scope>
-          options={[
-            { value: "global", label: "Global" },
-            { value: "project", label: "Project" },
-          ]}
-          value={scope}
-          onChange={setScope}
-        />
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant="subtle"
+            size="sm"
+            onClick={() => void scan()}
+            disabled={desktop && scanSkills.isPending}
+          >
+            <RefreshCw size={14} />
+            Scan
+          </Button>
+          <Segmented<Scope>
+            options={[
+              { value: "global", label: "Global" },
+              { value: "project", label: "Project" },
+            ]}
+            value={scope}
+            onChange={setScope}
+          />
+        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3.5">
@@ -107,15 +237,27 @@ export function SkillPage() {
           <div className="text-center">Disable invoke</div>
           <div className="text-right">Source file</div>
         </div>
-        {set.length > 0 ? (
+        {isLoading && set.length === 0 ? (
+          <div className="px-6 py-12 text-center">
+            <div className="text-[14px] font-bold text-[#7a6f60]">Scanning skills</div>
+            <div className="mt-1.5 text-[12.5px] text-[#b3a999]">
+              Reading global and project skill directories.
+            </div>
+          </div>
+        ) : pageError ? (
+          <div className="px-6 py-12 text-center">
+            <div className="text-[14px] font-bold text-nexus-crit">Skill scan failed</div>
+            <div className="mt-1.5 text-[12.5px] text-[#b3a999]">{pageError}</div>
+          </div>
+        ) : set.length > 0 ? (
           set.map((k) => (
             <SkillRow
               key={k.id}
               skill={k}
-              onToggleCell={(a) => toggleCell(k.id, a)}
-              onToggleDmi={() => toggleDmi(k.id)}
-              onOpen={() => toast(`Open source · ${k.path}`)}
-              onReveal={() => toast(`Reveal in file manager · ${k.path}`)}
+              onToggleCell={(a) => void toggleCell(k, a)}
+              onToggleDmi={() => void toggleDmi(k)}
+              onOpen={() => void openSource(k)}
+              onReveal={() => void revealPath(k)}
             />
           ))
         ) : (

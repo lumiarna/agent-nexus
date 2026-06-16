@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use crate::{
     database::Database,
-    services::{projects::ProjectService, sync::SyncService},
+    services::{projects::ProjectService, skills::SkillService, sync::SyncService},
 };
 
 pub struct AppState {
     pub projects: ProjectService,
+    pub skills: SkillService,
     pub sync: SyncService,
 }
 
@@ -15,6 +16,7 @@ impl AppState {
         let db = Arc::new(db);
         Self {
             projects: ProjectService::new(db.clone()),
+            skills: SkillService::new(db.clone()),
             sync: SyncService::new(db),
         }
     }
