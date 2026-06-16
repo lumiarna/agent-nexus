@@ -11,6 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="./nexus-data.js"></script>
   <style>
     *{box-sizing:border-box;}
     html,body{margin:0;height:100%;}
@@ -48,7 +49,7 @@
   </div>
 
   <div data-screen-label="Session" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;">
-    <div style="padding:22px 28px 14px;flex:0 0 auto;">
+    <div style="padding:22px 32px 14px;flex:0 0 auto;">
       <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;">
         <div>
           <h1 style="margin:0;font-size:23px;font-weight:800;letter-spacing:-.02em;color:#2a2520;">Session</h1>
@@ -66,7 +67,6 @@
     </div>
 
     <div style="flex:1;min-height:0;display:grid;grid-template-columns:380px 1fr;border-top:1px solid #e7ddce;">
-      <!-- list -->
       <div style="border-right:1px solid #e7ddce;overflow:auto;background:#f6efe5;">
         <sc-if value="{{ listShown }}" hint-placeholder-val="{{ true }}">
           <sc-for list="{{ list }}" as="se" hint-placeholder-count="5">
@@ -91,7 +91,6 @@
         </sc-if>
       </div>
 
-      <!-- preview -->
       <div style="overflow:auto;background:#fcf9f4;">
         <sc-if value="{{ hasSelection }}" hint-placeholder-val="{{ true }}">
           <div style="padding:24px 28px;">
@@ -106,12 +105,12 @@
 
             <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
               <div onClick="{{ sel.openFileClick }}" style="padding:8px 14px;background:#9d7a64;color:#fff;border-radius:999px;font-weight:700;cursor:pointer;font-size:12.5px;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">Open file</div>
-              <a href="Project.dc.html" style="padding:8px 14px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-weight:600;color:#7a6f60;cursor:pointer;font-size:12.5px;" style-hover="background:#ece2d5;">Open Project</a>
+              <div onClick="{{ sel.openProjectClick }}" style="padding:8px 14px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-weight:600;color:#7a6f60;cursor:pointer;font-size:12.5px;" style-hover="background:#ece2d5;">Open Project ↗</div>
               <div style="width:1px;height:22px;background:#efe6da;margin:0 4px;"></div>
               <div onClick="{{ sel.archiveClick }}" style="padding:8px 14px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-weight:600;color:#7a6f60;cursor:pointer;font-size:12.5px;" style-hover="background:#ece2d5;">Archive now</div>
               <div onClick="{{ sel.pullClick }}" style="padding:8px 14px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-weight:600;color:#7a6f60;cursor:pointer;font-size:12.5px;" style-hover="background:#ece2d5;">Pull now</div>
             </div>
-            <div style="margin-top:8px;font-size:11px;color:#c3b9a8;">Quick actions run at Project granularity. Archive and Pull are separate one-way tasks.</div>
+            <div style="margin-top:8px;font-size:11px;color:#c3b9a8;">Open Project jumps to this session's Project detail. Quick actions run at Project granularity; Archive and Pull are separate one-way tasks.</div>
 
             <div style="margin-top:18px;padding:20px 22px;background:#f8f3ea;border:1px solid #f0e8db;border-radius:14px;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.7;color:#4a4138;white-space:pre-wrap;">{{ sel.body }}</div>
           </div>
@@ -132,85 +131,70 @@
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
   projColors = { 'agent-nexus':'#9d7a64', 'oll-context':'#4f7a6a', 'tap':'#c2410c', 'tap-kit':'#7a5c9e', 'awesome-vibe-coding':'#b07d2e' };
-
-  sessionsData = [
-    { id:'s1', title:'260615-1059-Agent Nexus需求审视', project:'agent-nexus', file:'__sessions/260615-1059-Agent Nexus需求审视.md', size:'11.3 KB', updated:'2026-06-15 13:19', source:'both',
-      excerpt:'审视基于当前项目演化出的新项目需求边界、实体模型与范围优先级。',
-      body:'# 主题一\n\n## 设计决策\n- 先不讨论实现，优先澄清产品定位、范围边界、实体关系与同步语义。\n- 一级导航命名最终确认：单数形式 Provider / Project / Skill / Prompt / Session / Sync。\n- Sync 语义确认：只做单向，仅支持 Backup 与 Distribution 两种单向模式。\n- Agent Matrix 作为高层快捷控制器，用户在表格内直接切换关系，系统在后台创建/删除底层分发记录。' },
-    { id:'s2', title:'260615-1624-初版原型反馈设计访谈', project:'agent-nexus', file:'__sessions/260615-1624-初版原型反馈设计访谈.md', size:'2.0 KB', updated:'2026-06-15 17:18', source:'local',
-      excerpt:'围绕初版原型反馈逐项澄清领域语义、信息架构与交互边界。',
-      body:'# 主题一\n\n## 设计决策\n- Project Key 在 MVP 中默认取项目目录名，创建时强提醒可手工编辑，首次保存后冻结。\n- Provider 手动配置只覆盖观测参数与展示偏好，不把 Agent Nexus 扩展为凭据管理器。\n- Windows 任务栏的 used/remaining 展示口径采用全局统一配置，默认 remaining。\n- Copilot 被建模为完整 Agent，同时参与 Skill 与 Prompt 的传播；显式引入 COPILOT_CONFIG_DIR = ~/.agents。\n- Prompt 在 MVP 中继续限定为全局单文件资产。' },
-    { id:'s3', title:'260615-1430-prototype-build-notes', project:'agent-nexus', file:'__sessions/260615-1430-prototype-build-notes.md', size:'3.1 KB', updated:'2026-06-15 14:30', source:'local',
-      excerpt:'Working notes while wiring up the six primary screens and the agent matrix interaction.',
-      body:'# Prototype build notes\n\n- Top tab bar nav, native desktop chrome.\n- Agent Matrix collapsed to per-agent icons (source / target / none).\n- Session: Local/Cloud toggle, list + preview two-column.\n- Sync default sections moved to the bottom, collapsed.' },
-    { id:'s4', title:'260612-1432-tap-builder-refactor', project:'oll-context', file:'__sessions/260612-1432-tap-builder-refactor.md', size:'8.7 KB', updated:'2026-06-12 14:32', source:'both',
-      excerpt:'Refactored the TAP builder skill and re-symlinked the canonical source into CodeX.',
-      body:'# tap-builder refactor\n\n- Moved canonical source under .github/skills/tap-builder.\n- Re-created the CodeX placement as a symlink (auto target path).\n- disable-model-invocation left off for this skill.' },
-    { id:'s5', title:'260610-0901-quota-endpoint-debug', project:'agent-nexus', file:'__sessions/260610-0901-quota-endpoint-debug.md', size:'5.4 KB', updated:'2026-06-10 09:01', source:'cloud',
-      excerpt:'Traced the DeepSeek 503 returned from the quota endpoint and added a retry path.',
-      body:'# Quota endpoint debug\n\n- DeepSeek quota endpoint intermittently returns HTTP 503.\n- Provider card now surfaces "Request failed" with the last-success timestamp.\n- Added Retry as a diagnostic action.' },
-    { id:'s6', title:'260608-1730-session-archive-design', project:'tap-kit', file:'__sessions/260608-1730-session-archive-design.md', size:'6.9 KB', updated:'2026-06-08 17:30', source:'cloud',
-      excerpt:'Designed the WebDAV archive layout keyed by stable project key, no device sub-layer.',
-      body:'# Session archive design\n\n- WebDAV layout: webdav://nas/agent-nexus/<project key>/.\n- No <device-id> sub-layer; same project dir is a merge point, not a conflict.\n- last-write-wins on same-name files.' },
-    { id:'s7', title:'260605-1100-warp-config-sync', project:'awesome-vibe-coding', file:'docs/__sessions/260605-1100-warp-config-sync.md', size:'4.2 KB', updated:'2026-06-05 11:00', source:'cloud',
-      excerpt:'Set up Warp config distribution from the canonical machine via copy, same-platform only.',
-      body:'# Warp config sync\n\n- Generic File task from the Warp Config template.\n- Copies settings.toml + keybindings.yaml to WebDAV.\n- Same-platform restore only.' },
-    { id:'s8', title:'260611-0815-local-scratch', project:'tap', file:'__sessions/260611-0815-local-scratch.md', size:'1.2 KB', updated:'2026-06-11 08:15', source:'local',
-      excerpt:'Quick local scratch notes, not yet archived to WebDAV.',
-      body:'# Local scratch\n\n- Local-only notes for the tap repo.\n- Not yet archived — visible under Local source only.' }
-  ];
-
-  state = { source:'cloud', search:'', selectedId:'s1', cloudAvailable:true, toast:'' };
+  state = { ready: false, sessions: null, source: 'cloud', search: '', selectedId: 's1', cloudAvailable: true, toast: '' };
   accent = '#9d7a64';
-  dot(c){ return {display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:c,flex:'0 0 auto'}; }
-  toast(m){ this.setState({toast:m}); clearTimeout(this._t); this._t=setTimeout(()=>this.setState({toast:''}),2200); }
 
-  renderVals(){
-    const s=this.state;
-    const navDef=[['provider','Provider','Agent%20Nexus.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
-    const tabs=navDef.map(([key,label,href])=>{const active=key==='session';return {key,label,href,style:{padding:'7px 15px',borderRadius:'999px',fontSize:'13px',fontWeight:active?700:600,cursor:'pointer',color:active?'#9d7a64':'#9a8f80',background:active?'#fcf9f4':'transparent',border:active?'1px solid #e7ddce':'1px solid transparent',boxShadow:active?'0 1px 2px rgba(50,40,25,.05)':'none',transition:'all .12s'}};});
-    const v={tabs,toast:s.toast,toastShown:!!s.toast,search:s.search};
+  componentDidMount() {
+    this._tryInit();
+    if (!window.NexusData) { this._onData = () => this._tryInit(); window.addEventListener('nexus-data-ready', this._onData); }
+  }
+  componentWillUnmount() { if (this._onData) window.removeEventListener('nexus-data-ready', this._onData); clearTimeout(this._t); }
+  _tryInit() { const D = window.NexusData; if (!D || this.state.ready) return; this.setState({ ready: true, sessions: D.sessions() }); }
 
-    const src=s.source;
-    const seg=(on)=>({padding:'7px 18px',borderRadius:'999px',fontSize:'13px',fontWeight:on?700:600,cursor:'pointer',color:on?'#9d7a64':'#a99a89',background:on?'#fcf9f4':'transparent',boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none',transition:'all .12s'});
-    v.localStyle=seg(src==='local'); v.cloudStyle=seg(src==='cloud');
-    v.localClick=()=>this.setState({source:'local',selectedId:null}); v.cloudClick=()=>this.setState({source:'cloud',selectedId:null});
-    v.setSearch=(e)=>this.setState({search:e.target.value});
-    v.searchPlaceholder='Search '+(src==='cloud'?'Cloud':'Local')+' sessions by name or content';
-    v.sourceNote=src==='cloud'?'Cloud · WebDAV aggregated (read-only)':'Local · this device';
+  navTabs(activeKey) {
+    const def = [['provider','Provider','Provider.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
+    return def.map(([key,label,href]) => { const a = key === activeKey; return { key, label, href, style:{ padding:'7px 15px', borderRadius:'999px', fontSize:'13px', fontWeight:a?700:600, cursor:'pointer', color:a?'#9d7a64':'#9a8f80', background:a?'#fcf9f4':'transparent', border:a?'1px solid #e7ddce':'1px solid transparent', boxShadow:a?'0 1px 2px rgba(50,40,25,.05)':'none', transition:'all .12s' } }; });
+  }
+  dot(c) { return { display:'inline-block', width:'8px', height:'8px', borderRadius:'50%', background:c, flex:'0 0 auto' }; }
+  toast(m) { this.setState({ toast: m }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: '' }), 2200); }
 
-    const cloudDown = src==='cloud' && !s.cloudAvailable;
-    let sess=this.sessionsData.filter(se=>se.source===src||se.source==='both');
-    const q=s.search.trim().toLowerCase();
-    if(q) sess=sess.filter(se=>se.title.toLowerCase().includes(q)||se.excerpt.toLowerCase().includes(q)||se.body.toLowerCase().includes(q)||se.project.toLowerCase().includes(q));
-    let selId=s.selectedId;
-    if(!sess.find(se=>se.id===selId)) selId = sess.length?sess[0].id:null;
+  renderVals() {
+    const s = this.state;
+    const seg0 = (on) => ({ padding:'7px 18px', borderRadius:'999px', fontSize:'13px', fontWeight:on?700:600, cursor:'pointer', color:on?'#9d7a64':'#a99a89', background:on?'#fcf9f4':'transparent', boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none', transition:'all .12s' });
+    const v = { tabs: this.navTabs('session'), toast: s.toast, toastShown: !!s.toast, search: s.search, setSearch: (e) => this.setState({ search: e.target.value }), localStyle: seg0(s.source === 'local'), cloudStyle: seg0(s.source === 'cloud'), searchPlaceholder: 'Search ' + (s.source === 'cloud' ? 'Cloud' : 'Local') + ' sessions by name or content', sourceNote: s.source === 'cloud' ? 'Cloud · aggregated (read-only)' : 'Local · this device', localClick: () => this.setState({ source: 'local', selectedId: null }), cloudClick: () => this.setState({ source: 'cloud', selectedId: null }) };
+    if (!s.ready) return v;
 
-    v.cloudUnavailable=cloudDown;
-    v.listShown=!cloudDown && sess.length>0;
-    v.emptyShown=cloudDown || sess.length===0;
-    if(cloudDown){ v.emptyTitle='Cloud unavailable'; v.emptyBody='Could not reach the WebDAV endpoint.'; }
-    else if(q&&sess.length===0){ v.emptyTitle='No results'; v.emptyBody='No '+src+' session matches “'+s.search+'”.'; }
-    else if(sess.length===0){ v.emptyTitle=src==='cloud'?'Cloud empty':'Local empty'; v.emptyBody=src==='cloud'?'No archived sessions on WebDAV yet.':'No local sessions across recorded projects.'; }
-    v.retryCloud=()=>{ this.setState({cloudAvailable:true}); this.toast('Reconnected to WebDAV'); };
+    const src = s.source;
+    const seg = (on) => ({ padding:'7px 18px', borderRadius:'999px', fontSize:'13px', fontWeight:on?700:600, cursor:'pointer', color:on?'#9d7a64':'#a99a89', background:on?'#fcf9f4':'transparent', boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none', transition:'all .12s' });
+    v.localStyle = seg(src === 'local'); v.cloudStyle = seg(src === 'cloud');
+    v.localClick = () => this.setState({ source: 'local', selectedId: null }); v.cloudClick = () => this.setState({ source: 'cloud', selectedId: null });
+    v.setSearch = (e) => this.setState({ search: e.target.value });
+    v.searchPlaceholder = 'Search ' + (src === 'cloud' ? 'Cloud' : 'Local') + ' sessions by name or content';
+    v.sourceNote = src === 'cloud' ? 'Cloud · aggregated (read-only)' : 'Local · this device';
 
-    v.list=sess.map(se=>{
-      const pc=this.projColors[se.project]||'#a99a89';
-      const selected=se.id===selId;
-      return { key:se.id, title:se.title, project:se.project, excerpt:se.excerpt, updated:se.updated, tagFg:pc, tagBg:pc+'22',
-        rowStyle:{padding:'14px 16px',borderBottom:'1px solid #f0e8db',cursor:'pointer',background:selected?'#fcf9f4':'transparent',borderLeft:selected?'3px solid '+this.accent:'3px solid transparent'},
-        onClick:()=>this.setState({selectedId:se.id}) };
+    const cloudDown = src === 'cloud' && !s.cloudAvailable;
+    let sess = s.sessions.filter(se => se.source === src || se.source === 'both');
+    const q = s.search.trim().toLowerCase();
+    if (q) sess = sess.filter(se => se.title.toLowerCase().includes(q) || se.excerpt.toLowerCase().includes(q) || se.body.toLowerCase().includes(q) || se.project.toLowerCase().includes(q));
+    let selId = s.selectedId;
+    if (!sess.find(se => se.id === selId)) selId = sess.length ? sess[0].id : null;
+
+    v.cloudUnavailable = cloudDown;
+    v.listShown = !cloudDown && sess.length > 0;
+    v.emptyShown = cloudDown || sess.length === 0;
+    if (cloudDown) { v.emptyTitle = 'Cloud unavailable'; v.emptyBody = 'Could not reach the Cloud archive.'; }
+    else if (q && sess.length === 0) { v.emptyTitle = 'No results'; v.emptyBody = 'No ' + src + ' session matches “' + s.search + '”.'; }
+    else if (sess.length === 0) { v.emptyTitle = src === 'cloud' ? 'Cloud empty' : 'Local empty'; v.emptyBody = src === 'cloud' ? 'No archived sessions in the Cloud yet.' : 'No local sessions across recorded projects.'; }
+    v.retryCloud = () => { this.setState({ cloudAvailable: true }); this.toast('Reconnected to Cloud'); };
+
+    v.list = sess.map(se => {
+      const pc = this.projColors[se.project] || '#a99a89';
+      const selected = se.id === selId;
+      return { key: se.id, title: se.title, project: se.project, excerpt: se.excerpt, updated: se.updated, tagFg: pc, tagBg: pc + '22',
+        rowStyle: { padding:'14px 16px', borderBottom:'1px solid #f0e8db', cursor:'pointer', background:selected ? '#fcf9f4' : 'transparent', borderLeft:selected ? '3px solid ' + this.accent : '3px solid transparent' },
+        onClick: () => this.setState({ selectedId: se.id }) };
     });
 
-    const sel=sess.find(se=>se.id===selId);
-    v.hasSelection=!!sel && !cloudDown;
-    v.noSelection=!sel || cloudDown;
-    if(sel){
-      v.sel={ title:sel.title, project:sel.project, updated:sel.updated, size:sel.size, file:sel.file, body:sel.body,
-        srcLabel:src==='cloud'?'Cloud (WebDAV)':'Local', srcDot:this.dot(src==='cloud'?this.accent:'#8a9a5b'),
-        openFileClick:()=>this.toast('Open file · '+sel.file),
-        archiveClick:()=>this.toast('Archive now → '+sel.project+' (Project-level, one-way)'),
-        pullClick:()=>this.toast('Pull now → '+sel.project+' (Project-level, one-way)') };
+    const sel = sess.find(se => se.id === selId);
+    v.hasSelection = !!sel && !cloudDown;
+    v.noSelection = !sel || cloudDown;
+    if (sel) {
+      v.sel = { title: sel.title, project: sel.project, updated: sel.updated, size: sel.size, file: sel.file, body: sel.body,
+        srcLabel: src === 'cloud' ? 'Cloud' : 'Local', srcDot: this.dot(src === 'cloud' ? this.accent : '#8a9a5b'),
+        openFileClick: () => this.toast('Open file · ' + sel.file),
+        openProjectClick: () => { try { window.location.href = 'Project.dc.html?project=' + encodeURIComponent(sel.project); } catch (e) {} },
+        archiveClick: () => this.toast('Archive now → ' + sel.project + ' (Project-level, one-way)'),
+        pullClick: () => this.toast('Pull now → ' + sel.project + ' (Project-level, one-way)') };
     }
     return v;
   }

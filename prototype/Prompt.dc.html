@@ -11,6 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="./nexus-data.js"></script>
   <style>
     *{box-sizing:border-box;}
     html,body{margin:0;height:100%;}
@@ -48,7 +49,7 @@
   </div>
 
   <div data-screen-label="Prompt" style="flex:1;min-height:0;overflow:auto;">
-    <div style="padding:24px 28px 60px;max-width:1180px;margin:0 auto;">
+    <div style="padding:24px 32px 60px;max-width:1480px;margin:0 auto;">
       <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;">
         <div>
           <h1 style="margin:0;font-size:23px;font-weight:800;letter-spacing:-.02em;color:#2a2520;">Prompt</h1>
@@ -62,13 +63,13 @@
       </div>
 
       <div style="margin-top:16px;background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;overflow:hidden;box-shadow:0 1px 14px rgba(50,40,25,.05);">
-        <div style="display:grid;grid-template-columns:1fr 168px 132px;gap:16px;padding:12px 20px;background:#f6efe5;border-bottom:1px solid #f0e8db;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b3a999;align-items:center;">
+        <div style="display:grid;grid-template-columns:1fr 196px 132px;gap:16px;padding:12px 20px;background:#f6efe5;border-bottom:1px solid #f0e8db;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b3a999;align-items:center;">
           <div>Prompt</div>
           <div style="text-align:center;">Distribution</div>
           <div style="text-align:right;">Source file</div>
         </div>
         <sc-for list="{{ rows }}" as="row" hint-placeholder-count="2">
-          <div style="display:grid;grid-template-columns:1fr 168px 132px;gap:16px;padding:14px 20px;border-bottom:1px solid #f3eee5;align-items:center;">
+          <div style="display:grid;grid-template-columns:1fr 196px 132px;gap:16px;padding:14px 20px;border-bottom:1px solid #f3eee5;align-items:center;">
             <div style="min-width:0;">
               <div style="display:flex;align-items:center;gap:8px;">
                 <span style="font-size:14px;font-weight:700;color:#2a2520;">{{ row.name }}</span>
@@ -77,18 +78,18 @@
               <div style="margin-top:3px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#a99a89;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ row.path }}</div>
             </div>
             <div style="display:flex;justify-content:center;gap:5px;">
-              <sc-for list="{{ row.icons }}" as="ic" hint-placeholder-count="4">
+              <sc-for list="{{ row.icons }}" as="ic" hint-placeholder-count="5">
                 <span onClick="{{ ic.onClick }}" title="{{ ic.title }}" style="{{ ic.style }}">{{ ic.abbr }}</span>
               </sc-for>
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;">
-              <span onClick="{{ row.openClick }}" style="font-size:11.5px;color:#9d7a64;cursor:pointer;font-weight:600;" style-hover="text-decoration:underline;">Open source</span>
-              <span onClick="{{ row.revealClick }}" style="font-size:11.5px;color:#a99a89;cursor:pointer;font-weight:600;" style-hover="text-decoration:underline;">Reveal path</span>
+              <span onClick="{{ row.openClick }}" style="font-size:11.5px;color:#9d7a64;cursor:pointer;font-weight:600;white-space:nowrap;" style-hover="text-decoration:underline;">Open source</span>
+              <span onClick="{{ row.revealClick }}" style="font-size:11.5px;color:#a99a89;cursor:pointer;font-weight:600;white-space:nowrap;" style-hover="text-decoration:underline;">Reveal path</span>
             </div>
           </div>
         </sc-for>
       </div>
-      <p style="margin-top:14px;font-size:11.5px;color:#b3a999;">MVP keeps Prompt as a global single-file asset — there is no project-level prompt. Distribution defaults to <b style="color:#9a8f80;">symlink</b>; target paths are computed per agent.</p>
+      <p style="margin-top:14px;font-size:11.5px;color:#b3a999;">MVP keeps Prompt as a global single-file asset — there is no project-level prompt. Distribution defaults to <b style="color:#9a8f80;">symlink</b>; target paths are computed per agent. <b style="color:#9a8f80;">Agents</b> (<span style="font-family:ui-monospace,Menlo,monospace;">~/.agents</span>) is the leftmost generic target.</p>
     </div>
   </div>
 
@@ -100,48 +101,50 @@
 </x-dc>
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
-  agents = ['Claude Code','CodeX','OpenCode','Copilot'];
-  agentColors = { 'Claude Code':'#c2410c', 'CodeX':'#4f7a6a', 'OpenCode':'#7a5c9e', 'Copilot':'#5a7894' };
-  agentAbbr = { 'Claude Code':'CC', 'CodeX':'CX', 'OpenCode':'OC', 'Copilot':'CP' };
+  state = { ready: false, prompts: null, toast: '' };
 
-  state = {
-    toast:'',
-    prompts:[
-      { id:'pr1', name:'Global Instructions', path:'~/.claude/CLAUDE.md', cells:{'Claude Code':'source','CodeX':'target','OpenCode':'target','Copilot':'target'} },
-      { id:'pr2', name:'Agent Conventions', path:'~/.codex/AGENTS.md', cells:{'Claude Code':'none','CodeX':'source','OpenCode':'target','Copilot':'none'} }
-    ]
-  };
-
-  toast(m){ this.setState({toast:m}); clearTimeout(this._t); this._t=setTimeout(()=>this.setState({toast:''}),2200); }
-  srcAgentOf(a){ for(const g of this.agents) if(a.cells[g]==='source') return g; return this.agents[0]; }
-  agentIcon(state, agent){
-    const col = this.agentColors[agent];
-    const base = { display:'inline-flex', alignItems:'center', justifyContent:'center', width:'26px', height:'26px', borderRadius:'8px', fontSize:'9px', fontWeight:800, letterSpacing:'.02em', flex:'0 0 auto', transition:'all .12s', userSelect:'none' };
-    if(state==='source') return Object.assign({},base,{ background:col, color:'#fff', cursor:'default', boxShadow:'0 0 0 2px '+col+'33' });
-    if(state==='target') return Object.assign({},base,{ background:col+'22', color:col, border:'1px solid '+col+'55', cursor:'pointer' });
-    return Object.assign({},base,{ background:'transparent', color:'#cabfae', border:'1px dashed #ddccb6', cursor:'pointer' });
+  componentDidMount() {
+    this._tryInit();
+    if (!window.NexusData) { this._onData = () => this._tryInit(); window.addEventListener('nexus-data-ready', this._onData); }
   }
-  toggleCell(id, agent){
-    this.setState(s=>({ prompts:s.prompts.map(a=>{
-      if(a.id!==id) return a;
-      const cur=a.cells[agent]; if(cur==='source') return a;
-      const next=cur==='target'?'none':'target';
-      return Object.assign({},a,{cells:Object.assign({},a.cells,{[agent]:next})});
+  componentWillUnmount() { if (this._onData) window.removeEventListener('nexus-data-ready', this._onData); clearTimeout(this._t); }
+  _tryInit() { const D = window.NexusData; if (!D || this.state.ready) return; this.setState({ ready: true, prompts: D.prompts() }); }
+
+  navTabs(activeKey) {
+    const def = [['provider','Provider','Provider.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
+    return def.map(([key,label,href]) => { const a = key === activeKey; return { key, label, href, style:{ padding:'7px 15px', borderRadius:'999px', fontSize:'13px', fontWeight:a?700:600, cursor:'pointer', color:a?'#9d7a64':'#9a8f80', background:a?'#fcf9f4':'transparent', border:a?'1px solid #e7ddce':'1px solid transparent', boxShadow:a?'0 1px 2px rgba(50,40,25,.05)':'none', transition:'all .12s' } }; });
+  }
+  toast(m) { this.setState({ toast: m }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: '' }), 2200); }
+  srcAgentOf(cells, agents) { for (const a of agents) if (cells[a] === 'source') return a; return agents[0]; }
+  agentIcon(state, agent) {
+    const D = window.NexusData; const col = D.agentColor(agent);
+    const base = { display:'inline-flex', alignItems:'center', justifyContent:'center', width:'26px', height:'26px', borderRadius:'8px', fontSize:'9px', fontWeight:800, letterSpacing:'.02em', flex:'0 0 auto', transition:'all .12s', userSelect:'none' };
+    if (state === 'source') return Object.assign({}, base, { background:col, color:'#fff', cursor:'default', boxShadow:'0 0 0 2px '+col+'33' });
+    if (state === 'target') return Object.assign({}, base, { background:col+'22', color:col, border:'1px solid '+col+'55', cursor:'pointer' });
+    return Object.assign({}, base, { background:'transparent', color:'#cabfae', border:'1px dashed #ddccb6', cursor:'pointer' });
+  }
+  toggleCell(id, agent) {
+    this.setState(s => ({ prompts: s.prompts.map(a => {
+      if (a.id !== id) return a;
+      const cur = a.cells[agent]; if (cur === 'source') return a;
+      const next = cur === 'target' ? 'none' : 'target';
+      return Object.assign({}, a, { cells: Object.assign({}, a.cells, { [agent]: next }) });
     }) }));
   }
 
-  renderVals(){
-    const s=this.state;
-    const navDef=[['provider','Provider','Agent%20Nexus.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
-    const tabs=navDef.map(([key,label,href])=>{const active=key==='prompt';return {key,label,href,style:{padding:'7px 15px',borderRadius:'999px',fontSize:'13px',fontWeight:active?700:600,cursor:'pointer',color:active?'#9d7a64':'#9a8f80',background:active?'#fcf9f4':'transparent',border:active?'1px solid #e7ddce':'1px solid transparent',boxShadow:active?'0 1px 2px rgba(50,40,25,.05)':'none',transition:'all .12s'}};});
-    const v={tabs,toast:s.toast,toastShown:!!s.toast};
-    v.rows=s.prompts.map(p=>{
-      const src=this.srcAgentOf(p);
+  renderVals() {
+    const s = this.state;
+    const v = { tabs: this.navTabs('prompt'), toast: s.toast, toastShown: !!s.toast };
+    if (!s.ready) return v;
+    const D = window.NexusData;
+    const agents = D.AGENT_ORDER;
+    v.rows = s.prompts.map(p => {
+      const src = this.srcAgentOf(p.cells, agents);
       return {
-        key:p.id, name:p.name, path:p.path,
-        srcAbbr:this.agentAbbr[src], srcBadge:{display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'1px 6px',borderRadius:'5px',fontSize:'9px',fontWeight:800,letterSpacing:'.04em',background:this.agentColors[src]+'1c',color:this.agentColors[src]},
-        icons:this.agents.map(a=>({key:a,abbr:this.agentAbbr[a],title:a+(p.cells[a]==='source'?' · source (fixed)':p.cells[a]==='target'?' · target — click to remove':' · none — click to add target'),style:this.agentIcon(p.cells[a],a),onClick:()=>this.toggleCell(p.id,a)})),
-        openClick:()=>this.toast('Open source · '+p.path), revealClick:()=>this.toast('Reveal in file manager · '+p.path)
+        key: p.id, name: p.name, path: p.path,
+        srcAbbr: D.agentAbbr(src), srcBadge: { display:'inline-flex', alignItems:'center', justifyContent:'center', padding:'1px 6px', borderRadius:'5px', fontSize:'9px', fontWeight:800, letterSpacing:'.04em', background:D.agentColor(src)+'1c', color:D.agentColor(src) },
+        icons: agents.map(a => ({ key: a, abbr: D.agentAbbr(a), title: a + (p.cells[a] === 'source' ? ' · source (fixed)' : p.cells[a] === 'target' ? ' · target — click to remove' : ' · none — click to add target'), style: this.agentIcon(p.cells[a], a), onClick: () => this.toggleCell(p.id, a) })),
+        openClick: () => this.toast('Open source · ' + p.path), revealClick: () => this.toast('Reveal in file manager · ' + p.path)
       };
     });
     return v;

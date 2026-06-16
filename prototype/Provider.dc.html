@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="./nexus-data.js"></script>
+  <style>
+    *{box-sizing:border-box;}
+    html,body{margin:0;height:100%;}
+    body{background:#f3ece3;}
+    a{text-decoration:none;color:inherit;}
+    input{font-family:inherit;}
+    ::-webkit-scrollbar{width:11px;height:11px;}
+    ::-webkit-scrollbar-thumb{background:rgba(90,70,45,.16);border-radius:6px;border:3px solid transparent;background-clip:content-box;}
+    ::-webkit-scrollbar-thumb:hover{background:rgba(90,70,45,.28);background-clip:content-box;}
+    @keyframes ann-pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+    @keyframes ann-rise{from{opacity:0;transform:translateY(8px) translateX(-50%);}to{opacity:1;transform:translateY(0) translateX(-50%);}}
+    @keyframes ann-fade{from{opacity:0;}to{opacity:1;}}
+  </style>
+</helmet>
+<div style="position:fixed;inset:0;display:flex;flex-direction:column;background:#f3ece3;font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,sans-serif;color:#3a302a;font-size:13px;-webkit-font-smoothing:antialiased;overflow:hidden;">
+
+  <div style="height:40px;flex:0 0 auto;display:flex;align-items:center;padding:0 14px;background:#ece2d5;border-bottom:1px solid #e0d4c2;position:relative;">
+    <div style="display:flex;gap:7px;align-items:center;">
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+      <span style="width:11px;height:11px;border-radius:50%;background:#ddd0bf;"></span>
+    </div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#5a4d42;">
+      <span style="display:inline-block;width:14px;height:14px;border-radius:5px;background:#9d7a64;"></span>
+      Agent Nexus
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px;color:#a99a89;font-size:11.5px;">
+      <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;">Search assets <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#b8a890;border:1px solid #e7ddce;border-radius:4px;padding:0 4px;">⌘K</span></span>
+      <a href="Settings.dc.html" title="Settings" style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;background:#fcf9f4;border:1px solid #e7ddce;color:#8a7a68;font-size:14px;" style-hover="background:#f6efe5;color:#9d7a64;">⚙</a>
+    </div>
+  </div>
+
+  <div style="flex:0 0 auto;display:flex;align-items:center;gap:4px;padding:9px 14px;background:#f3ece3;border-bottom:1px solid #e7ddce;">
+    <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="6">
+      <a href="{{ tab.href }}" style="{{ tab.style }}">{{ tab.label }}</a>
+    </sc-for>
+  </div>
+
+  <div data-screen-label="Provider" style="flex:1;min-height:0;overflow:auto;">
+    <div style="padding:24px 32px 60px;max-width:1480px;margin:0 auto;">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div>
+          <h1 style="margin:0;font-size:23px;font-weight:800;letter-spacing:-.02em;color:#2a2520;">Provider</h1>
+          <p style="margin:6px 0 0;color:#9a8f80;font-size:13px;">Global quota &amp; credential visibility · {{ visibleCount }} of {{ totalCount }} shown · drag cards to reorder</p>
+        </div>
+        <div onClick="{{ refreshAll }}" style="display:inline-flex;align-items:center;gap:7px;padding:9px 16px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;font-weight:600;color:#7a6f60;cursor:pointer;box-shadow:0 1px 2px rgba(50,40,25,.04);" style-hover="background:#f6efe5;">Refresh all</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-top:22px;">
+        <sc-for list="{{ providers }}" as="p" hint-placeholder-count="6">
+          <div draggable="true" onDragStart="{{ p.onDragStart }}" onDragOver="{{ p.onDragOver }}" onDrop="{{ p.onDrop }}" onDragEnd="{{ p.onDragEnd }}" style="{{ p.cardStyle }}">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+              <div style="min-width:0;display:flex;align-items:flex-start;gap:9px;">
+                <span title="Drag to reorder" style="margin-top:3px;color:#cabfae;cursor:grab;font-size:13px;line-height:1;letter-spacing:-1px;flex:0 0 auto;">⠿</span>
+                <div style="min-width:0;">
+                  <div style="display:flex;align-items:center;gap:7px;">
+                    <span style="font-size:15.5px;font-weight:700;letter-spacing:-.01em;color:#2a2520;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.name }}</span>
+                    <sc-if value="{{ p.isAgent }}" hint-placeholder-val="{{ true }}">
+                      <span title="Also a full Agent" style="flex:0 0 auto;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#7a6f60;background:#f0e8db;border:1px solid #e7ddce;border-radius:5px;padding:1px 5px;">Agent</span>
+                    </sc-if>
+                  </div>
+                  <div style="margin-top:3px;font-size:12px;color:#a99a89;">{{ p.plan }}</div>
+                </div>
+              </div>
+              <div style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;font-size:11px;font-weight:700;border-radius:999px;padding:4px 10px;color:{{ p.statusColor }};background:{{ p.statusTint }};white-space:nowrap;"><span style="{{ p.dotStyle }}"></span>{{ p.statusLabel }}</div>
+            </div>
+
+            <sc-if value="{{ p.showQuota }}" hint-placeholder-val="{{ true }}">
+              <div style="margin-top:18px;display:flex;align-items:baseline;gap:7px;">
+                <span style="font-size:30px;font-weight:800;line-height:1;letter-spacing:-.03em;color:{{ p.primaryColor }};">{{ p.primaryText }}</span>
+                <span style="font-size:12px;color:#b3a999;">peak window used</span>
+              </div>
+              <div style="margin-top:15px;display:flex;flex-direction:column;gap:13px;">
+                <sc-for list="{{ p.windows }}" as="w" hint-placeholder-count="2">
+                  <div>
+                    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;">
+                      <span style="color:#6a6055;">{{ w.label }}</span>
+                      <span style="font-weight:700;color:{{ w.barColor }};">{{ w.usedLabel }}</span>
+                    </div>
+                    <div style="height:8px;border-radius:999px;background:#ece2d6;overflow:hidden;"><div style="{{ w.fillStyle }}"></div></div>
+                    <div style="margin-top:6px;font-size:11px;color:#b3a999;">{{ w.reset }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ p.hasMessage }}" hint-placeholder-val="{{ true }}">
+              <div style="margin-top:16px;padding:13px 14px;border-radius:13px;background:{{ p.statusTint }};border:1px solid {{ p.msgBorder }};">
+                <div style="font-size:12.5px;font-weight:700;color:{{ p.statusColor }};">{{ p.msgTitle }}</div>
+                <div style="margin-top:4px;font-size:12px;color:#7a6f60;line-height:1.5;">{{ p.msgBody }}</div>
+              </div>
+            </sc-if>
+
+            <div style="margin-top:16px;padding-top:14px;border-top:1px solid #f0e8db;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+              <div style="min-width:0;">
+                <div style="font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#c3b9a8;">Credential</div>
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#8a8073;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.credential }}</div>
+              </div>
+              <div style="display:flex;gap:6px;flex:0 0 auto;">
+                <div onClick="{{ p.refreshClick }}" title="{{ p.actionLabel }}" style="padding:7px 12px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-size:12px;font-weight:600;color:#7a6f60;cursor:pointer;white-space:nowrap;" style-hover="background:#ece2d5;">{{ p.actionLabel }}</div>
+                <div onClick="{{ p.configClick }}" title="Configure" style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-size:14px;color:#8a7a68;cursor:pointer;flex:0 0 auto;" style-hover="background:#ece2d5;color:#9d7a64;">⚙</div>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{ hasHidden }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px;background:#f0e8db;border:1px dashed #ddccb6;border-radius:14px;">
+          <span style="font-size:12px;font-weight:700;color:#7a6f60;">Hidden on this page</span>
+          <sc-for list="{{ hiddenList }}" as="h" hint-placeholder-count="2">
+            <div onClick="{{ h.restoreClick }}" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#6a6055;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;padding:5px 12px;cursor:pointer;" style-hover="background:#f6efe5;">{{ h.name }} <span style="color:#a99a89;">· show</span></div>
+          </sc-for>
+          <span style="font-size:11px;color:#b3a999;">Card visibility is separate from Windows taskbar visibility.</span>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <sc-if value="{{ configOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeConfig }}" style="position:fixed;inset:0;background:rgba(42,33,28,.34);display:flex;align-items:center;justify-content:center;z-index:60;animation:ann-fade .14s ease-out;padding:24px;">
+      <div onClick="{{ stop }}" style="width:460px;max-width:100%;max-height:88vh;overflow:auto;background:#fcf9f4;border:1px solid #efe6da;border-radius:20px;box-shadow:0 24px 60px rgba(50,40,25,.28);">
+        <div style="padding:20px 22px;border-bottom:1px solid #f0e8db;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+          <div>
+            <div style="font-size:17px;font-weight:800;letter-spacing:-.01em;color:#2a2520;">Configure {{ cfg.name }}</div>
+            <div style="margin-top:4px;font-size:12px;color:#a99a89;">Observation params &amp; display preferences · not a credential manager</div>
+          </div>
+          <div onClick="{{ closeConfig }}" style="font-size:20px;color:#b3a999;cursor:pointer;line-height:1;" style-hover="color:#7a6f60;">×</div>
+        </div>
+
+        <div style="padding:20px 22px;display:flex;flex-direction:column;gap:22px;">
+          <div>
+            <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9d7a64;margin-bottom:12px;">Connection parameters</div>
+            <sc-if value="{{ cfg.needsParams }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:13px;">
+                <sc-for list="{{ cfg.params }}" as="f" hint-placeholder-count="2">
+                  <label style="display:block;">
+                    <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">{{ f.label }}</div>
+                    <input value="{{ f.value }}" placeholder="{{ f.placeholder }}" style="width:100%;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+                    <div style="margin-top:5px;font-size:11px;color:#b3a999;">{{ f.hint }}</div>
+                  </label>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ cfg.noParams }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:13px 14px;background:#f3ece3;border:1px solid #efe6da;border-radius:12px;font-size:12px;color:#8a7a68;line-height:1.5;">No extra connection parameters needed for {{ cfg.name }} — quota is read from the existing credential source.</div>
+            </sc-if>
+          </div>
+
+          <div>
+            <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9d7a64;margin-bottom:12px;">Display preferences</div>
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              <div onClick="{{ cfg.toggleCard }}" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border-radius:11px;cursor:pointer;" style-hover="background:#f6efe5;">
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:#3a302a;">Show card on Provider page</div>
+                  <div style="font-size:11px;color:#a99a89;margin-top:2px;">Affects this page only</div>
+                </div>
+                <div style="{{ cfg.cardTrack }}"><div style="{{ cfg.cardKnob }}"></div></div>
+              </div>
+              <div onClick="{{ cfg.toggleTray }}" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border-radius:11px;cursor:pointer;" style-hover="background:#f6efe5;">
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:#3a302a;">Show in Windows taskbar</div>
+                  <div style="font-size:11px;color:#a99a89;margin-top:2px;">Separate surface — independent of the card above</div>
+                </div>
+                <div style="{{ cfg.trayTrack }}"><div style="{{ cfg.trayKnob }}"></div></div>
+              </div>
+            </div>
+            <div style="margin-top:10px;padding:11px 13px;background:#f3ece3;border:1px solid #efe6da;border-radius:11px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+              <div style="font-size:11.5px;color:#8a7a68;line-height:1.5;">Taskbar metric (<b style="color:#6a6055;">used / remaining</b>) is a global setting. Currently <b style="color:#6a6055;">{{ trayMetric }}</b>.</div>
+              <a href="Settings.dc.html" style="flex:0 0 auto;font-size:11.5px;font-weight:600;color:#9d7a64;" style-hover="text-decoration:underline;">Settings →</a>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:16px 22px;border-top:1px solid #f0e8db;display:flex;justify-content:flex-end;gap:9px;">
+          <div onClick="{{ closeConfig }}" style="padding:9px 16px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-size:12.5px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#ece2d5;">Cancel</div>
+          <div onClick="{{ saveConfig }}" style="padding:9px 18px;background:#9d7a64;color:#fff;border-radius:999px;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">Save</div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ toastShown }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#2a2520;color:#f3ece3;padding:11px 18px;border-radius:999px;font-size:12.5px;font-weight:600;box-shadow:0 10px 30px rgba(50,40,25,.32);animation:ann-rise .18s ease-out;z-index:80;">{{ toast }}</div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    providers: null, order: [], cardVisible: {}, trayVisible: {},
+    configId: null, refreshing: {}, trayMetric: 'Remaining', toast: '', dragId: null
+  };
+
+  componentDidMount() {
+    this._tryInit();
+    if (!window.NexusData) { this._onData = () => this._tryInit(); window.addEventListener('nexus-data-ready', this._onData); }
+  }
+  componentWillUnmount() { if (this._onData) window.removeEventListener('nexus-data-ready', this._onData); clearTimeout(this._t); }
+
+  _tryInit() {
+    const D = window.NexusData;
+    if (!D || this.state.providers) return;
+    const ps = D.providers();
+    const cv = {}, tv = {};
+    ps.forEach(p => { cv[p.id] = !p.hiddenCard; tv[p.id] = p.status === 'available'; });
+    this.setState({ providers: ps, order: ps.map(p => p.id), cardVisible: cv, trayVisible: tv, trayMetric: D.settings().trayMetric });
+  }
+
+  navTabs(activeKey) {
+    const def = [['provider','Provider','Provider.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
+    return def.map(([key,label,href]) => { const a = key === activeKey; return { key, label, href, style:{ padding:'7px 15px', borderRadius:'999px', fontSize:'13px', fontWeight:a?700:600, cursor:'pointer', color:a?'#9d7a64':'#9a8f80', background:a?'#fcf9f4':'transparent', border:a?'1px solid #e7ddce':'1px solid transparent', boxShadow:a?'0 1px 2px rgba(50,40,25,.05)':'none', transition:'all .12s' } }; });
+  }
+
+  toast(msg) { this.setState({ toast: msg }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: '' }), 2200); }
+  dot(color, pulse) { const s = { display:'inline-block', width:'7px', height:'7px', borderRadius:'50%', background:color, flex:'0 0 auto' }; if (pulse) s.animation = 'ann-pulse 1s ease-in-out infinite'; return s; }
+  track(on) { return { width:'34px', height:'20px', borderRadius:'999px', background:on?'#9d7a64':'#ddccb6', position:'relative', flex:'0 0 auto', transition:'background .15s' }; }
+  knob(on) { return { position:'absolute', top:'2px', left:on?'16px':'2px', width:'16px', height:'16px', borderRadius:'50%', background:'#fff', transition:'left .15s', boxShadow:'0 1px 2px rgba(50,40,25,.3)' }; }
+
+  refreshProvider(id) {
+    this.setState(s => ({ refreshing: Object.assign({}, s.refreshing, { [id]: true }) }));
+    setTimeout(() => this.setState(s => { const r = Object.assign({}, s.refreshing); delete r[id]; return { refreshing: r }; }), 1200);
+  }
+  statusInfo(st) {
+    const C = window.NexusData.palette;
+    if (st === 'available') return { label:'Available', color:C.good };
+    if (st === 'expired')   return { label:'Token expired', color:C.warn };
+    if (st === 'failed')    return { label:'Request failed', color:C.crit };
+    if (st === 'loading')   return { label:'Checking…', color:C.accent };
+    return { label:'No credentials', color:C.muted };
+  }
+  reorder(fromId, toId) {
+    if (!fromId || fromId === toId) return;
+    this.setState(s => {
+      const order = s.order.slice();
+      const fi = order.indexOf(fromId), ti = order.indexOf(toId);
+      if (fi < 0 || ti < 0) return {};
+      order.splice(fi, 1); order.splice(ti, 0, fromId);
+      return { order };
+    });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const v = { tabs: this.navTabs('provider'), toast: s.toast, toastShown: !!s.toast, trayMetric: s.trayMetric, stop: (e) => { e.stopPropagation && e.stopPropagation(); }, visibleCount: 0, totalCount: 0, refreshAll: () => {} };
+    if (!s.providers) return v;
+    const D = window.NexusData;
+    const byId = {}; s.providers.forEach(p => byId[p.id] = p);
+    const ordered = s.order.map(id => byId[id]).filter(Boolean);
+
+    const visible = ordered.filter(p => s.cardVisible[p.id] !== false);
+    const hidden = ordered.filter(p => s.cardVisible[p.id] === false);
+    v.visibleCount = visible.length;
+    v.totalCount = s.providers.length;
+    v.hasHidden = hidden.length > 0;
+    v.hiddenList = hidden.map(p => ({ key: p.id, name: p.name, restoreClick: () => { this.setState(st => ({ cardVisible: Object.assign({}, st.cardVisible, { [p.id]: true }) })); this.toast(p.name + ' shown on Provider page'); } }));
+
+    v.providers = visible.map(p => {
+      const loading = !!s.refreshing[p.id];
+      const st = loading ? 'loading' : p.status;
+      const si = this.statusInfo(st);
+      const showQuota = st === 'available' && !!p.windows;
+      const hasMessage = !loading && (st === 'expired' || st === 'nocreds' || st === 'failed');
+      const msgMap = {
+        expired: { title:'Token expired', body:'The saved credential is no longer valid. Re-check to refresh the token.' },
+        nocreds: { title:'No credentials found', body:'Add a credential source for this provider to read quota.' },
+        failed: { title:'Request failed', body: p.error || 'Quota request failed.' }
+      };
+      const mm = msgMap[p.status] || { title:'', body:'' };
+      const actionLabel = st === 'expired' ? 'Re-check' : st === 'failed' ? 'Retry' : st === 'nocreds' ? 'Add cred' : loading ? 'Checking…' : 'Refresh';
+      const dragging = s.dragId === p.id;
+      return {
+        key: p.id, name: p.name, plan: p.plan, credential: p.credential, isAgent: !!p.isAgent,
+        cardStyle: { background:'#fcf9f4', border:'1px solid '+(dragging?'#9d7a64':'#efe6da'), borderRadius:'18px', padding:'18px', display:'flex', flexDirection:'column', boxShadow: dragging?'0 8px 28px rgba(50,40,25,.16)':'0 1px 14px rgba(50,40,25,.05)', opacity: dragging?0.6:1, transition:'box-shadow .12s,opacity .12s' },
+        statusLabel: si.label, statusColor: si.color, statusTint: si.color + '22', msgBorder: si.color + '44', dotStyle: this.dot(si.color, loading),
+        showQuota, primaryText: (p.primary != null ? p.primary + '%' : ''), primaryColor: D.quotaColor(p.primary || 0),
+        windows: (p.windows || []).map(w => ({ key:w.label, label:w.label, reset:w.reset, usedLabel:w.used+'%', barColor:D.quotaColor(w.used), fillStyle:{ width:w.used+'%', height:'100%', borderRadius:'999px', background:D.quotaColor(w.used) } })),
+        hasMessage, msgTitle: mm.title, msgBody: mm.body,
+        actionLabel, refreshClick: () => this.refreshProvider(p.id),
+        configClick: () => this.setState({ configId: p.id }),
+        onDragStart: (e) => { this.setState({ dragId: p.id }); if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', p.id); } catch (x) {} } },
+        onDragOver: (e) => { e.preventDefault && e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; },
+        onDrop: (e) => { e.preventDefault && e.preventDefault(); this.reorder(s.dragId, p.id); this.setState({ dragId: null }); },
+        onDragEnd: () => this.setState({ dragId: null })
+      };
+    });
+    v.refreshAll = () => { s.providers.forEach(p => this.refreshProvider(p.id)); this.toast('Refreshing all providers…'); };
+
+    const cp = s.providers.find(p => p.id === s.configId);
+    v.configOpen = !!cp;
+    if (cp) {
+      const needsParams = !!cp.needsParams;
+      v.cfg = {
+        name: cp.name, needsParams, noParams: !needsParams,
+        params: needsParams ? [
+          { key:'ws', label:'Workspace ID', value:'', placeholder:'ws_xxxxxxxxxxxx', hint:'Required to query the workspace quota endpoint' },
+          { key:'cookie', label:'Auth Cookie', value:'', placeholder:'session=…', hint:'Treated only as a quota-observation connection param — not a login' }
+        ] : [],
+        toggleCard: () => this.setState(st => ({ cardVisible: Object.assign({}, st.cardVisible, { [cp.id]: !(st.cardVisible[cp.id] !== false) }) })),
+        toggleTray: () => this.setState(st => ({ trayVisible: Object.assign({}, st.trayVisible, { [cp.id]: !st.trayVisible[cp.id] }) })),
+        cardTrack: this.track(s.cardVisible[cp.id] !== false), cardKnob: this.knob(s.cardVisible[cp.id] !== false),
+        trayTrack: this.track(!!s.trayVisible[cp.id]), trayKnob: this.knob(!!s.trayVisible[cp.id])
+      };
+    }
+    v.closeConfig = () => this.setState({ configId: null });
+    v.saveConfig = () => { const n = cp ? cp.name : ''; this.setState({ configId: null }); this.toast('Saved preferences for ' + n); };
+
+    return v;
+  }
+}
+</script>
+</body>
+</html>

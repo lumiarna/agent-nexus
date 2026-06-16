@@ -11,6 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="./nexus-data.js"></script>
   <style>
     *{box-sizing:border-box;}
     html,body{margin:0;height:100%;}
@@ -48,7 +49,7 @@
   </div>
 
   <div data-screen-label="Skill" style="flex:1;min-height:0;overflow:auto;">
-    <div style="padding:24px 28px 60px;max-width:1180px;margin:0 auto;">
+    <div style="padding:24px 32px 60px;max-width:1480px;margin:0 auto;">
       <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;">
         <div>
           <h1 style="margin:0;font-size:23px;font-weight:800;letter-spacing:-.02em;color:#2a2520;">Skill</h1>
@@ -79,7 +80,7 @@
       </sc-if>
 
       <div style="margin-top:16px;background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;overflow:hidden;box-shadow:0 1px 14px rgba(50,40,25,.05);">
-        <div style="display:grid;grid-template-columns:1fr 168px 116px 132px;gap:16px;padding:12px 20px;background:#f6efe5;border-bottom:1px solid #f0e8db;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b3a999;align-items:center;">
+        <div style="display:grid;grid-template-columns:1fr 196px 116px 132px;gap:16px;padding:12px 20px;background:#f6efe5;border-bottom:1px solid #f0e8db;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#b3a999;align-items:center;">
           <div>Skill</div>
           <div style="text-align:center;">Distribution</div>
           <div style="text-align:center;">Disable invoke</div>
@@ -87,7 +88,7 @@
         </div>
         <sc-if value="{{ hasRows }}" hint-placeholder-val="{{ true }}">
           <sc-for list="{{ rows }}" as="row" hint-placeholder-count="4">
-            <div style="display:grid;grid-template-columns:1fr 168px 116px 132px;gap:16px;padding:13px 20px;border-bottom:1px solid #f3eee5;align-items:center;">
+            <div style="display:grid;grid-template-columns:1fr 196px 116px 132px;gap:16px;padding:13px 20px;border-bottom:1px solid #f3eee5;align-items:center;">
               <div style="min-width:0;">
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span style="font-size:14px;font-weight:700;color:#2a2520;">{{ row.name }}</span>
@@ -96,7 +97,7 @@
                 <div style="margin-top:2px;font-size:12px;color:#a99a89;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ row.desc }}</div>
               </div>
               <div style="display:flex;justify-content:center;gap:5px;">
-                <sc-for list="{{ row.icons }}" as="ic" hint-placeholder-count="4">
+                <sc-for list="{{ row.icons }}" as="ic" hint-placeholder-count="5">
                   <span onClick="{{ ic.onClick }}" title="{{ ic.title }}" style="{{ ic.style }}">{{ ic.abbr }}</span>
                 </sc-for>
               </div>
@@ -105,8 +106,8 @@
                 <span style="font-size:10px;color:#b3a999;">{{ row.dmiLabel }}</span>
               </div>
               <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;">
-                <span onClick="{{ row.openClick }}" style="font-size:11.5px;color:#9d7a64;cursor:pointer;font-weight:600;" style-hover="text-decoration:underline;">Open source</span>
-                <span onClick="{{ row.revealClick }}" style="font-size:11.5px;color:#a99a89;cursor:pointer;font-weight:600;" style-hover="text-decoration:underline;">Reveal path</span>
+                <span onClick="{{ row.openClick }}" style="font-size:11.5px;color:#9d7a64;cursor:pointer;font-weight:600;white-space:nowrap;" style-hover="text-decoration:underline;">Open source</span>
+                <span onClick="{{ row.revealClick }}" style="font-size:11.5px;color:#a99a89;cursor:pointer;font-weight:600;white-space:nowrap;" style-hover="text-decoration:underline;">Reveal path</span>
               </div>
             </div>
           </sc-for>
@@ -118,6 +119,7 @@
           </div>
         </sc-if>
       </div>
+      <p style="margin-top:14px;font-size:11.5px;color:#b3a999;">Distribution targets show as Agent icons — <b style="color:#9a8f80;">Agents</b> (the shared <span style="font-family:ui-monospace,Menlo,monospace;">~/.agents</span> dir) sits leftmost, then Claude Code / CodeX / Copilot / OpenCode. Each row has exactly one source.</p>
     </div>
   </div>
 
@@ -129,84 +131,75 @@
 </x-dc>
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
-  agents = ['Claude Code','CodeX','OpenCode','Copilot'];
-  agentColors = { 'Claude Code':'#c2410c', 'CodeX':'#4f7a6a', 'OpenCode':'#7a5c9e', 'Copilot':'#5a7894' };
-  agentAbbr = { 'Claude Code':'CC', 'CodeX':'CX', 'OpenCode':'OC', 'Copilot':'CP' };
-
-  projectsData = [
-    { id:'oll-context', name:'oll-context' }, { id:'tap', name:'tap' }, { id:'tap-kit', name:'tap-kit' },
-    { id:'awesome-vibe-coding', name:'awesome-vibe-coding' }, { id:'agent-nexus', name:'agent-nexus' }
-  ];
-
-  state = {
-    scope:'global', projectId:'oll-context', search:'', toast:'',
-    skills:[
-      { id:'sk1', name:'tap-builder', scope:'global', desc:'Scaffold TAP modules from a spec file', path:'~/.claude/skills/tap-builder', disabled:false, cells:{'Claude Code':'source','CodeX':'target','OpenCode':'none','Copilot':'target'} },
-      { id:'sk2', name:'commit-helper', scope:'global', desc:'Generate conventional commit messages', path:'~/.claude/skills/commit-helper', disabled:false, cells:{'Claude Code':'source','CodeX':'target','OpenCode':'target','Copilot':'target'} },
-      { id:'sk3', name:'issue-triage', scope:'global', desc:'Apply canonical triage labels to issues', path:'~/.config/opencode/skills/issue-triage', disabled:true, cells:{'Claude Code':'none','CodeX':'none','OpenCode':'source','Copilot':'none'} },
-      { id:'sk4', name:'pdf-extractor', scope:'global', desc:'Extract structured data from PDFs', path:'~/.codex/skills/pdf-extractor', disabled:false, cells:{'Claude Code':'none','CodeX':'source','OpenCode':'target','Copilot':'none'} },
-      { id:'sk5', name:'domain-doctor', scope:'global', desc:'Maintain CONTEXT.md domain docs', path:'~/.claude/skills/domain-doctor', disabled:false, cells:{'Claude Code':'source','CodeX':'none','OpenCode':'none','Copilot':'target'} },
-      { id:'sk6', name:'tap-builder', scope:'project', projectId:'oll-context', desc:'Project-scoped TAP scaffolder', path:'.github/skills/tap-builder', disabled:false, cells:{'Claude Code':'source','CodeX':'target','OpenCode':'none','Copilot':'target'} },
-      { id:'sk7', name:'test-runner', scope:'project', projectId:'oll-context', desc:'Run and summarize the test suite', path:'.codex/skills/test-runner', disabled:false, cells:{'Claude Code':'none','CodeX':'source','OpenCode':'none','Copilot':'none'} },
-      { id:'sk8', name:'release-notes', scope:'project', projectId:'tap', desc:'Draft release notes from merged PRs', path:'.claude/skills/release-notes', disabled:false, cells:{'Claude Code':'source','CodeX':'none','OpenCode':'none','Copilot':'target'} }
-    ]
-  };
-
+  state = { ready: false, skills: null, scope: 'global', projectId: 'oll-context', search: '', toast: '' };
   accent = '#9d7a64';
-  toast(m){ this.setState({toast:m}); clearTimeout(this._t); this._t=setTimeout(()=>this.setState({toast:''}),2200); }
-  srcAgentOf(a){ for(const g of this.agents) if(a.cells[g]==='source') return g; return this.agents[0]; }
 
-  agentIcon(state, agent, clickable){
-    const col = this.agentColors[agent];
-    const base = { display:'inline-flex', alignItems:'center', justifyContent:'center', width:'26px', height:'26px', borderRadius:'8px', fontSize:'9px', fontWeight:800, letterSpacing:'.02em', flex:'0 0 auto', transition:'all .12s', userSelect:'none' };
-    if(state==='source') return Object.assign({},base,{ background:col, color:'#fff', cursor:'default', boxShadow:'0 0 0 2px '+col+'33' });
-    if(state==='target') return Object.assign({},base,{ background:col+'22', color:col, border:'1px solid '+col+'55', cursor:'pointer' });
-    return Object.assign({},base,{ background:'transparent', color:'#cabfae', border:'1px dashed #ddccb6', cursor:'pointer' });
+  componentDidMount() {
+    this._tryInit();
+    if (!window.NexusData) { this._onData = () => this._tryInit(); window.addEventListener('nexus-data-ready', this._onData); }
+  }
+  componentWillUnmount() { if (this._onData) window.removeEventListener('nexus-data-ready', this._onData); clearTimeout(this._t); }
+  _tryInit() { const D = window.NexusData; if (!D || this.state.ready) return; this.setState({ ready: true, skills: D.skills() }); }
+
+  navTabs(activeKey) {
+    const def = [['provider','Provider','Provider.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
+    return def.map(([key,label,href]) => { const a = key === activeKey; return { key, label, href, style:{ padding:'7px 15px', borderRadius:'999px', fontSize:'13px', fontWeight:a?700:600, cursor:'pointer', color:a?'#9d7a64':'#9a8f80', background:a?'#fcf9f4':'transparent', border:a?'1px solid #e7ddce':'1px solid transparent', boxShadow:a?'0 1px 2px rgba(50,40,25,.05)':'none', transition:'all .12s' } }; });
   }
 
-  toggleCell(id, agent){
-    this.setState(s=>({ skills:s.skills.map(a=>{
-      if(a.id!==id) return a;
-      const cur=a.cells[agent];
-      if(cur==='source') return a;
-      const next=cur==='target'?'none':'target';
-      return Object.assign({},a,{cells:Object.assign({},a.cells,{[agent]:next})});
+  toast(m) { this.setState({ toast: m }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: '' }), 2200); }
+  srcAgentOf(cells, agents) { for (const a of agents) if (cells[a] === 'source') return a; return agents[0]; }
+  agentIcon(state, agent) {
+    const D = window.NexusData; const col = D.agentColor(agent);
+    const base = { display:'inline-flex', alignItems:'center', justifyContent:'center', width:'26px', height:'26px', borderRadius:'8px', fontSize:'9px', fontWeight:800, letterSpacing:'.02em', flex:'0 0 auto', transition:'all .12s', userSelect:'none' };
+    if (state === 'source') return Object.assign({}, base, { background:col, color:'#fff', cursor:'default', boxShadow:'0 0 0 2px '+col+'33' });
+    if (state === 'target') return Object.assign({}, base, { background:col+'22', color:col, border:'1px solid '+col+'55', cursor:'pointer' });
+    return Object.assign({}, base, { background:'transparent', color:'#cabfae', border:'1px dashed #ddccb6', cursor:'pointer' });
+  }
+  toggleCell(id, agent) {
+    this.setState(s => ({ skills: s.skills.map(a => {
+      if (a.id !== id) return a;
+      const cur = a.cells[agent]; if (cur === 'source') return a;
+      const next = cur === 'target' ? 'none' : 'target';
+      return Object.assign({}, a, { cells: Object.assign({}, a.cells, { [agent]: next }) });
     }) }));
   }
-  toggleDmi(id){ this.setState(s=>({ skills:s.skills.map(a=>a.id===id?Object.assign({},a,{disabled:!a.disabled}):a) })); }
+  toggleDmi(id) { this.setState(s => ({ skills: s.skills.map(a => a.id === id ? Object.assign({}, a, { disabled: !a.disabled }) : a) })); }
 
-  renderVals(){
-    const s=this.state;
-    const navDef=[['provider','Provider','Agent%20Nexus.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
-    const tabs=navDef.map(([key,label,href])=>{const active=key==='skill';return {key,label,href,style:{padding:'7px 15px',borderRadius:'999px',fontSize:'13px',fontWeight:active?700:600,cursor:'pointer',color:active?'#9d7a64':'#9a8f80',background:active?'#fcf9f4':'transparent',border:active?'1px solid #e7ddce':'1px solid transparent',boxShadow:active?'0 1px 2px rgba(50,40,25,.05)':'none',transition:'all .12s'}};});
-    const v={tabs,toast:s.toast,toastShown:!!s.toast,search:s.search};
+  renderVals() {
+    const s = this.state;
+    const seg0 = (on) => ({ padding:'7px 18px', borderRadius:'999px', fontSize:'13px', fontWeight:on?700:600, cursor:'pointer', color:on?'#9d7a64':'#a99a89', background:on?'#fcf9f4':'transparent', boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none', transition:'all .12s' });
+    const v = { tabs: this.navTabs('skill'), toast: s.toast, toastShown: !!s.toast, search: s.search, setSearch: (e) => this.setState({ search: e.target.value }), scopeGlobalStyle: seg0(s.scope !== 'project'), scopeProjectStyle: seg0(s.scope === 'project'), scopeGlobalClick: () => this.setState({ scope: 'global' }), scopeProjectClick: () => this.setState({ scope: 'project' }), isProjectScope: s.scope === 'project', projectChips: [], hasRows: false, isEmpty: false };
+    if (!s.ready) return v;
+    const D = window.NexusData;
+    const agents = D.AGENT_ORDER;
+    const projects = D.projects().filter(p => p.status === 'active');
 
-    const isProj=s.scope==='project';
-    v.isProjectScope=isProj;
-    const segB=(on)=>({padding:'7px 18px',borderRadius:'999px',fontSize:'13px',fontWeight:on?700:600,cursor:'pointer',color:on?'#9d7a64':'#a99a89',background:on?'#fcf9f4':'transparent',boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none',transition:'all .12s'});
-    v.scopeGlobalStyle=segB(!isProj); v.scopeProjectStyle=segB(isProj);
-    v.scopeGlobalClick=()=>this.setState({scope:'global'}); v.scopeProjectClick=()=>this.setState({scope:'project'});
-    v.setSearch=(e)=>this.setState({search:e.target.value});
-    v.projectChips=this.projectsData.map(p=>({key:p.id,name:p.name,onClick:()=>this.setState({projectId:p.id}),style:{padding:'5px 12px',borderRadius:'999px',fontSize:'12px',fontWeight:s.projectId===p.id?700:600,cursor:'pointer',color:s.projectId===p.id?'#fff':'#7a6f60',background:s.projectId===p.id?this.accent:'#fcf9f4',border:'1px solid '+(s.projectId===p.id?this.accent:'#e7ddce')}}));
+    const isProj = s.scope === 'project';
+    v.isProjectScope = isProj;
+    const segB = (on) => ({ padding:'7px 18px', borderRadius:'999px', fontSize:'13px', fontWeight:on?700:600, cursor:'pointer', color:on?'#9d7a64':'#a99a89', background:on?'#fcf9f4':'transparent', boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none', transition:'all .12s' });
+    v.scopeGlobalStyle = segB(!isProj); v.scopeProjectStyle = segB(isProj);
+    v.scopeGlobalClick = () => this.setState({ scope: 'global' }); v.scopeProjectClick = () => this.setState({ scope: 'project' });
+    v.setSearch = (e) => this.setState({ search: e.target.value });
+    v.projectChips = projects.map(p => ({ key: p.id, name: p.name, onClick: () => this.setState({ projectId: p.id }), style: { padding:'5px 12px', borderRadius:'999px', fontSize:'12px', fontWeight:s.projectId === p.id ? 700 : 600, cursor:'pointer', color:s.projectId === p.id ? '#fff' : '#7a6f60', background:s.projectId === p.id ? this.accent : '#fcf9f4', border:'1px solid '+(s.projectId === p.id ? this.accent : '#e7ddce') } }));
 
-    const q=s.search.trim().toLowerCase();
-    let set=s.skills.filter(k=>isProj?(k.scope==='project'&&k.projectId===s.projectId):k.scope==='global');
-    if(q) set=set.filter(k=>k.name.toLowerCase().includes(q)||k.desc.toLowerCase().includes(q));
-    v.hasRows=set.length>0; v.isEmpty=set.length===0;
-    if(q&&set.length===0){ v.emptyTitle='No matching skills'; v.emptyBody='No skill matches “'+s.search+'” in this scope.'; }
-    else if(isProj){ const pn=(this.projectsData.find(p=>p.id===s.projectId)||{}).name; v.emptyTitle='No project skills'; v.emptyBody='No project-scoped skills recorded for '+pn+'.'; }
-    else { v.emptyTitle='No global skills'; v.emptyBody='No global skills discovered across agents yet.'; }
+    const q = s.search.trim().toLowerCase();
+    let set = s.skills.filter(k => isProj ? (k.scope === 'project' && k.projectId === s.projectId) : k.scope === 'global');
+    if (q) set = set.filter(k => k.name.toLowerCase().includes(q) || k.desc.toLowerCase().includes(q));
+    v.hasRows = set.length > 0; v.isEmpty = set.length === 0;
+    if (q && set.length === 0) { v.emptyTitle = 'No matching skills'; v.emptyBody = 'No skill matches “' + s.search + '” in this scope.'; }
+    else if (isProj) { const pn = (projects.find(p => p.id === s.projectId) || {}).name; v.emptyTitle = 'No project skills'; v.emptyBody = 'No project-scoped skills recorded for ' + pn + '.'; }
+    else { v.emptyTitle = 'No global skills'; v.emptyBody = 'No global skills discovered across agents yet.'; }
 
-    v.rows=set.map(k=>{
-      const src=this.srcAgentOf(k);
+    v.rows = set.map(k => {
+      const src = this.srcAgentOf(k.cells, agents);
       return {
-        key:k.id, name:k.name, desc:k.desc,
-        srcAbbr:this.agentAbbr[src], srcBadge:{display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'1px 6px',borderRadius:'5px',fontSize:'9px',fontWeight:800,letterSpacing:'.04em',background:this.agentColors[src]+'1c',color:this.agentColors[src]},
-        icons:this.agents.map(a=>({key:a,abbr:this.agentAbbr[a],title:a+(k.cells[a]==='source'?' · source (fixed)':k.cells[a]==='target'?' · target — click to remove':' · none — click to add target'),style:this.agentIcon(k.cells[a],a,k.cells[a]!=='source'),onClick:()=>this.toggleCell(k.id,a)})),
-        dmiClick:()=>this.toggleDmi(k.id), dmiLabel:k.disabled?'On':'Off',
-        dmiTrack:{width:'34px',height:'20px',borderRadius:'999px',background:k.disabled?'#c2913f':'#ddccb6',position:'relative',cursor:'pointer',transition:'background .15s'},
-        dmiKnob:{position:'absolute',top:'2px',left:k.disabled?'16px':'2px',width:'16px',height:'16px',borderRadius:'50%',background:'#fff',transition:'left .15s',boxShadow:'0 1px 2px rgba(50,40,25,.3)'},
-        openClick:()=>this.toast('Open source · '+k.path), revealClick:()=>this.toast('Reveal in file manager · '+k.path)
+        key: k.id, name: k.name, desc: k.desc,
+        srcAbbr: D.agentAbbr(src), srcBadge: { display:'inline-flex', alignItems:'center', justifyContent:'center', padding:'1px 6px', borderRadius:'5px', fontSize:'9px', fontWeight:800, letterSpacing:'.04em', background:D.agentColor(src)+'1c', color:D.agentColor(src) },
+        icons: agents.map(a => ({ key: a, abbr: D.agentAbbr(a), title: a + (k.cells[a] === 'source' ? ' · source (fixed)' : k.cells[a] === 'target' ? ' · target — click to remove' : ' · none — click to add target'), style: this.agentIcon(k.cells[a], a), onClick: () => this.toggleCell(k.id, a) })),
+        dmiClick: () => this.toggleDmi(k.id), dmiLabel: k.disabled ? 'On' : 'Off',
+        dmiTrack: { width:'34px', height:'20px', borderRadius:'999px', background:k.disabled ? '#c2913f' : '#ddccb6', position:'relative', cursor:'pointer', transition:'background .15s' },
+        dmiKnob: { position:'absolute', top:'2px', left:k.disabled ? '16px' : '2px', width:'16px', height:'16px', borderRadius:'50%', background:'#fff', transition:'left .15s', boxShadow:'0 1px 2px rgba(50,40,25,.3)' },
+        openClick: () => this.toast('Open source · ' + k.path), revealClick: () => this.toast('Reveal in file manager · ' + k.path)
       };
     });
 

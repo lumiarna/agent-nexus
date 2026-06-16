@@ -11,6 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="./nexus-data.js"></script>
   <style>
     *{box-sizing:border-box;}
     html,body{margin:0;height:100%;}
@@ -49,42 +50,49 @@
   </div>
 
   <div data-screen-label="Sync" style="flex:1;min-height:0;overflow:auto;">
-    <div style="padding:24px 28px 60px;max-width:1180px;margin:0 auto;">
+    <div style="padding:24px 32px 60px;max-width:1480px;margin:0 auto;">
       <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;">
         <div>
           <h1 style="margin:0;font-size:23px;font-weight:800;letter-spacing:-.02em;color:#2a2520;">Sync</h1>
-          <p style="margin:6px 0 0;color:#9a8f80;font-size:13px;">Task center · one-way tasks grouped into Task Groups · single source → multiple targets</p>
+          <p style="margin:6px 0 0;color:#9a8f80;font-size:13px;">Task workbench · groups organize tasks · each task carries its own direction, action &amp; schedule</p>
         </div>
         <div onClick="{{ openCreate }}" style="padding:9px 17px;background:#9d7a64;color:#fff;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">+ Create custom task</div>
       </div>
 
-      <!-- ===== Task Groups (user-created) ===== -->
       <div style="margin-top:22px;display:flex;align-items:center;gap:10px;">
         <h2 style="margin:0;font-size:15px;font-weight:800;color:#2a2520;white-space:nowrap;">Your Task Groups</h2>
-        <span style="font-size:11px;color:#b3a999;">Generic file distribution &amp; backup · created by you</span>
+        <span style="font-size:11px;color:#b3a999;">Drag groups, or tasks within a group, to reorder · serial execution top-to-bottom</span>
       </div>
 
       <div style="margin-top:14px;display:flex;flex-direction:column;gap:14px;">
         <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
-          <div style="background:#fcf9f4;border:1px solid #efe6da;border-radius:18px;overflow:hidden;box-shadow:0 1px 14px rgba(50,40,25,.05);">
-            <div style="display:flex;align-items:center;gap:12px;padding:15px 20px;border-bottom:1px solid #f3eee5;flex-wrap:wrap;">
+          <div draggable="true" onDragStart="{{ g.onDragStart }}" onDragOver="{{ g.onDragOver }}" onDrop="{{ g.onDrop }}" onDragEnd="{{ g.onDragEnd }}" style="{{ g.cardStyle }}">
+            <div style="display:flex;align-items:center;gap:11px;padding:15px 20px;border-bottom:1px solid #f3eee5;flex-wrap:wrap;">
+              <span title="Drag to reorder group" style="color:#cabfae;cursor:grab;font-size:13px;line-height:1;letter-spacing:-1px;">⠿</span>
               <div style="font-size:14.5px;font-weight:800;color:#2a2520;">{{ g.name }}</div>
-              <span style="font-size:10px;font-weight:700;color:{{ g.dirFg }};background:{{ g.dirBg }};border-radius:6px;padding:2px 9px;">{{ g.direction }}</span>
-              <span style="font-size:11px;color:#b3a999;">{{ g.action }} · {{ g.taskCountLabel }}</span>
+              <span style="font-size:11px;color:#b3a999;">{{ g.taskCountLabel }}</span>
               <div style="margin-left:auto;display:flex;gap:7px;">
                 <div onClick="{{ g.runAllClick }}" style="font-size:11.5px;font-weight:700;color:#fff;background:#9d7a64;border-radius:999px;padding:5px 13px;cursor:pointer;white-space:nowrap;" style-hover="background:#8c6b56;">Run group</div>
                 <div onClick="{{ g.addTaskClick }}" style="font-size:11.5px;font-weight:600;color:#7a6f60;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;padding:5px 12px;cursor:pointer;white-space:nowrap;" style-hover="background:#ece2d5;">Add task</div>
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1.4fr 1.6fr 110px 130px;gap:14px;padding:9px 20px;background:#f8f3ea;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#c3b9a8;">
-              <div>Source</div><div>Target</div><div>Last run</div><div style="text-align:right;">Action</div>
+            <div style="display:grid;grid-template-columns:24px 132px 1.3fr 1.4fr 132px 116px;gap:12px;padding:9px 20px;background:#f8f3ea;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#c3b9a8;align-items:center;">
+              <div></div><div>Type</div><div>Source</div><div>Target</div><div>Schedule</div><div style="text-align:right;">Status</div>
             </div>
             <sc-for list="{{ g.tasks }}" as="t" hint-placeholder-count="2">
-              <div style="display:grid;grid-template-columns:1.4fr 1.6fr 110px 130px;gap:14px;padding:12px 20px;border-top:1px solid #f3eee5;align-items:center;">
+              <div draggable="true" onDragStart="{{ t.onDragStart }}" onDragOver="{{ t.onDragOver }}" onDrop="{{ t.onDrop }}" onDragEnd="{{ t.onDragEnd }}" style="{{ t.rowStyle }}">
+                <span title="Drag to reorder task" style="color:#d4c9b6;cursor:grab;font-size:12px;line-height:1;letter-spacing:-1px;">⠿</span>
+                <div style="display:flex;flex-direction:column;gap:3px;min-width:0;">
+                  <span style="{{ t.dirBadge }}">{{ t.direction }}</span>
+                  <span style="font-size:10px;color:#b3a999;font-family:ui-monospace,Menlo,monospace;">{{ t.action }}</span>
+                </div>
                 <div style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#6a6055;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t.source }}</div>
-                <div style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#8a8073;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t.target }}</div>
-                <div style="font-size:11px;color:#b3a999;">{{ t.lastRun }}</div>
-                <div style="display:flex;gap:10px;justify-content:flex-end;align-items:center;">
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#8a8073;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t.targetLabel }}</div>
+                <div style="min-width:0;">
+                  <div onClick="{{ t.editSched }}" title="Edit schedule" style="{{ t.schedChip }}"><span style="font-size:10px;">{{ t.schedIcon }}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t.schedLabel }}</span></div>
+                  <div style="margin-top:3px;font-size:10px;color:#c3b9a8;">last {{ t.lastRun }}</div>
+                </div>
+                <div style="display:flex;gap:9px;justify-content:flex-end;align-items:center;">
                   <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:{{ t.statusFg }};"><span style="{{ t.statusDot }}"></span>{{ t.statusLabel }}</span>
                   <span onClick="{{ t.runClick }}" style="font-size:11px;color:#9d7a64;cursor:pointer;font-weight:700;" style-hover="text-decoration:underline;">Run</span>
                 </div>
@@ -100,7 +108,6 @@
         </sc-if>
       </div>
 
-      <!-- ===== System default sections (collapsed) ===== -->
       <div style="margin-top:32px;display:flex;align-items:center;gap:10px;">
         <h2 style="margin:0;font-size:13px;font-weight:700;color:#9a8f80;letter-spacing:.02em;">System-managed records</h2>
         <span style="font-size:11px;color:#c3b9a8;">Default behaviors · generated from Skill / Prompt / Session — collapsed by default</span>
@@ -139,68 +146,140 @@
   <!-- ===== Create custom task modal ===== -->
   <sc-if value="{{ createOpen }}" hint-placeholder-val="{{ false }}">
     <div onClick="{{ closeCreate }}" style="position:fixed;inset:0;background:rgba(42,33,28,.34);display:flex;align-items:center;justify-content:center;z-index:60;animation:ann-fade .14s ease-out;padding:24px;">
-      <div onClick="{{ stop }}" style="width:560px;max-width:100%;max-height:90vh;overflow:auto;background:#fcf9f4;border:1px solid #efe6da;border-radius:20px;box-shadow:0 24px 60px rgba(50,40,25,.28);">
+      <div onClick="{{ stop }}" style="width:640px;max-width:100%;max-height:90vh;overflow:auto;background:#fcf9f4;border:1px solid #efe6da;border-radius:20px;box-shadow:0 24px 60px rgba(50,40,25,.28);">
         <div style="padding:20px 22px;border-bottom:1px solid #f0e8db;">
           <div style="font-size:17px;font-weight:800;letter-spacing:-.01em;color:#2a2520;">Create custom task</div>
-          <div style="margin-top:4px;font-size:12px;color:#a99a89;">A Task Group holds one or more one-way tasks · single source → multiple targets</div>
+          <div style="margin-top:4px;font-size:12px;color:#a99a89;">A Task Group holds one or more tasks. Direction, action &amp; schedule are set per task.</div>
         </div>
         <div style="padding:20px 22px;display:flex;flex-direction:column;gap:20px;">
-          <!-- templates -->
           <div>
             <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9d7a64;margin-bottom:10px;">Start from a template</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               <sc-for list="{{ templateChips }}" as="t" hint-placeholder-count="4">
-                <div onClick="{{ t.onClick }}" title="{{ t.desc }}" style="{{ t.style }}">{{ t.name }}</div>
+                <div onClick="{{ t.onClick }}" title="{{ t.desc }}" style="{{ t.style }}">{{ t.name }}<span style="opacity:.7;font-weight:600;"> · {{ t.taskCount }}</span></div>
               </sc-for>
             </div>
           </div>
-          <!-- name -->
+
           <label style="display:block;">
             <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Task group name</div>
-            <input value="{{ form.name }}" onInput="{{ setName }}" placeholder="e.g. Warp Config" style="width:100%;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:13px;color:#3a302a;background:#fff;outline:none;" />
+            <input value="{{ form.name }}" onInput="{{ setName }}" placeholder="e.g. Machine Backup" style="width:100%;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:13px;color:#3a302a;background:#fff;outline:none;" />
           </label>
-          <!-- direction + action -->
-          <div style="display:flex;gap:16px;flex-wrap:wrap;">
-            <div>
-              <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Direction</div>
-              <div style="display:flex;background:#f0e8db;border-radius:999px;padding:3px;">
-                <div onClick="{{ setDistribution }}" style="{{ distStyle }}">Distribution</div>
-                <div onClick="{{ setBackup }}" style="{{ backupStyle }}">Backup</div>
-              </div>
-            </div>
-            <div>
-              <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Action</div>
-              <div style="display:flex;background:#f0e8db;border-radius:999px;padding:3px;">
-                <div onClick="{{ setSymlink }}" style="{{ symlinkStyle }}">symlink</div>
-                <div onClick="{{ setCopy }}" style="{{ copyStyle }}">copy</div>
-              </div>
-            </div>
-          </div>
-          <!-- source -->
-          <label style="display:block;">
-            <div style="font-size:12px;font-weight:600;color:#6a6055;margin-bottom:6px;">Source <span style="color:#b3a999;font-weight:500;">(single)</span></div>
-            <input value="{{ form.source }}" onInput="{{ setSource }}" placeholder="~/.config/warp/" style="width:100%;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
-          </label>
-          <!-- targets -->
+
           <div>
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-              <div style="font-size:12px;font-weight:600;color:#6a6055;">Targets <span style="color:#b3a999;font-weight:500;">(one or more)</span></div>
-              <div onClick="{{ addTarget }}" style="font-size:11.5px;font-weight:700;color:#9d7a64;cursor:pointer;" style-hover="text-decoration:underline;">+ Add target</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <div style="font-size:12px;font-weight:700;color:#6a6055;">Tasks <span style="color:#b3a999;font-weight:500;">· {{ form.taskCountLabel }}</span></div>
+              <div onClick="{{ addFormTask }}" style="font-size:11.5px;font-weight:700;color:#9d7a64;cursor:pointer;" style-hover="text-decoration:underline;">+ Add task</div>
             </div>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-              <sc-for list="{{ form.targets }}" as="t" hint-placeholder-count="2">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <input value="{{ t.value }}" onInput="{{ t.onInput }}" placeholder="webdav://nas/config/warp/" style="flex:1;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
-                  <div onClick="{{ t.remove }}" style="flex:0 0 auto;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e7ddce;border-radius:9px;color:#b3a999;cursor:pointer;font-size:15px;" style-hover="background:#f3ece3;color:#b55440;">−</div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <sc-for list="{{ form.tasks }}" as="t" hint-placeholder-count="1">
+                <div style="border:1px solid #efe6da;border-radius:14px;padding:14px;background:#f8f3ea;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px;">
+                    <span style="font-size:11px;font-weight:700;color:#9d7a64;">Task {{ t.num }}</span>
+                    <sc-if value="{{ t.removable }}" hint-placeholder-val="{{ false }}">
+                      <div onClick="{{ t.remove }}" style="font-size:11px;font-weight:600;color:#b55440;cursor:pointer;" style-hover="text-decoration:underline;">Remove</div>
+                    </sc-if>
+                  </div>
+                  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:11px;">
+                    <div>
+                      <div style="font-size:11px;font-weight:600;color:#8a7d6c;margin-bottom:5px;">Direction</div>
+                      <div style="display:flex;background:#ece2d5;border-radius:999px;padding:3px;">
+                        <sc-for list="{{ t.dirOptions }}" as="o" hint-placeholder-count="3">
+                          <div onClick="{{ o.onClick }}" style="{{ o.style }}">{{ o.label }}</div>
+                        </sc-for>
+                      </div>
+                    </div>
+                    <div>
+                      <div style="font-size:11px;font-weight:600;color:#8a7d6c;margin-bottom:5px;">Action</div>
+                      <div style="display:flex;background:#ece2d5;border-radius:999px;padding:3px;">
+                        <div onClick="{{ t.setSymlink }}" style="{{ t.symlinkStyle }}">symlink</div>
+                        <div onClick="{{ t.setCopy }}" style="{{ t.copyStyle }}">copy</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div style="margin-bottom:10px;">
+                    <div style="font-size:11px;font-weight:600;color:#8a7d6c;margin-bottom:5px;">Source <span style="color:#b3a999;font-weight:500;">(single)</span></div>
+                    <input value="{{ t.source }}" onInput="{{ t.setSource }}" placeholder="~/.config/warp/" style="width:100%;padding:8px 11px;border:1px solid #e7ddce;border-radius:9px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+                  </div>
+                  <div style="margin-bottom:10px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
+                      <div style="font-size:11px;font-weight:600;color:#8a7d6c;">Targets <span style="color:#b3a999;font-weight:500;">(one or more)</span></div>
+                      <div onClick="{{ t.addTarget }}" style="font-size:11px;font-weight:700;color:#9d7a64;cursor:pointer;" style-hover="text-decoration:underline;">+ Add</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:7px;">
+                      <sc-for list="{{ t.targets }}" as="tg" hint-placeholder-count="1">
+                        <div style="display:flex;align-items:center;gap:7px;">
+                          <input value="{{ tg.value }}" onInput="{{ tg.onInput }}" placeholder="webdav://nas/config/warp/" style="flex:1;padding:8px 11px;border:1px solid #e7ddce;border-radius:9px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+                          <div onClick="{{ tg.remove }}" style="flex:0 0 auto;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e7ddce;border-radius:8px;color:#b3a999;cursor:pointer;font-size:15px;background:#fff;" style-hover="background:#f3ece3;color:#b55440;">−</div>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;font-weight:600;color:#8a7d6c;margin-bottom:5px;">Schedule</div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                      <div style="display:flex;background:#ece2d5;border-radius:999px;padding:3px;">
+                        <div onClick="{{ t.setManual }}" style="{{ t.manualStyle }}">Manual</div>
+                        <div onClick="{{ t.setCron }}" style="{{ t.cronStyle }}">CRON</div>
+                      </div>
+                      <sc-if value="{{ t.isCron }}" hint-placeholder-val="{{ false }}">
+                        <input value="{{ t.cronExpr }}" onInput="{{ t.setCronExpr }}" placeholder="0 5 * * *" style="flex:1;min-width:120px;padding:8px 11px;border:1px solid #e7ddce;border-radius:9px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+                      </sc-if>
+                    </div>
+                    <sc-if value="{{ t.isCron }}" hint-placeholder-val="{{ false }}">
+                      <div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap;">
+                        <sc-for list="{{ t.cronPresets }}" as="cp" hint-placeholder-count="3">
+                          <div onClick="{{ cp.onClick }}" style="{{ cp.style }}">{{ cp.label }}</div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                  </div>
                 </div>
               </sc-for>
             </div>
           </div>
-          <div style="padding:11px 13px;background:#f3ece3;border:1px solid #efe6da;border-radius:11px;font-size:11.5px;color:#8a7a68;line-height:1.5;">One-way only. To bring files back from WebDAV, create a separate <b style="color:#6a6055;">Pull</b> task — Backup is never reversed in place.</div>
+
+          <div style="padding:11px 13px;background:#f3ece3;border:1px solid #efe6da;border-radius:11px;font-size:11.5px;color:#8a7a68;line-height:1.5;">Every task is one-way · single source → one or more targets. To bring files back from the Cloud, add a <b style="color:#6a6055;">Restore/Pull</b> task — Backup is never reversed in place.</div>
         </div>
         <div style="padding:16px 22px;border-top:1px solid #f0e8db;display:flex;justify-content:flex-end;gap:9px;">
           <div onClick="{{ closeCreate }}" style="padding:9px 16px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-size:12.5px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#ece2d5;">Cancel</div>
           <div onClick="{{ submitCreate }}" style="padding:9px 18px;background:#9d7a64;color:#fff;border-radius:999px;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">Create task group</div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== Edit schedule modal (existing task) ===== -->
+  <sc-if value="{{ schedOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeSched }}" style="position:fixed;inset:0;background:rgba(42,33,28,.34);display:flex;align-items:center;justify-content:center;z-index:70;animation:ann-fade .14s ease-out;padding:24px;">
+      <div onClick="{{ stop }}" style="width:440px;max-width:100%;background:#fcf9f4;border:1px solid #efe6da;border-radius:20px;box-shadow:0 24px 60px rgba(50,40,25,.28);">
+        <div style="padding:20px 22px;border-bottom:1px solid #f0e8db;">
+          <div style="font-size:16px;font-weight:800;letter-spacing:-.01em;color:#2a2520;">Schedule · {{ sched.taskName }}</div>
+          <div style="margin-top:4px;font-size:12px;color:#a99a89;">Per-task trigger. CRON runs are executed by Agent Nexus while the app is running.</div>
+        </div>
+        <div style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+          <div style="display:flex;background:#f0e8db;border-radius:999px;padding:3px;width:fit-content;">
+            <div onClick="{{ sched.setManual }}" style="{{ sched.manualStyle }}">Manual</div>
+            <div onClick="{{ sched.setCron }}" style="{{ sched.cronStyle }}">CRON</div>
+          </div>
+          <sc-if value="{{ sched.isCron }}" hint-placeholder-val="{{ true }}">
+            <div>
+              <input value="{{ sched.cronExpr }}" onInput="{{ sched.setCronExpr }}" placeholder="0 5 * * *" style="width:100%;padding:9px 12px;border:1px solid #e7ddce;border-radius:10px;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;color:#3a302a;background:#fff;outline:none;" />
+              <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+                <sc-for list="{{ sched.presets }}" as="cp" hint-placeholder-count="3">
+                  <div onClick="{{ cp.onClick }}" style="{{ cp.style }}">{{ cp.label }}</div>
+                </sc-for>
+              </div>
+              <div style="margin-top:10px;font-size:11px;color:#b3a999;">{{ sched.human }}</div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ sched.isManual }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:12px 14px;background:#f3ece3;border:1px solid #efe6da;border-radius:11px;font-size:12px;color:#8a7a68;line-height:1.5;">Manual — this task only runs when you trigger it from the group or the task row.</div>
+          </sc-if>
+        </div>
+        <div style="padding:16px 22px;border-top:1px solid #f0e8db;display:flex;justify-content:flex-end;gap:9px;">
+          <div onClick="{{ closeSched }}" style="padding:9px 16px;background:#f3ece3;border:1px solid #e7ddce;border-radius:999px;font-size:12.5px;font-weight:600;color:#7a6f60;cursor:pointer;" style-hover="background:#ece2d5;">Cancel</div>
+          <div onClick="{{ sched.save }}" style="padding:9px 18px;background:#9d7a64;color:#fff;border-radius:999px;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(157,122,100,.32);" style-hover="background:#8c6b56;">Save schedule</div>
         </div>
       </div>
     </div>
@@ -214,105 +293,179 @@
 </x-dc>
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
-  C = { good:'#8a9a5b', warn:'#c2913f', crit:'#b55440', accent:'#9d7a64' };
-
-  templates = [
-    { id:'blank', name:'Blank', desc:'Start from scratch', dir:'Backup', action:'copy', source:'', targets:[''] },
-    { id:'ssh', name:'SSH Backup', desc:'Copy ~/.ssh to a WebDAV destination (one-way)', dir:'Backup', action:'copy', source:'~/.ssh/', targets:['webdav://nas/backups/ssh/'] },
-    { id:'zed', name:'Zed Config', desc:'Distribute Zed settings across machines', dir:'Backup', action:'copy', source:'%APPDATA%/Zed/', targets:['webdav://nas/config/zed/'] },
-    { id:'warp', name:'Warp Config', desc:'Distribute Warp settings + keybindings', dir:'Backup', action:'copy', source:'~/.config/warp/', targets:['webdav://nas/config/warp/'] }
+  DIRECTIONS = ['Distribution', 'Backup', 'Restore/Pull'];
+  CRON_PRESETS = [
+    { label: 'Hourly', expr: '0 * * * *' },
+    { label: 'Daily 05:00', expr: '0 5 * * *' },
+    { label: 'Weekly Sun 03:00', expr: '0 3 * * 0' }
   ];
 
   state = {
-    createOpen:false,
-    openSec:{ skill:false, prompt:false, backup:false },
-    tpl:'blank',
-    form:{ name:'', dir:'Backup', action:'copy', source:'', targets:[''] },
-    groups:[
-      { id:'g1', name:'Warp Config', direction:'Backup', action:'copy', tasks:[
-        { id:'t1', source:'~/.config/warp/settings.toml', target:'webdav://nas/config/warp/', lastRun:'06-15 05:00', status:'ok' },
-        { id:'t2', source:'~/.config/warp/keybindings.yaml', target:'webdav://nas/config/warp/', lastRun:'06-15 05:00', status:'ok' }
-      ] },
-      { id:'g2', name:'TAP symlinks', direction:'Distribution', action:'symlink', tasks:[
-        { id:'t3', source:'D:/Workspace/tap/src', target:'oll-context/backend/', lastRun:'06-14 18:02', status:'ok' },
-        { id:'t4', source:'D:/Workspace/tap/src', target:'oll-context/frontend/', lastRun:'06-14 18:02', status:'ok' }
-      ] },
-      { id:'g3', name:'SSH Backup', direction:'Backup', action:'copy', tasks:[
-        { id:'t5', source:'~/.ssh/', target:'webdav://nas/backups/ssh/', lastRun:'—', status:'never' }
-      ] }
-    ]
+    ready: false, groups: null, templates: null, system: null,
+    openSec: { skill: false, prompt: false, backup: false },
+    createOpen: false, tpl: 'blank', form: null,
+    sched: null, dragGroupId: null, dragTask: null, toast: ''
   };
 
-  dot(c){ return {display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:c,flex:'0 0 auto'}; }
-  toast(m){ this.setState({toast:m}); clearTimeout(this._t); this._t=setTimeout(()=>this.setState({toast:''}),2200); }
-  dirColors(d){ return d==='Backup'?{fg:'#9a6f0a',bg:'#f7eccb'}:{fg:'#4a6a8a',bg:'#e2ebf2'}; }
-  statusOf(st){ return st==='ok'?{label:'OK',fg:'#5f7a3e',dot:this.C.good}:st==='pending'?{label:'Pending',fg:'#9a6f0a',dot:this.C.warn}:{label:'Never',fg:'#a99a89',dot:'#d9c9b3'}; }
+  componentDidMount() {
+    this._tryInit();
+    if (!window.NexusData) { this._onData = () => this._tryInit(); window.addEventListener('nexus-data-ready', this._onData); }
+  }
+  componentWillUnmount() { if (this._onData) window.removeEventListener('nexus-data-ready', this._onData); clearTimeout(this._t); }
+  _tryInit() {
+    const D = window.NexusData;
+    if (!D || this.state.ready) return;
+    this.setState({ ready: true, groups: D.taskGroups(), templates: D.templates(), system: D.systemSync() });
+  }
 
-  renderVals(){
-    const s=this.state;
-    const navDef=[['provider','Provider','Agent%20Nexus.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
-    const tabs=navDef.map(([key,label,href])=>{const active=key==='sync';return {key,label,href,style:{padding:'7px 15px',borderRadius:'999px',fontSize:'13px',fontWeight:active?700:600,cursor:'pointer',color:active?'#9d7a64':'#9a8f80',background:active?'#fcf9f4':'transparent',border:active?'1px solid #e7ddce':'1px solid transparent',boxShadow:active?'0 1px 2px rgba(50,40,25,.05)':'none',transition:'all .12s'}};});
-    const v={tabs,toast:s.toast,toastShown:!!s.toast,stop:(e)=>{e.stopPropagation&&e.stopPropagation();}};
+  navTabs(activeKey) {
+    const def = [['provider','Provider','Provider.dc.html'],['project','Project','Project.dc.html'],['skill','Skill','Skill.dc.html'],['prompt','Prompt','Prompt.dc.html'],['session','Session','Session.dc.html'],['sync','Sync','Sync.dc.html']];
+    return def.map(([key,label,href]) => { const a = key === activeKey; return { key, label, href, style:{ padding:'7px 15px', borderRadius:'999px', fontSize:'13px', fontWeight:a?700:600, cursor:'pointer', color:a?'#9d7a64':'#9a8f80', background:a?'#fcf9f4':'transparent', border:a?'1px solid #e7ddce':'1px solid transparent', boxShadow:a?'0 1px 2px rgba(50,40,25,.05)':'none', transition:'all .12s' } }; });
+  }
 
-    // groups
-    v.noGroups = s.groups.length===0;
-    v.groups = s.groups.map(g=>{
-      const dc=this.dirColors(g.direction);
-      return { key:g.id, name:g.name, direction:g.direction, dirFg:dc.fg, dirBg:dc.bg, action:g.action,
-        taskCountLabel:g.tasks.length+(g.tasks.length===1?' task':' tasks'),
-        runAllClick:()=>this.toast('Run group · '+g.name+' ('+g.tasks.length+' tasks)'),
-        addTaskClick:()=>this.toast('Add task to '+g.name),
-        tasks:g.tasks.map(t=>{ const st=this.statusOf(t.status); return {key:t.id,source:t.source,target:t.target,lastRun:t.lastRun,statusLabel:st.label,statusFg:st.fg,statusDot:this.dot(st.dot),runClick:()=>this.toast('Run · '+t.source+' → '+t.target)}; }) };
+  newTask() { return { id: 'nt' + Math.random().toString(36).slice(2, 8), direction: 'Backup', action: 'copy', source: '', targets: [''], schedule: 'manual' }; }
+  dot(c) { return { display:'inline-block', width:'8px', height:'8px', borderRadius:'50%', background:c, flex:'0 0 auto' }; }
+  toast(m) { this.setState({ toast: m }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: '' }), 2200); }
+  dirColors(d) { return d === 'Backup' ? { fg:'#9a6f0a', bg:'#f7eccb' } : d === 'Restore/Pull' ? { fg:'#3f6f55', bg:'#dcebe0' } : { fg:'#4a6a8a', bg:'#e2ebf2' }; }
+  statusOf(st) { const C = window.NexusData.palette; return st === 'ok' ? { label:'OK', fg:'#5f7a3e', dot:C.good } : st === 'pending' ? { label:'Pending', fg:'#9a6f0a', dot:C.warn } : { label:'Never', fg:'#a99a89', dot:'#d9c9b3' }; }
+  cronHuman(expr) {
+    const m = { '0 * * * *':'Every hour, on the hour.', '0 5 * * *':'Every day at 05:00.', '0 3 * * 0':'Every Sunday at 03:00.', '0 4 * * *':'Every day at 04:00.', '0 3 * * 0,3':'Sundays & Wednesdays at 03:00.' };
+    return m[expr] || 'Custom CRON expression.';
+  }
+  badge(d) { const c = this.dirColors(d); return { display:'inline-flex', alignItems:'center', justifyContent:'center', width:'fit-content', fontSize:'9.5px', fontWeight:700, letterSpacing:'.03em', textTransform:'uppercase', borderRadius:'5px', padding:'2px 7px', color:c.fg, background:c.bg }; }
+
+  // mutations on groups
+  updateTask(groupId, taskId, patch) {
+    this.setState(s => ({ groups: s.groups.map(g => g.id !== groupId ? g : Object.assign({}, g, { tasks: g.tasks.map(t => t.id !== taskId ? t : Object.assign({}, t, patch)) })) }));
+  }
+  reorderGroups(fromId, toId) {
+    if (!fromId || fromId === toId) return;
+    this.setState(s => { const a = s.groups.slice(); const fi = a.findIndex(g => g.id === fromId), ti = a.findIndex(g => g.id === toId); if (fi < 0 || ti < 0) return {}; const [m] = a.splice(fi, 1); a.splice(ti, 0, m); return { groups: a }; });
+  }
+  reorderTask(groupId, fromId, toId) {
+    if (!fromId || fromId === toId) return;
+    this.setState(s => ({ groups: s.groups.map(g => { if (g.id !== groupId) return g; const a = g.tasks.slice(); const fi = a.findIndex(t => t.id === fromId), ti = a.findIndex(t => t.id === toId); if (fi < 0 || ti < 0) return g; const [m] = a.splice(fi, 1); a.splice(ti, 0, m); return Object.assign({}, g, { tasks: a }); }) }));
+  }
+
+  renderVals() {
+    const s = this.state;
+    const v = { tabs: this.navTabs('sync'), toast: s.toast, toastShown: !!s.toast, stop: (e) => { e.stopPropagation && e.stopPropagation(); } };
+    if (!s.ready) return v;
+    const self = this;
+
+    // ---- groups ----
+    v.noGroups = s.groups.length === 0;
+    v.groups = s.groups.map(g => {
+      const dragging = s.dragGroupId === g.id;
+      return {
+        key: g.id, name: g.name, taskCountLabel: g.tasks.length + (g.tasks.length === 1 ? ' task' : ' tasks'),
+        cardStyle: { background:'#fcf9f4', border:'1px solid '+(dragging?'#9d7a64':'#efe6da'), borderRadius:'18px', overflow:'hidden', boxShadow:dragging?'0 8px 28px rgba(50,40,25,.16)':'0 1px 14px rgba(50,40,25,.05)', opacity:dragging?0.6:1, transition:'box-shadow .12s,opacity .12s' },
+        runAllClick: () => this.toast('Run group · ' + g.name + ' (' + g.tasks.length + ' tasks, serial)'),
+        addTaskClick: () => this.toast('Add task to ' + g.name),
+        onDragStart: (e) => { this.setState({ dragGroupId: g.id }); if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', g.id); } catch (x) {} } },
+        onDragOver: (e) => { if (s.dragGroupId) { e.preventDefault && e.preventDefault(); } },
+        onDrop: (e) => { if (s.dragGroupId) { e.preventDefault && e.preventDefault(); this.reorderGroups(s.dragGroupId, g.id); this.setState({ dragGroupId: null }); } },
+        onDragEnd: () => this.setState({ dragGroupId: null }),
+        tasks: g.tasks.map(t => {
+          const st = this.statusOf(t.status);
+          const isCron = t.schedule && t.schedule !== 'manual';
+          const tDragging = s.dragTask && s.dragTask.groupId === g.id && s.dragTask.taskId === t.id;
+          return {
+            key: t.id, direction: t.direction, action: t.action,
+            dirBadge: this.badge(t.direction),
+            source: t.source, targetLabel: t.targets.length > 1 ? (t.targets[0] + '  +' + (t.targets.length - 1)) : (t.targets[0] || '—'),
+            schedIcon: isCron ? '⏱' : '○', schedLabel: isCron ? t.schedule : 'Manual',
+            schedChip: { display:'inline-flex', alignItems:'center', gap:'5px', maxWidth:'100%', fontSize:'10.5px', fontWeight:700, fontFamily:isCron?'ui-monospace,Menlo,monospace':'inherit', color:isCron?'#5a4d42':'#a99a89', background:isCron?'#f0e8db':'transparent', border:'1px solid '+(isCron?'#e0d4c2':'#e7ddce'), borderRadius:'999px', padding:'3px 9px', cursor:'pointer' },
+            editSched: () => this.setState({ sched: { groupId: g.id, taskId: t.id, taskName: t.direction + ' · ' + (t.source || 'task'), mode: isCron ? 'cron' : 'manual', cronExpr: isCron ? t.schedule : '0 5 * * *' } }),
+            lastRun: t.lastRun,
+            statusLabel: st.label, statusFg: st.fg, statusDot: this.dot(st.dot),
+            runClick: () => this.toast('Run · ' + t.direction + ' · ' + (t.source || 'task')),
+            rowStyle: { display:'grid', gridTemplateColumns:'24px 132px 1.3fr 1.4fr 132px 116px', gap:'12px', padding:'12px 20px', borderTop:'1px solid #f3eee5', alignItems:'center', background:tDragging?'#fbf6ef':'transparent', opacity:tDragging?0.5:1 },
+            onDragStart: (e) => { this.setState({ dragTask: { groupId: g.id, taskId: t.id } }); if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', t.id); } catch (x) {} } if (e.stopPropagation) e.stopPropagation(); },
+            onDragOver: (e) => { if (s.dragTask && s.dragTask.groupId === g.id) { e.preventDefault && e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); } },
+            onDrop: (e) => { if (s.dragTask && s.dragTask.groupId === g.id) { e.preventDefault && e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); this.reorderTask(g.id, s.dragTask.taskId, t.id); this.setState({ dragTask: null }); } },
+            onDragEnd: () => this.setState({ dragTask: null })
+          };
+        })
+      };
     });
 
-    // system sections
-    const caret=(open)=>({display:'inline-block',fontSize:'10px',color:'#a99a89',transform:open?'rotate(90deg)':'rotate(0deg)',transition:'transform .12s'});
-    const skillRows=[
-      {key:'a',asset:'tap-builder',relation:'Claude Code → CodeX',path:'~/.codex/skills/tap-builder',status:'ok'},
-      {key:'b',asset:'commit-helper',relation:'Claude Code → OpenCode',path:'~/.config/opencode/skills/commit-helper',status:'pending'},
-      {key:'c',asset:'commit-helper',relation:'Claude Code → Copilot',path:'~/.agents/skills/commit-helper',status:'ok'}
-    ];
-    const promptRows=[
-      {key:'a',asset:'Global Instructions',relation:'Claude Code → CodeX',path:'~/.codex/AGENTS.md',status:'ok'},
-      {key:'b',asset:'Global Instructions',relation:'Claude Code → Copilot',path:'~/.agents/AGENTS.md',status:'ok'}
-    ];
-    const backupRows=[
-      {key:'a',asset:'oll-context',relation:'__sessions → WebDAV',path:'webdav://nas/agent-nexus/oll-context',status:'ok'},
-      {key:'b',asset:'agent-nexus',relation:'__sessions → WebDAV',path:'webdav://nas/agent-nexus/agent-nexus',status:'pending'},
-      {key:'c',asset:'tap',relation:'__sessions → WebDAV',path:'webdav://nas/agent-nexus/tap',status:'never'}
-    ];
-    const mk=(rows)=>rows.map(r=>{const st=this.statusOf(r.status);return Object.assign({},r,{statusLabel:st.label,statusFg:st.fg,statusDot:this.dot(st.dot)});});
-    v.sysSections=[
-      { key:'skill', title:'Skill Distribution', managedBy:'Managed by Skill', countLabel:skillRows.length+' records', open:s.openSec.skill, caret:caret(s.openSec.skill), rows:mk(skillRows), toggle:()=>this.setState(st=>({openSec:Object.assign({},st.openSec,{skill:!st.openSec.skill})})) },
-      { key:'prompt', title:'Prompt Distribution', managedBy:'Managed by Prompt', countLabel:promptRows.length+' records', open:s.openSec.prompt, caret:caret(s.openSec.prompt), rows:mk(promptRows), toggle:()=>this.setState(st=>({openSec:Object.assign({},st.openSec,{prompt:!st.openSec.prompt})})) },
-      { key:'backup', title:'Session Backup', managedBy:'Managed by Session', countLabel:backupRows.length+' projects', open:s.openSec.backup, caret:caret(s.openSec.backup), rows:mk(backupRows), toggle:()=>this.setState(st=>({openSec:Object.assign({},st.openSec,{backup:!st.openSec.backup})})) }
+    // ---- system sections ----
+    const caret = (open) => ({ display:'inline-block', fontSize:'10px', color:'#a99a89', transform:open?'rotate(90deg)':'rotate(0deg)', transition:'transform .12s' });
+    const mk = (rows) => rows.map((r, i) => { const st = this.statusOf(r.status); return Object.assign({ key: i }, r, { statusLabel:st.label, statusFg:st.fg, statusDot:this.dot(st.dot) }); });
+    const sys = s.system;
+    v.sysSections = [
+      { key:'skill', title:'Skill Distribution', managedBy:'Managed by Skill', countLabel:sys.skill.length + ' records', open:s.openSec.skill, caret:caret(s.openSec.skill), rows:mk(sys.skill), toggle:() => this.setState(st => ({ openSec: Object.assign({}, st.openSec, { skill: !st.openSec.skill }) })) },
+      { key:'prompt', title:'Prompt Distribution', managedBy:'Managed by Prompt', countLabel:sys.prompt.length + ' records', open:s.openSec.prompt, caret:caret(s.openSec.prompt), rows:mk(sys.prompt), toggle:() => this.setState(st => ({ openSec: Object.assign({}, st.openSec, { prompt: !st.openSec.prompt }) })) },
+      { key:'backup', title:'Session Backup', managedBy:'Managed by Session', countLabel:sys.backup.length + ' projects', open:s.openSec.backup, caret:caret(s.openSec.backup), rows:mk(sys.backup), toggle:() => this.setState(st => ({ openSec: Object.assign({}, st.openSec, { backup: !st.openSec.backup }) })) }
     ];
 
-    // create modal
-    v.createOpen=s.createOpen;
-    v.openCreate=()=>this.setState({createOpen:true,tpl:'blank',form:{name:'',dir:'Backup',action:'copy',source:'',targets:['']}});
-    v.closeCreate=()=>this.setState({createOpen:false});
-    const chip=(on)=>({padding:'7px 13px',borderRadius:'999px',fontSize:'12px',fontWeight:on?700:600,cursor:'pointer',color:on?'#fff':'#7a6f60',background:on?this.C.accent:'#fcf9f4',border:'1px solid '+(on?this.C.accent:'#e7ddce')});
-    v.templateChips=this.templates.map(t=>({key:t.id,name:t.name,desc:t.desc,style:chip(s.tpl===t.id),onClick:()=>this.setState({tpl:t.id,form:{name:t.id==='blank'?'':t.name,dir:t.dir,action:t.action,source:t.source,targets:t.targets.slice()}})}));
-    v.form={ name:s.form.name, source:s.form.source, targets:s.form.targets.map((val,i)=>({key:i,value:val,onInput:(e)=>{const tg=s.form.targets.slice();tg[i]=e.target.value;this.setState({form:Object.assign({},s.form,{targets:tg})});},remove:()=>{const tg=s.form.targets.filter((_,j)=>j!==i);this.setState({form:Object.assign({},s.form,{targets:tg.length?tg:['']})});}})) };
-    v.setName=(e)=>this.setState({form:Object.assign({},s.form,{name:e.target.value})});
-    v.setSource=(e)=>this.setState({form:Object.assign({},s.form,{source:e.target.value})});
-    v.addTarget=()=>this.setState({form:Object.assign({},s.form,{targets:s.form.targets.concat([''])})});
-    const segS=(on)=>({padding:'6px 14px',borderRadius:'999px',fontSize:'12px',fontWeight:on?700:600,cursor:'pointer',color:on?'#9d7a64':'#a99a89',background:on?'#fcf9f4':'transparent',boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none'});
-    v.distStyle=segS(s.form.dir==='Distribution'); v.backupStyle=segS(s.form.dir==='Backup');
-    v.setDistribution=()=>this.setState({form:Object.assign({},s.form,{dir:'Distribution'})});
-    v.setBackup=()=>this.setState({form:Object.assign({},s.form,{dir:'Backup'})});
-    v.symlinkStyle=segS(s.form.action==='symlink'); v.copyStyle=segS(s.form.action==='copy');
-    v.setSymlink=()=>this.setState({form:Object.assign({},s.form,{action:'symlink'})});
-    v.setCopy=()=>this.setState({form:Object.assign({},s.form,{action:'copy'})});
-    v.submitCreate=()=>{
-      const f=s.form; const name=f.name.trim()||'Untitled group';
-      const tgs=f.targets.map(t=>t.trim()).filter(Boolean);
-      const tasks=(tgs.length?tgs:['(target)']).map((tg,i)=>({id:'n'+Date.now()+i,source:f.source||'(source)',target:tg,lastRun:'—',status:'never'}));
-      const ng={id:'g'+Date.now(),name,direction:f.dir,action:f.action,tasks};
-      this.setState(st=>({groups:st.groups.concat([ng]),createOpen:false}));
-      this.toast('Task group “'+name+'” created with '+tasks.length+(tasks.length===1?' task':' tasks'));
+    // ---- create modal ----
+    v.createOpen = s.createOpen;
+    v.openCreate = () => this.setState({ createOpen: true, tpl: 'blank', form: { name: '', tasks: [this.newTask()] } });
+    v.closeCreate = () => this.setState({ createOpen: false });
+    const f = s.form || { name: '', tasks: [] };
+    const chip = (on) => ({ padding:'7px 13px', borderRadius:'999px', fontSize:'12px', fontWeight:on?700:600, cursor:'pointer', color:on?'#fff':'#7a6f60', background:on?'#9d7a64':'#fcf9f4', border:'1px solid '+(on?'#9d7a64':'#e7ddce') });
+    v.templateChips = s.templates.map(t => ({
+      key: t.id, name: t.name, desc: t.desc, taskCount: t.tasks.length + (t.tasks.length === 1 ? ' task' : ' tasks'), style: chip(s.tpl === t.id),
+      onClick: () => this.setState({ tpl: t.id, form: { name: t.id === 'blank' ? '' : t.name, tasks: t.tasks.length ? t.tasks.map(tk => Object.assign(this.newTask(), { direction: tk.direction, action: tk.action, source: tk.source, targets: tk.targets.slice(), schedule: tk.schedule })) : [this.newTask()] } })
+    }));
+
+    const seg = (on) => ({ padding:'5px 11px', borderRadius:'999px', fontSize:'11px', fontWeight:on?700:600, cursor:'pointer', color:on?'#9d7a64':'#a99a89', background:on?'#fcf9f4':'transparent', boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none', whiteSpace:'nowrap' });
+    const presetChip = (on) => ({ padding:'5px 10px', borderRadius:'999px', fontSize:'11px', fontWeight:on?700:600, cursor:'pointer', color:on?'#fff':'#7a6f60', background:on?'#9d7a64':'#f3ece3', border:'1px solid '+(on?'#9d7a64':'#e7ddce'), fontFamily:'ui-monospace,Menlo,monospace' });
+    const setTasks = (tasks) => this.setState({ form: Object.assign({}, f, { tasks }) });
+    v.form = {
+      name: f.name, taskCountLabel: f.tasks.length + (f.tasks.length === 1 ? ' task' : ' tasks'),
+      tasks: f.tasks.map((tk, i) => {
+        const patch = (p) => { const a = f.tasks.slice(); a[i] = Object.assign({}, a[i], p); setTasks(a); };
+        const isCron = tk.schedule !== 'manual';
+        return {
+          key: tk.id, num: i + 1, removable: f.tasks.length > 1,
+          remove: () => setTasks(f.tasks.filter((_, j) => j !== i)),
+          dirOptions: this.DIRECTIONS.map(d => ({ key: d, label: d === 'Restore/Pull' ? 'Pull' : d, style: seg(tk.direction === d), onClick: () => patch({ direction: d }) })),
+          symlinkStyle: seg(tk.action === 'symlink'), copyStyle: seg(tk.action === 'copy'),
+          setSymlink: () => patch({ action: 'symlink' }), setCopy: () => patch({ action: 'copy' }),
+          source: tk.source, setSource: (e) => patch({ source: e.target.value }),
+          targets: tk.targets.map((val, j) => ({ key: j, value: val, onInput: (e) => { const tg = tk.targets.slice(); tg[j] = e.target.value; patch({ targets: tg }); }, remove: () => { const tg = tk.targets.filter((_, k) => k !== j); patch({ targets: tg.length ? tg : [''] }); } })),
+          addTarget: () => patch({ targets: tk.targets.concat(['']) }),
+          isCron,
+          manualStyle: seg(!isCron), cronStyle: seg(isCron),
+          setManual: () => patch({ schedule: 'manual' }), setCron: () => patch({ schedule: isCron ? tk.schedule : '0 5 * * *' }),
+          cronExpr: isCron ? tk.schedule : '', setCronExpr: (e) => patch({ schedule: e.target.value || ' ' }),
+          cronPresets: this.CRON_PRESETS.map(cp => ({ key: cp.expr, label: cp.expr, style: presetChip(tk.schedule === cp.expr), onClick: () => patch({ schedule: cp.expr }) }))
+        };
+      })
     };
+    v.setName = (e) => this.setState({ form: Object.assign({}, f, { name: e.target.value }) });
+    v.addFormTask = () => setTasks(f.tasks.concat([this.newTask()]));
+    v.submitCreate = () => {
+      const name = (f.name || '').trim() || 'Untitled group';
+      const tasks = f.tasks.map((tk, i) => {
+        const tgs = tk.targets.map(x => x.trim()).filter(Boolean);
+        return { id: 'g' + Date.now() + '_' + i, direction: tk.direction, action: tk.action, source: tk.source || '(source)', targets: tgs.length ? tgs : ['(target)'], schedule: (tk.schedule || 'manual').trim() || 'manual', lastRun: '—', status: 'never' };
+      });
+      const ng = { id: 'grp' + Date.now(), name, tasks };
+      this.setState(st => ({ groups: st.groups.concat([ng]), createOpen: false }));
+      this.toast('Task group “' + name + '” created · ' + tasks.length + (tasks.length === 1 ? ' task' : ' tasks'));
+    };
+
+    // ---- edit-schedule modal ----
+    const sc = s.sched;
+    v.schedOpen = !!sc;
+    if (sc) {
+      const isCron = sc.mode === 'cron';
+      v.sched = {
+        taskName: sc.taskName, isCron, isManual: !isCron,
+        manualStyle: seg(!isCron), cronStyle: seg(isCron),
+        setManual: () => this.setState({ sched: Object.assign({}, sc, { mode: 'manual' }) }),
+        setCron: () => this.setState({ sched: Object.assign({}, sc, { mode: 'cron' }) }),
+        cronExpr: sc.cronExpr, setCronExpr: (e) => this.setState({ sched: Object.assign({}, sc, { cronExpr: e.target.value }) }),
+        presets: this.CRON_PRESETS.map(cp => ({ key: cp.expr, label: cp.expr, style: presetChip(sc.cronExpr === cp.expr), onClick: () => this.setState({ sched: Object.assign({}, sc, { cronExpr: cp.expr }) }) })),
+        human: this.cronHuman(sc.cronExpr),
+        save: () => { const val = isCron ? (sc.cronExpr.trim() || 'manual') : 'manual'; this.updateTask(sc.groupId, sc.taskId, { schedule: val }); this.setState({ sched: null }); this.toast(isCron ? ('Schedule set · ' + val) : 'Schedule set to Manual'); }
+      };
+    }
+    v.closeSched = () => this.setState({ sched: null });
 
     return v;
   }
