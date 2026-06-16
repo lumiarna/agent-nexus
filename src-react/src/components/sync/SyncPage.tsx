@@ -31,7 +31,7 @@ const SCHEDULE_PRESETS = [
   { label: "Daily 05:00", expr: "0 5 * * *" },
   { label: "Weekly Sun 03:00", expr: "0 3 * * 0" },
 ];
-const TASK_COLS = "24px 132px 1.3fr 1.4fr 132px 150px";
+const TASK_COLS = "24px 132px 1.3fr 1.4fr 150px";
 const LINK_COLS =
   "minmax(70px,.6fr) minmax(0,1.6fr) minmax(70px,.6fr) minmax(0,1.6fr) 60px";
 
@@ -96,7 +96,7 @@ let ntSeq = 0;
 function newTask(): FormTask {
   return {
     id: `nt${ntSeq++}_${Math.random().toString(36).slice(2, 6)}`,
-    action: "Copy",
+    action: "Symlink",
     sourceType: "Local",
     source: "",
     targets: [{ type: "Local", path: "" }],
@@ -165,6 +165,7 @@ export function SyncPage() {
       ),
     );
   }
+
   function reorderGroups(fromId: string, toId: string) {
     if (!fromId || fromId === toId) return;
     setGroups((gs) => {
@@ -232,7 +233,7 @@ export function SyncPage() {
       name: id === "blank" || !t ? "" : t.name,
       tasks:
         t && t.tasks.length
-          ? t.tasks.map((tk) => ({ ...newTask(), action: tk.action, sourceType: tk.sourceType, source: tk.source, targets: [{ type: tk.targetType, path: tk.target }], schedule: tk.schedule }))
+          ? t.tasks.map((tk) => ({ ...newTask(), action: tk.action, sourceType: tk.sourceType, source: tk.source, targets: [{ type: tk.targetType, path: tk.target }], schedule: tk.action === "Symlink" ? "manual" : tk.schedule }))
           : [newTask()],
     });
   }
@@ -353,12 +354,10 @@ export function SyncPage() {
                   <div>Type</div>
                   <div>Source</div>
                   <div>Target</div>
-                  <div>Schedule</div>
                   <div className="text-right">Actions</div>
                 </div>
 
                 {g.tasks.map((t) => {
-                  const isCron = t.schedule !== "manual";
                   const isCopy = t.action === "Copy";
                   const st = isCopy ? statusOf(t.status) : null;
                   const tDragging = dragTask != null && dragTask.groupId === g.id && dragTask.taskId === t.id;
@@ -392,26 +391,6 @@ export function SyncPage() {
                       <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#8a8073]">
                         {targetLabel}
                       </div>
-                      <div className="min-w-0">
-                        <div
-                          onClick={() =>
-                            setSched({ groupId: g.id, taskId: t.id, taskName: `${t.direction} · ${t.source || "task"}`, mode: isCron ? "cron" : "manual", cronExpr: isCron ? t.schedule : "0 5 * * *" })
-                          }
-                          title="Edit schedule"
-                          className={cn(
-                            "inline-flex max-w-full cursor-pointer items-center gap-[5px] rounded-full border px-[9px] py-[3px] text-[10.5px] font-bold",
-                            isCron
-                              ? "border-[#e0d4c2] bg-nexus-panel font-mono text-[#5a4d42]"
-                              : "border-nexus-border2 text-[#a99a89]",
-                          )}
-                        >
-                          <span className="text-[10px]">{isCron ? "⏱" : "○"}</span>
-                          <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                            {isCron ? t.schedule : "Manual"}
-                          </span>
-                        </div>
-                        <div className="mt-[3px] text-[10px] text-[#c3b9a8]">last {t.lastRun}</div>
-                      </div>
                       <div className="flex items-center justify-end gap-[9px]">
                         {st && (
                           <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: st.fg }}>
@@ -419,12 +398,28 @@ export function SyncPage() {
                           </span>
                         )}
                         {isCopy && (
-                          <span
-                            onClick={() => toast(`Run · ${t.direction} · ${t.source || "task"}`)}
-                            className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
-                          >
-                            Run
-                          </span>
+                          <>
+                            <span
+                              onClick={() =>
+                                setSched({
+                                  groupId: g.id,
+                                  taskId: t.id,
+                                  taskName: `${t.direction} · ${t.source || "task"}`,
+                                  mode: t.schedule !== "manual" ? "cron" : "manual",
+                                  cronExpr: t.schedule !== "manual" ? t.schedule : "0 5 * * *",
+                                })
+                              }
+                              className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
+                            >
+                              Schedule
+                            </span>
+                            <span
+                              onClick={() => toast(`Run · ${t.direction} · ${t.source || "task"}`)}
+                              className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
+                            >
+                              Run
+                            </span>
+                          </>
                         )}
                         <span
                           onClick={() => void deleteTask(g.id, t)}
@@ -668,7 +663,7 @@ export function SyncPage() {
                             { value: "Copy", label: "Copy" },
                           ]}
                           value={tk.action}
-                          onChange={(a) => patchFormTask(i, { action: a })}
+                          onChange={(a) => patchFormTask(i, { action: a, schedule: a === "Symlink" ? "manual" : tk.schedule })}
                         />
                       </div>
                     </div>
@@ -741,38 +736,40 @@ export function SyncPage() {
                         ))}
                       </div>
                     </div>
-                    <div>
-                      <div className="mb-[5px] text-[11px] font-semibold text-[#8a7d6c]">Schedule</div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Segmented<"manual" | "cron">
-                          className="bg-[#ece2d5]"
-                          size="sm"
-                          options={[
-                            { value: "manual", label: "Manual" },
-                            { value: "cron", label: "Schedule" },
-                          ]}
-                          value={isCron ? "cron" : "manual"}
-                          onChange={(v) => patchFormTask(i, { schedule: v === "manual" ? "manual" : isCron ? tk.schedule : "0 5 * * *" })}
-                        />
-                        {isCron ? (
-                          <Input
-                            className="min-w-[120px] flex-1 rounded-[9px] px-[11px] py-2 font-mono text-[12px]"
-                            placeholder="0 5 * * *"
-                            value={tk.schedule}
-                            onChange={(e) => patchFormTask(i, { schedule: e.target.value || " " })}
+                    {tk.action === "Copy" ? (
+                      <div>
+                        <div className="mb-[5px] text-[11px] font-semibold text-[#8a7d6c]">Schedule</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Segmented<"manual" | "cron">
+                            className="bg-[#ece2d5]"
+                            size="sm"
+                            options={[
+                              { value: "manual", label: "Manual" },
+                              { value: "cron", label: "Schedule" },
+                            ]}
+                            value={isCron ? "cron" : "manual"}
+                            onChange={(v) => patchFormTask(i, { schedule: v === "manual" ? "manual" : isCron ? tk.schedule : "0 5 * * *" })}
                           />
+                          {isCron ? (
+                            <Input
+                              className="min-w-[120px] flex-1 rounded-[9px] px-[11px] py-2 font-mono text-[12px]"
+                              placeholder="0 5 * * *"
+                              value={tk.schedule}
+                              onChange={(e) => patchFormTask(i, { schedule: e.target.value || " " })}
+                            />
+                          ) : null}
+                        </div>
+                        {isCron ? (
+                          <div className="mt-[7px] flex flex-wrap gap-1.5">
+                            {SCHEDULE_PRESETS.map((cp) => (
+                              <Chip key={cp.expr} mono active={tk.schedule === cp.expr} onClick={() => patchFormTask(i, { schedule: cp.expr })}>
+                                {cp.expr}
+                              </Chip>
+                            ))}
+                          </div>
                         ) : null}
                       </div>
-                      {isCron ? (
-                        <div className="mt-[7px] flex flex-wrap gap-1.5">
-                          {SCHEDULE_PRESETS.map((cp) => (
-                            <Chip key={cp.expr} mono active={tk.schedule === cp.expr} onClick={() => patchFormTask(i, { schedule: cp.expr })}>
-                              {cp.expr}
-                            </Chip>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -802,7 +799,7 @@ export function SyncPage() {
             <ModalHeader
               title={`Schedule · ${sched.taskName}`}
               titleClassName="text-[16px]"
-               subtitle="Per-task trigger. Scheduled runs are not implemented yet."
+              subtitle="Per-task trigger. Scheduled runs are not implemented yet."
             />
             <div className="flex flex-col gap-3.5 px-[22px] py-5">
               <Segmented<"manual" | "cron">

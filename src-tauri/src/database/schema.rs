@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 1;
+const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     let current = current_version(conn)?;
@@ -15,6 +15,8 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
 
     if current == 0 {
         migrate_to_v1(conn)?;
+    } else if current < 2 {
+        migrate_to_v2(conn)?;
     }
 
     Ok(())
@@ -46,7 +48,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (1);
+        INSERT INTO schema_version (version) VALUES (2);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -223,4 +225,56 @@ node_modules');
     })?;
 
     Ok(())
+}
+
+fn migrate_to_v2(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch("BEGIN;").or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    let result = (|| -> AppResult<()> {
+        add_column_if_missing(conn, "source_type", "TEXT NOT NULL DEFAULT 'Local'")?;
+        add_column_if_missing(conn, "target_type", "TEXT NOT NULL DEFAULT 'Local'")?;
+        add_column_if_missing(conn, "schedule", "TEXT NOT NULL DEFAULT 'manual'")?;
+        add_column_if_missing(conn, "last_run_at", "INTEGER")?;
+        add_column_if_missing(conn, "last_status", "TEXT")?;
+        conn.execute("UPDATE schema_version SET version = 2", [])?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = conn.execute("ROLLBACK", params![]);
+            Err(error)
+        }
+    }
+}
+
+fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
+    if task_column_exists(conn, column)? {
+        return Ok(());
+    }
+
+    conn.execute_batch(&format!(
+        "ALTER TABLE tasks ADD COLUMN {column} {definition};"
+    ))?;
+    Ok(())
+}
+
+fn task_column_exists(conn: &Connection, column: &str) -> AppResult<bool> {
+    let mut stmt = conn.prepare("PRAGMA table_info(tasks)")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+    for row in rows {
+        if row? == column {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
