@@ -179,15 +179,18 @@ CREATE TABLE task_groups (
     updated_at INTEGER NOT NULL
 );
 
--- Task: 具体的单向执行任务
--- CONTEXT.md: 方向与类型定义在 Task 层；可独立配置 manual 或 CRON 调度
+-- Task: 具体的单向执行任务（1 source → 1 target）
+-- CONTEXT.md: Direction 由 Location Type 自动派生；可独立配置 manual 或 CRON 调度
 CREATE TABLE tasks (
     id TEXT PRIMARY KEY,
     group_id TEXT NOT NULL,
-    direction TEXT NOT NULL                           -- Distribution | Backup | Restore/Pull
-        CHECK (direction IN ('Distribution', 'Backup', 'Restore/Pull')),
-    action TEXT NOT NULL CHECK (action IN ('symlink', 'copy')),
+    direction TEXT NOT NULL                           -- Distribution | Push | Pull
+        CHECK (direction IN ('Distribution', 'Push', 'Pull')),
+    action TEXT NOT NULL CHECK (action IN ('Symlink', 'Copy')),
+    source_type TEXT NOT NULL CHECK (source_type IN ('Local', 'Cloud')),
     source TEXT NOT NULL,
+    target_type TEXT NOT NULL CHECK (target_type IN ('Local', 'Cloud')),
+    target TEXT NOT NULL,
     schedule TEXT NOT NULL DEFAULT 'manual',          -- 'manual' | CRON 表达式
     sort_index INTEGER,
     last_run_at INTEGER,
@@ -197,15 +200,7 @@ CREATE TABLE tasks (
     FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
 );
 
--- Task Target: Sync Task 的目标落点
--- CONTEXT.md: 单个 Task 遵守 single source -> multiple targets；显式反向同步需创建另一个 Task
-CREATE TABLE task_targets (
-    task_id TEXT NOT NULL,
-    target_path TEXT NOT NULL,
-    sort_index INTEGER,
-    PRIMARY KEY (task_id, target_path),
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-);
+-- (task_targets 表已移除：Task 模型变为 1 source → 1 target，target 直接存于 tasks 表)
 
 -- ─── Settings ────────────────────────────────────────────────
 
@@ -241,8 +236,10 @@ CREATE INDEX idx_provider_windows_provider ON provider_windows(provider_id);
 - `Agent Matrix` 每个 asset 必须且只能有一个 `source`；partial unique index 只能保证“最多一个”，Service 负责保证“至少一个”。
 - `target_path` 由系统按 agent 与上下文计算，前端不能直接提交任意目标路径。
 - 更新某个 asset 的 Matrix 时，使用单个事务删除旧 rows、插入新 rows、校验 source 数量后提交。
-- `Sync Task` 的 `source` 不能等于任一 `task_targets.target_path`；target 也不能在同一个 Task 内回流为 source。
+- `Sync Task` 的 `source` 不能等于其 `target`。
 - 如果用户需要配置文件多设备同步，应创建两个独立的显式反向 Task pair，例如 `A -> B` 与 `B -> A`，而不是在单个 Task 中表达双向同步。
+- `direction` 必须与 `source_type` / `target_type` 一致：Local+Local=Distribution, Local+Cloud=Push, Cloud+Local=Pull, Cloud+Cloud=非法。
+- `action` 为 `Symlink` 时，`direction` 必须为 `Distribution`。
 - Runner 执行前必须 canonicalize source/target 并生成 dry-run 计划，成功落盘后再记录 placement 或 last-run 状态。
 
 ### 初始设置种子

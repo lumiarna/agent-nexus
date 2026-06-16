@@ -134,15 +134,16 @@ const SESSIONS: Session[] = [
 
 const TASK_GROUPS: TaskGroup[] = [
   { id: "g1", name: "Warp Config", tasks: [
-    { id: "t1", direction: "Backup", action: "copy", source: "~/.config/warp/settings.toml", targets: ["webdav://nas/config/warp/"], schedule: "0 5 * * *", lastRun: "06-15 05:00", status: "ok" },
-    { id: "t2", direction: "Backup", action: "copy", source: "~/.config/warp/keybindings.yaml", targets: ["webdav://nas/config/warp/"], schedule: "0 5 * * *", lastRun: "06-15 05:00", status: "ok" },
+    { id: "t1", direction: "Push", action: "Copy", sourceType: "Local", source: "~/.config/warp/settings.toml", targetType: "Cloud", target: "config/warp/settings.toml", schedule: "0 5 * * *", lastRun: "06-15 05:00", status: "ok" },
+    { id: "t2", direction: "Push", action: "Copy", sourceType: "Local", source: "~/.config/warp/keybindings.yaml", targetType: "Cloud", target: "config/warp/keybindings.yaml", schedule: "0 5 * * *", lastRun: "06-15 05:00", status: "ok" },
   ] },
   { id: "g2", name: "TAP symlinks", tasks: [
-    { id: "t3", direction: "Distribution", action: "symlink", source: "D:/Workspace/tap/src", targets: ["oll-context/backend/", "oll-context/frontend/"], schedule: "manual", lastRun: "06-14 18:02", status: "ok" },
+    { id: "t3", direction: "Distribution", action: "Symlink", sourceType: "Local", source: "D:/Workspace/tap/src", targetType: "Local", target: "oll-context/backend/", schedule: "manual", lastRun: "06-14 18:02", status: "ok" },
+    { id: "t4", direction: "Distribution", action: "Symlink", sourceType: "Local", source: "D:/Workspace/tap/src", targetType: "Local", target: "oll-context/frontend/", schedule: "manual", lastRun: "06-14 18:02", status: "ok" },
   ] },
   { id: "g3", name: "Machine Backup", tasks: [
-    { id: "t5", direction: "Backup", action: "copy", source: "~/.ssh/", targets: ["webdav://nas/backups/ssh/"], schedule: "0 3 * * 0", lastRun: "—", status: "never" },
-    { id: "t6", direction: "Restore/Pull", action: "copy", source: "webdav://nas/config/zed/", targets: ["%APPDATA%/Zed/"], schedule: "manual", lastRun: "06-13 09:10", status: "ok" },
+    { id: "t5", direction: "Push", action: "Copy", sourceType: "Local", source: "~/.ssh/", targetType: "Cloud", target: "backups/ssh/", schedule: "0 3 * * 0", lastRun: "—", status: "never" },
+    { id: "t6", direction: "Pull", action: "Copy", sourceType: "Cloud", source: "config/zed/", targetType: "Local", target: "%APPDATA%/Zed/", schedule: "manual", lastRun: "06-13 09:10", status: "ok" },
   ] },
 ];
 
@@ -150,17 +151,17 @@ const TASK_GROUPS: TaskGroup[] = [
 
 const TEMPLATES: Template[] = [
   { id: "blank", name: "Blank", desc: "Start an empty group and add tasks yourself.", tasks: [] },
-  { id: "machine", name: "Machine Backup", desc: "Back up SSH keys + pull editor config back from Cloud.", tasks: [
-    { direction: "Backup", action: "copy", source: "~/.ssh/", targets: ["webdav://nas/backups/ssh/"], schedule: "0 3 * * 0" },
-    { direction: "Restore/Pull", action: "copy", source: "webdav://nas/config/zed/", targets: ["%APPDATA%/Zed/"], schedule: "manual" },
+  { id: "machine", name: "Machine Backup", desc: "Push SSH keys + pull editor config back from Cloud.", tasks: [
+    { action: "Copy", sourceType: "Local", source: "~/.ssh/", targetType: "Cloud", target: "backups/ssh/", schedule: "0 3 * * 0" },
+    { action: "Copy", sourceType: "Cloud", source: "config/zed/", targetType: "Local", target: "%APPDATA%/Zed/", schedule: "manual" },
   ] },
-  { id: "warp", name: "Warp Config", desc: "Back up Warp settings + keybindings to Cloud (two tasks).", tasks: [
-    { direction: "Backup", action: "copy", source: "~/.config/warp/settings.toml", targets: ["webdav://nas/config/warp/"], schedule: "0 5 * * *" },
-    { direction: "Backup", action: "copy", source: "~/.config/warp/keybindings.yaml", targets: ["webdav://nas/config/warp/"], schedule: "0 5 * * *" },
+  { id: "warp", name: "Warp Config", desc: "Push Warp settings + keybindings to Cloud (two tasks).", tasks: [
+    { action: "Copy", sourceType: "Local", source: "~/.config/warp/settings.toml", targetType: "Cloud", target: "config/warp/settings.toml", schedule: "0 5 * * *" },
+    { action: "Copy", sourceType: "Local", source: "~/.config/warp/keybindings.yaml", targetType: "Cloud", target: "config/warp/keybindings.yaml", schedule: "0 5 * * *" },
   ] },
-  { id: "dotfiles", name: "Dotfiles", desc: "Distribute shared dotfiles across machines, then back them up.", tasks: [
-    { direction: "Distribution", action: "symlink", source: "~/dotfiles/", targets: ["~/", "~/work/"], schedule: "manual" },
-    { direction: "Backup", action: "copy", source: "~/dotfiles/", targets: ["webdav://nas/backups/dotfiles/"], schedule: "0 4 * * *" },
+  { id: "dotfiles", name: "Dotfiles", desc: "Distribute shared dotfiles locally, then push them to Cloud.", tasks: [
+    { action: "Symlink", sourceType: "Local", source: "~/dotfiles/", targetType: "Local", target: "~/", schedule: "manual" },
+    { action: "Copy", sourceType: "Local", source: "~/dotfiles/", targetType: "Cloud", target: "backups/dotfiles/", schedule: "0 4 * * *" },
   ] },
 ];
 

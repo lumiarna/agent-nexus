@@ -104,16 +104,19 @@ export interface Session {
 
 // ─── Sync ───────────────────────────────────────────────────────────────────
 
-export type TaskDirection = "Distribution" | "Backup" | "Restore/Pull";
-export type TaskAction = "symlink" | "copy";
+export type TaskDirection = "Distribution" | "Push" | "Pull";
+export type TaskAction = "Symlink" | "Copy";
+export type LocationType = "Local" | "Cloud";
 export type TaskStatus = "ok" | "pending" | "never";
 
 export interface Task {
   id: string;
   direction: TaskDirection;
   action: TaskAction;
+  sourceType: LocationType;
   source: string;
-  targets: string[];
+  targetType: LocationType;
+  target: string;
   /** "manual" or a CRON expression. */
   schedule: string;
   lastRun: string;
@@ -128,7 +131,7 @@ export interface TaskGroup {
 
 export type TemplateTask = Pick<
   Task,
-  "direction" | "action" | "source" | "targets" | "schedule"
+  "action" | "sourceType" | "source" | "targetType" | "target" | "schedule"
 >;
 
 export interface Template {

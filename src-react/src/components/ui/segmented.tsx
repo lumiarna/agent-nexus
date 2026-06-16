@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 interface SegOption<T extends string> {
   value: T;
   label: string;
+  disabled?: boolean;
 }
 
 interface SegmentedProps<T extends string> {
@@ -36,13 +37,16 @@ export function Segmented<T extends string>({
         return (
           <div
             key={o.value}
-            onClick={() => onChange(o.value)}
+            onClick={() => !o.disabled && onChange(o.value)}
             className={cn(
-              "cursor-pointer whitespace-nowrap rounded-full transition-colors",
+              "whitespace-nowrap rounded-full transition-colors",
               SEG_SIZE[size],
-              on
+              o.disabled
+                ? "cursor-not-allowed font-semibold text-[#d0c8be] opacity-50"
+                : "cursor-pointer",
+              !o.disabled && on
                 ? "bg-nexus-card font-bold text-nexus-accent shadow-[0_1px_2px_rgba(50,40,25,.06)]"
-                : "font-semibold text-[#a99a89]",
+                : !o.disabled ? "font-semibold text-[#a99a89]" : "",
             )}
           >
             {o.label}

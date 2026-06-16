@@ -17,7 +17,7 @@ _Avoid_: File, record, resource
 _Avoid_: Every asset is distributable, backup item, global resource
 
 **Archivable Content**:
-一种以搜索、归档和恢复为核心价值的内容型 `Asset`。MVP 中典型对象是 `Session`；它可以进入 `Backup` / `Restore/Pull`，但不进入 `Agent Matrix` 传播模型。
+一种以搜索、归档和恢复为核心价值的内容型 `Asset`。MVP 中典型对象是 `Session`；它可以进入 `Push` / `Pull`，但不进入 `Agent Matrix` 传播模型。
 _Avoid_: Distributable skill, prompt placement, generic file task
 
 **Shared Asset**:
@@ -105,7 +105,7 @@ _Avoid_: Type, category
 ## Distribution
 
 **Distribution**:
-把一个 `Distributable Asset` 从 `canonical source` 传播到其他消费端的单向关系。它强调关系建立与目标落点，而不是双向同步。
+把一个 `Distributable Asset` 从 `canonical source` 传播到其他消费端的单向关系（Local → Local）。它强调关系建立与目标落点，而不是双向同步。
 _Avoid_: Two-way sync, replication mesh
 
 **Agent Matrix**:
@@ -126,13 +126,25 @@ _Avoid_: Partial agent identity, ad hoc special case
 
 ## Sync
 
+**Location Type**:
+`Task` 的 source 或 target 所处的位置类型。取值为 `Local` 或 `Cloud`。UI 层统一使用 `Cloud`；`WebDAV` 属于实现层术语。
+_Avoid_: WebDAV (in UI), path prefix as type
+
+**Direction**:
+`Task` 的传播方向，由 source 与 target 的 `Location Type` 自动派生：Local→Local = `Distribution`，Local→Cloud = `Push`，Cloud→Local = `Pull`。Cloud→Cloud 非法。用户不手选此值。
+_Avoid_: User-selected direction, manual label
+
+**Action**:
+`Task` 执行时对目标的写入方式。取值为 `Symlink` 或 `Copy`。`Symlink` 仅在 Direction 为 `Distribution` 时可用；`Push` / `Pull` 方向时 `Symlink` 不可选。
+_Avoid_: lowercase symlink/copy, transfer mode
+
 **Sync**:
-Agent Nexus 的任务与预设工作域。它统一承载 `Distribution`、`Backup` 和 `Restore/Pull` 的底层执行与可观测性，但不承担资产主视图。MVP 中它以自定义 `Task Group` / `Task` 工作台为主，系统默认任务降为次级观察区。`Backup` 与 `Restore/Pull` 是两个显式的单向任务方向，不合并成一个双向任务。
+Agent Nexus 的任务与预设工作域。它统一承载 `Distribution`、`Push` 和 `Pull` 的底层执行与可观测性，但不承担资产主视图。MVP 中它以自定义 `Task Group` / `Task` 工作台为主，系统默认任务降为次级观察区。`Push` 与 `Pull` 是两个显式的单向任务方向，不合并成一个双向任务。
 _Avoid_: Asset page, file manager, two-way sync engine
 
 **Sync Task**:
-一个具体的单向执行任务，遵守 `single source -> multiple targets` 规则。它是运行对象，不是模板，也不是资产本体；如果需要从 WebDAV 拉回本地，应创建独立的 `Restore/Pull` 任务，而不是反转既有 `Backup` 任务。`Backup` / `Distribution` / `Restore/Pull` 的方向与类型都定义在 `Task` 层。`Task` 可独立配置 `manual` 或 `CRON` 调度，并由 Agent Nexus 内建执行。
-_Avoid_: Template, relationship only, background daemon, task group as execution type
+一个具体的单向执行任务，严格遵守 `1 source → 1 target` 规则。它是运行对象，不是模板，也不是资产本体。`Direction` 由 source 与 target 的 `Location Type` 自动派生，不由用户手选。`Task` 可独立配置 `manual` 或 `CRON` 调度，并由 Agent Nexus 内建执行。
+_Avoid_: Template, relationship only, background daemon, task group as execution type, multi-target task
 
 **Task Group**:
 一个包含一个或多个 `Sync Task` 的组织与编排容器。它用于创建、排序、批量查看与批量触发，但不承载 `Backup` / `Distribution` / `Restore/Pull` 等执行方向语义。MVP 中 `Create custom task` 的默认创建单位是 `Task Group`，单任务只是单元素 group。
@@ -159,16 +171,16 @@ _Avoid_: Generic symlink task, manual sync relation
 _Avoid_: Prompt sync config editor
 
 **Session Backup**:
-围绕 `Session` 归档建立的 `Sync` 类型。它负责把 `Project` 的本地 `Session` 目录归档到 WebDAV，而不是管理会话内容本身。
+围绕 `Session` 归档建立的 `Sync` 类型。它负责把 `Project` 的本地 `Session` 目录归档到 Cloud，而不是管理会话内容本身。
 _Avoid_: Session viewer, session search
 
-**Backup**:
-从本地权威源复制到远端或其他目标的单向操作。它不要求目标与源严格镜像，也不默认传播删除。
-_Avoid_: Mirror sync, two-way sync
+**Push**:
+从本地到 Cloud 的单向操作。语义中性，只表达方向，不携带镜像/删除等隐含策略。
+_Avoid_: Mirror sync, two-way sync, Backup
 
-**Restore/Pull**:
-从 WebDAV 等远端归档源显式拉回到本地的受限单向操作。它用于恢复或落地配置，不等于双向同步。
-_Avoid_: Reverse sync, cloud source by default
+**Pull**:
+从 Cloud 到本地的单向操作。语义中性，只表达方向，不等于双向同步。
+_Avoid_: Reverse sync, Restore
 
 ## Session Views
 

@@ -170,9 +170,12 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             id TEXT PRIMARY KEY,
             group_id TEXT NOT NULL,
             direction TEXT NOT NULL
-                CHECK (direction IN ('Distribution', 'Backup', 'Restore/Pull')),
-            action TEXT NOT NULL CHECK (action IN ('symlink', 'copy')),
+                CHECK (direction IN ('Distribution', 'Push', 'Pull')),
+            action TEXT NOT NULL CHECK (action IN ('Symlink', 'Copy')),
+            source_type TEXT NOT NULL CHECK (source_type IN ('Local', 'Cloud')),
             source TEXT NOT NULL,
+            target_type TEXT NOT NULL CHECK (target_type IN ('Local', 'Cloud')),
+            target TEXT NOT NULL,
             schedule TEXT NOT NULL DEFAULT 'manual',
             sort_index INTEGER,
             last_run_at INTEGER,
@@ -182,13 +185,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
         );
 
-        CREATE TABLE task_targets (
-            task_id TEXT NOT NULL,
-            target_path TEXT NOT NULL,
-            sort_index INTEGER,
-            PRIMARY KEY (task_id, target_path),
-            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-        );
+        -- (task_targets removed: Task is now 1 source → 1 target)
 
         CREATE TABLE settings (
             key TEXT PRIMARY KEY,

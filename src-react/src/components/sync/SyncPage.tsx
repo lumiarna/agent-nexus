@@ -17,9 +17,9 @@ import type {
   TaskDirection,
   TaskGroup,
   TaskStatus,
+  LocationType,
 } from "@/types";
 
-const DIRECTIONS: TaskDirection[] = ["Distribution", "Backup", "Restore/Pull"];
 const CRON_PRESETS = [
   { label: "Hourly", expr: "0 * * * *" },
   { label: "Daily 05:00", expr: "0 5 * * *" },
@@ -39,8 +39,8 @@ function relPath(fullPath: string, projectName?: string | null): string {
 }
 
 function dirColors(d: TaskDirection): { fg: string; bg: string } {
-  if (d === "Backup") return { fg: "#9a6f0a", bg: "#f7eccb" };
-  if (d === "Restore/Pull") return { fg: "#3f6f55", bg: "#dcebe0" };
+  if (d === "Push") return { fg: "#9a6f0a", bg: "#f7eccb" };
+  if (d === "Pull") return { fg: "#3f6f55", bg: "#dcebe0" };
   return { fg: "#4a6a8a", bg: "#e2ebf2" };
 }
 
@@ -86,24 +86,34 @@ function DirBadge({ direction }: { direction: TaskDirection }) {
   );
 }
 
+function deriveDirection(sourceType: LocationType, targetType: LocationType): TaskDirection {
+  if (sourceType === "Local" && targetType === "Local") return "Distribution";
+  if (sourceType === "Local" && targetType === "Cloud") return "Push";
+  return "Pull";
+}
+
 let ntSeq = 0;
 function newTask(): FormTask {
   return {
     id: `nt${ntSeq++}_${Math.random().toString(36).slice(2, 6)}`,
-    direction: "Backup",
-    action: "copy",
+    action: "Copy",
+    sourceType: "Local",
     source: "",
-    targets: [""],
+    targets: [{ type: "Local", path: "" }],
     schedule: "manual",
   };
 }
 
+interface FormTarget {
+  type: LocationType;
+  path: string;
+}
 interface FormTask {
   id: string;
-  direction: TaskDirection;
   action: TaskAction;
+  sourceType: LocationType;
   source: string;
-  targets: string[];
+  targets: FormTarget[];
   schedule: string;
 }
 interface FormState {
@@ -189,28 +199,34 @@ export function SyncPage() {
       name: id === "blank" || !t ? "" : t.name,
       tasks:
         t && t.tasks.length
-          ? t.tasks.map((tk) => ({ ...newTask(), direction: tk.direction, action: tk.action, source: tk.source, targets: [...tk.targets], schedule: tk.schedule }))
+          ? t.tasks.map((tk) => ({ ...newTask(), action: tk.action, sourceType: tk.sourceType, source: tk.source, targets: [{ type: tk.targetType, path: tk.target }], schedule: tk.schedule }))
           : [newTask()],
     });
   }
   function submitCreate() {
     const name = form.name.trim() || "Untitled group";
-    const tasks: Task[] = form.tasks.map((tk, i) => {
-      const tgs = tk.targets.map((x) => x.trim()).filter(Boolean);
-      return {
-        id: `g${Date.now()}_${i}`,
-        direction: tk.direction,
-        action: tk.action,
-        source: tk.source || "(source)",
-        targets: tgs.length ? tgs : ["(target)"],
-        schedule: (tk.schedule || "manual").trim() || "manual",
-        lastRun: "—",
-        status: "never",
-      };
+    const tasks: Task[] = form.tasks.flatMap((tk, i) => {
+      const validTargets = tk.targets.filter((t) => t.path.trim());
+      if (!validTargets.length) validTargets.push({ type: tk.targets[0]?.type ?? "Local", path: "(target)" });
+      return validTargets.map((tgt, j) => {
+        const direction = deriveDirection(tk.sourceType, tgt.type);
+        return {
+          id: `g${Date.now()}_${i}_${j}`,
+          direction,
+          action: tk.action,
+          sourceType: tk.sourceType,
+          source: tk.source || "(source)",
+          targetType: tgt.type,
+          target: tgt.path.trim() || "(target)",
+          schedule: (tk.schedule || "manual").trim() || "manual",
+          lastRun: "—",
+          status: "never" as TaskStatus,
+        };
+      });
     });
     setGroups((gs) => [...gs, { id: `grp${Date.now()}`, name, tasks }]);
     setCreateOpen(false);
-    toast(`Task group “${name}” created · ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`);
+    toast(`Task group "${name}" created · ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`);
   }
 
   const sysSections: {
@@ -281,7 +297,7 @@ export function SyncPage() {
                     {g.tasks.length} {g.tasks.length === 1 ? "task" : "tasks"}
                   </span>
                   <div className="ml-auto flex gap-[7px]">
-                    {g.tasks.some((t) => t.action === "copy") && (
+                    {g.tasks.some((t) => t.action === "Copy") && (
                       <button
                         onClick={() => toast(`Run group · ${g.name} (${g.tasks.length} tasks, serial)`)}
                         className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
@@ -312,11 +328,10 @@ export function SyncPage() {
 
                 {g.tasks.map((t) => {
                   const isCron = t.schedule !== "manual";
-                  const isCopy = t.action === "copy";
+                  const isCopy = t.action === "Copy";
                   const st = isCopy ? statusOf(t.status) : null;
                   const tDragging = dragTask != null && dragTask.groupId === g.id && dragTask.taskId === t.id;
-                  const targetLabel =
-                    t.targets.length > 1 ? `${t.targets[0]}  +${t.targets.length - 1}` : t.targets[0] || "—";
+                  const targetLabel = t.target || "—";
                   return (
                     <div
                       key={t.id}
@@ -613,23 +628,13 @@ export function SyncPage() {
                     </div>
                     <div className="mb-[11px] flex flex-wrap gap-4">
                       <div>
-                        <div className="mb-[5px] text-[11px] font-semibold text-[#8a7d6c]">Direction</div>
-                        <Segmented<TaskDirection>
-                          className="bg-[#ece2d5]"
-                          size="sm"
-                          options={DIRECTIONS.map((d) => ({ value: d, label: d === "Restore/Pull" ? "Pull" : d }))}
-                          value={tk.direction}
-                          onChange={(d) => patchFormTask(i, { direction: d })}
-                        />
-                      </div>
-                      <div>
                         <div className="mb-[5px] text-[11px] font-semibold text-[#8a7d6c]">Action</div>
                         <Segmented<TaskAction>
                           className="bg-[#ece2d5]"
                           size="sm"
                           options={[
-                            { value: "symlink", label: "symlink" },
-                            { value: "copy", label: "copy" },
+                            { value: "Symlink", label: "Symlink", disabled: tk.targets.some((t) => t.type === "Cloud") || tk.sourceType === "Cloud" },
+                            { value: "Copy", label: "Copy" },
                           ]}
                           value={tk.action}
                           onChange={(a) => patchFormTask(i, { action: a })}
@@ -640,12 +645,21 @@ export function SyncPage() {
                       <div className="mb-[5px] text-[11px] font-semibold text-[#8a7d6c]">
                         Source <span className="font-medium text-[#b3a999]">(single)</span>
                       </div>
-                      <Input
-                        className="rounded-[9px] px-[11px] py-2 font-mono text-[12px]"
-                        placeholder="~/.config/warp/"
-                        value={tk.source}
-                        onChange={(e) => patchFormTask(i, { source: e.target.value })}
-                      />
+                      <div className="flex items-center gap-[7px]">
+                        <Segmented<LocationType>
+                          className="bg-[#ece2d5]"
+                          size="sm"
+                          options={[{ value: "Local", label: "Local" }, { value: "Cloud", label: "Cloud" }]}
+                          value={tk.sourceType}
+                          onChange={(v) => patchFormTask(i, { sourceType: v })}
+                        />
+                        <Input
+                          className="flex-1 rounded-[9px] px-[11px] py-2 font-mono text-[12px]"
+                          placeholder={tk.sourceType === "Cloud" ? "config/warp/" : "~/.config/warp/"}
+                          value={tk.source}
+                          onChange={(e) => patchFormTask(i, { source: e.target.value })}
+                        />
+                      </div>
                     </div>
                     <div className="mb-2.5">
                       <div className="mb-[5px] flex items-center justify-between">
@@ -653,7 +667,7 @@ export function SyncPage() {
                           Targets <span className="font-medium text-[#b3a999]">(one or more)</span>
                         </div>
                         <div
-                          onClick={() => patchFormTask(i, { targets: [...tk.targets, ""] })}
+                          onClick={() => patchFormTask(i, { targets: [...tk.targets, { type: "Local", path: "" }] })}
                           className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
                         >
                           + Add
@@ -662,20 +676,31 @@ export function SyncPage() {
                       <div className="flex flex-col gap-[7px]">
                         {tk.targets.map((val, j) => (
                           <div key={j} className="flex items-center gap-[7px]">
+                            <Segmented<LocationType>
+                              className="bg-[#ece2d5]"
+                              size="sm"
+                              options={[{ value: "Local", label: "Local" }, { value: "Cloud", label: "Cloud" }]}
+                              value={val.type}
+                              onChange={(v) => {
+                                const tg = [...tk.targets];
+                                tg[j] = { ...tg[j], type: v };
+                                patchFormTask(i, { targets: tg });
+                              }}
+                            />
                             <Input
                               className="flex-1 rounded-[9px] px-[11px] py-2 font-mono text-[12px]"
-                              placeholder="webdav://nas/config/warp/"
-                              value={val}
+                              placeholder={val.type === "Cloud" ? "backups/ssh/" : "/target/path/"}
+                              value={val.path}
                               onChange={(e) => {
                                 const tg = [...tk.targets];
-                                tg[j] = e.target.value;
+                                tg[j] = { ...tg[j], path: e.target.value };
                                 patchFormTask(i, { targets: tg });
                               }}
                             />
                             <div
                               onClick={() => {
                                 const tg = tk.targets.filter((_, k) => k !== j);
-                                patchFormTask(i, { targets: tg.length ? tg : [""] });
+                                patchFormTask(i, { targets: tg.length ? tg : [{ type: "Local", path: "" }] });
                               }}
                               className="inline-flex h-[30px] w-[30px] flex-none cursor-pointer items-center justify-center rounded-[8px] border border-nexus-border2 bg-white text-[15px] text-[#b3a999] hover:bg-nexus-bg hover:text-nexus-crit"
                             >
