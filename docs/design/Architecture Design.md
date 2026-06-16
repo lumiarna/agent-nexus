@@ -22,14 +22,28 @@ Agent Nexus 是一个跨平台（Mac + Windows）桌面应用，管理多个 AI 
 | 框架 | React 18 |
 | 构建 | Vite 7（`root: "src-react"`，dev port 3000） |
 | 语言 | TypeScript（strict） |
-| 样式 | Tailwind CSS 3 + shadcn/ui（Radix + CVA） |
-| 服务端状态 | TanStack React Query |
+| 样式 | Tailwind CSS 3 + CVA + `cn`；自写 themed 原语（**阶段一未用 shadcn CLI / Radix**，见下「前端依赖取舍」） |
+| 服务端状态 | TanStack React Query（**阶段三**接 IPC 时引入） |
 | UI 状态 | useState / useReducer（不引入 Zustand 等额外状态库） |
 | 图标 | Lucide React |
-| 动画 | Framer Motion |
+| 动画 | Framer Motion（**阶段一用 CSS keyframes**，见下「前端依赖取舍」） |
 | Toast | Sonner |
-| 拖拽 | @dnd-kit |
-| 表单 | React Hook Form + Zod |
+| 拖拽 | @dnd-kit（**阶段一用原生 HTML5 DnD**，见下「前端依赖取舍」） |
+| 表单 | React Hook Form + Zod（**阶段三**引入；阶段一为受控组件） |
+
+#### 前端依赖取舍（阶段一实施偏差）
+
+阶段一目标是按 `prototype/*.dc.html` 1:1 复刻交互、数据走内存 mock。下列重量级依赖按「先用更轻的等价实现满足复刻，待其真正产生价值时再引入」的原则**延后**，均为对上表最终选型的有意偏离，非功能裁剪：
+
+| 选型 | 文档最终目标 | 阶段一实现 | 理由 / 引入时机 |
+|------|------------|-----------|----------------|
+| 样式原语 | shadcn/ui（Radix + CVA） | Tailwind + CVA + `cn` 自写 themed 原语；自写轻量 `<Modal>`（ESC / 遮罩 / 锁滚动 / portal）替代 Radix Dialog | 原型是 bespoke 暖色视觉，shadcn 默认中性主题需大量重写、Radix Dialog 改变 markup；自写原语保真且零额外依赖。需要复杂可访问性组件（Combobox / Popover 等）时再按需引入 Radix |
+| 拖拽 | @dnd-kit | 原生 HTML5 DnD（draggable / onDrop） | 原型本就是原生实现，1:1 复刻更省；需键盘可访问性 / 触屏 / 排序动画时再引入 @dnd-kit |
+| 动画 | Framer Motion | CSS `@keyframes`（fade / pulse） | 原型动画即 CSS keyframes，零依赖等价 |
+| 表单 | React Hook Form + Zod | 受控组件 | mock 表单无校验与真实提交；阶段三接 IPC 真实写入时引入 |
+| 服务端状态 | TanStack React Query | 不引入（内存 mock 直读） | 阶段一无 IPC；随阶段三 `lib/api/` 落地，属时序而非偏差 |
+
+保留并已按文档使用：Tailwind CSS 3、CVA + `cn`、Lucide React、Sonner。
 
 ### 后端
 
@@ -52,60 +66,39 @@ agent-nexus/
 │   ├── main.tsx
 │   ├── App.tsx                   # 视图切换器（状态驱动，无路由库）
 │   ├── components/
-│   │   ├── ui/                   # shadcn/ui 原语
+│   │   ├── ui/                   # themed 原语（CVA + cn，非 shadcn CLI；见前端依赖取舍）
+│   │   ├── shell/                # 内容区壳 AppHeader / TabNav / AppShell / ScreenScroll（阶段一新增）
 │   │   ├── project/
-│   │   ├── skill/
+│   │   ├── skill/                # 含 SkillRow（Skill 页与 Project 详情共用）
 │   │   ├── session/
 │   │   ├── provider/
 │   │   ├── prompt/
-│   │   └── sync/
+│   │   ├── sync/
+│   │   └── settings/             # Settings 页（齿轮进入，非 tab；阶段一新增）
 │   ├── lib/
-│   │   ├── api/                  # 按领域分文件的 typed invoke 封装
-│   │   ├── query/                # React Query hooks
-│   │   └── utils.ts
+│   │   ├── runtime.ts            # Tauri 环境判断与最小桌面调用（阶段二）
+│   │   ├── api/                  # 按领域分文件的 typed invoke 封装（阶段三）
+│   │   ├── query/                # React Query hooks（阶段三）
+│   │   ├── mock.ts               # 阶段一内存 mock 数据边界（等价 nexus-data.js）
+│   │   ├── tokens.ts             # 运行时调色板 / agent 元数据 / 状态色
+│   │   ├── nav.tsx               # 视图切换 context（View 联合 + go）
+│   │   └── utils.ts              # cn()
 │   ├── hooks/
 │   ├── types/
 │   └── index.html
 ├── src-tauri/                    # Rust 后端
 │   ├── src/
-│   │   ├── main.rs
-│   │   ├── lib.rs                # 插件/命令注册
-│   │   ├── commands/             # 薄命令层（校验 → service → map_err）
-│   │   │   ├── project.rs
-│   │   │   ├── skill.rs
-│   │   │   ├── prompt.rs
-│   │   │   ├── session.rs
-│   │   │   ├── provider.rs
-│   │   │   ├── sync.rs
-│   │   │   └── settings.rs
-│   │   ├── services/             # 业务逻辑层
-│   │   │   ├── project.rs       # Git 仓库扫描、路径续认
-│   │   │   ├── skill.rs         # SSOT + distribution + agent matrix
-│   │   │   ├── session.rs       # 目录扫描、索引
-│   │   │   ├── sync_protocol.rs # 传输无关的 manifest 同步协议
-│   │   │   └── distribution.rs  # Symlink/Copy 落点逻辑
-│   │   ├── orchestration/        # 跨领域用例编排
-│   │   │   ├── sync.rs          # Sync Task 执行编排
-│   │   │   ├── webdav_sync.rs   # WebDAV 上传/下载编排
-│   │   │   └── auto_sync.rs     # DB hook / 事件驱动的防抖自动上传
-│   │   ├── ports/                # 外部副作用边界（轻量接口）
-│   │   │   ├── filesystem.rs    # 文件系统 / symlink / copy
-│   │   │   ├── webdav.rs        # WebDAV 传输端口
-│   │   │   └── tray.rs          # 托盘 / flyout surface 端口
-│   │   ├── adapters/             # 端口的具体实现
-│   │   │   ├── local_filesystem.rs
-│   │   │   ├── reqwest_webdav.rs
-│   │   │   └── tauri_tray.rs
-│   │   ├── database/
-│   │   │   ├── mod.rs           # Database 结构体、init、Mutex<Connection>
-│   │   │   ├── schema.rs        # 建表 + 版本迁移
-│   │   │   └── dao/             # 按领域拆分的查询方法（impl Database）
-│   │   ├── store.rs             # AppState（Arc<Database> + services + orchestration）
-│   │   └── error.rs             # AppError 枚举
+│   │   ├── main.rs              # 极薄入口，仅调用 lib::run()
+│   │   ├── lib.rs               # Builder / setup / 状态注入 / 命令注册
+│   │   ├── commands/
+│   │   │   ├── mod.rs
+│   │   │   └── app.rs           # get_desktop_health（阶段二最小命令）
+│   │   ├── store.rs             # 最小 AppState，占位但不预塞伪 service
+│   │   └── error.rs             # 最小 AppError 入口
 │   ├── tauri.conf.json
 │   └── Cargo.toml
 ├── prototype/                    # 视觉参考（只读，不参与构建）
-├── docs/adr/
+├── docs/design/                 # 架构 / Schema / 需求 / 原型设计
 ├── CONTEXT.md
 └── package.json
 ```
@@ -120,7 +113,7 @@ agent-nexus/
 - 前端：App shell + 视图切换器 + 顶部 tab 导航
 - 根据 `prototype/*.dc.html` 将所有页面迁移为 React 组件
 - 6 个一级页面：Provider、Project、Skill、Prompt、Session、Sync + Settings
-- 含所有交互：modal、overflow menu、agent matrix、拖拽排序、toast
+- 含所有交互：modal、overflow menu、agent matrix、拖拽排序（范围依 CONTEXT.md Display Order：Provider / Project / Task Group / Task）、toast
 - 数据来源：前端内存 mock（等价于 `nexus-data.js`），不经 IPC
 - 原型已完整，此阶段目标是 1:1 复刻交互，不做功能裁剪
 - 能通过 `pnpm dev` 在浏览器中验证全部页面和交互
@@ -129,8 +122,15 @@ agent-nexus/
 
 - 初始化 Tauri 2 项目（`src-tauri/`，参考 cc-switch 的 `tauri.conf.json`、`package.json`）
 - 配置 Tauri 使用已有 `src-react/` 前端：`devUrl` 指向 `http://localhost:3000`，`frontendDist` 指向 `../src-react/dist`
-- Rust 侧：空 `lib.rs` + `main.rs`，能 `pnpm tauri dev` 打开窗口
-- 不接真实 IPC，不引入 rusqlite；此阶段只验证桌面壳、窗口启动和前端静态资源加载
+- Rust 侧采用正式装配结构：`main.rs` 极薄、`lib.rs` 负责 builder/setup/命令注册、`store.rs` 为最小占位
+- 增加一个最小只读 IPC：`get_desktop_health`，返回 `{ ok, appName, appVersion }`，仅用于验证桌面宿主联通
+- 前端继续保留 `pnpm dev` 纯浏览器开发模式；通过 `src-react/lib/runtime.ts` 集中判断 Tauri 环境，并在 Tauri 环境首屏挂载后静默探测一次，不自动重试
+- `desktopHealth` 仅作为 `App.tsx` 本地开发态辅助状态，失败静默降级为 `unavailable`，不阻塞主渲染、不引入 React Query 或正式 `lib/api/`
+- `pnpm tauri dev` 应一条命令拉起桌面开发所需进程；阶段二不要求手动先启动 `pnpm dev`
+- 阶段二仅创建当前参与编译与注册的最小 Rust 文件，不预建 `services/`、`orchestration/`、`ports/`、`adapters/`、`database/` 空目录
+- 不引入 `rusqlite`、`tokio`、`reqwest` 等阶段三依赖；此阶段只验证桌面壳、窗口启动、前端静态资源加载与最小 IPC 链路
+- Tauri 侧只配置一个 `main` 主窗口：原生标题栏、可调整大小、初始尺寸 `1280x840`、最小尺寸 `1100x720`；关闭主窗口即退出应用
+- 阶段二不引任何可选 Tauri 插件，不提前开启文件系统、托盘、网络等未来能力
 
 ### 阶段三：IPC 接线 + 真实后端
 
@@ -237,7 +237,7 @@ type View = "provider" | "project" | "skill" | "prompt" | "session" | "sync" | "
 
 ## 数据库设计
 
-详见 [ADR 0002: 数据库 Schema 设计](./adr0002-数据库 Schema 设计.md)。
+详见 [数据库 Schema 设计](<./Database Schema.md>)。
 
 ## 后果
 

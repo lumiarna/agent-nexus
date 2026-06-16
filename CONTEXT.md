@@ -195,7 +195,7 @@ _Avoid_: Login flow, account management, token writer
 _Avoid_: Full configuration surface, task editor
 
 **Display Order**:
-一种用户可显式调整的列表顺序偏好。MVP 中 `Provider` 卡片、`Task Group` 列表以及 `Task Group` 内的 `Task` 列表都支持拖拽排序；而 agent 相关展示顺序则采用固定 canonical order：`Claude Code / CodeX / Copilot / OpenCode`。
+一种用户可显式调整的列表顺序偏好。MVP 中 `Provider` 卡片、`Project` 列表、`Task Group` 列表以及 `Task Group` 内的 `Task` 列表都支持拖拽排序；而 agent 相关展示顺序则采用固定 canonical order：`Claude Code / CodeX / Copilot / OpenCode`。
 _Avoid_: Implicit heuristic order, mixed agent order
 
 **Global Resource**:

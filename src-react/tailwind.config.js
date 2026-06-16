@@ -1,6 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ["./src-react/index.html", "./src-react/**/*.{ts,tsx}"],
+  content: [
+    "./index.html",
+    "./src/**/*.{ts,tsx}",
+  ],
   theme: {
     extend: {
       fontFamily: {
@@ -14,7 +17,7 @@ export default {
       },
       // High-frequency structural + status colors from prototype/nexus-data.js.
       // Long-tail one-off shades stay as arbitrary values (`[#hex]`) for exact
-      // fidelity. Runtime-computed colors live in src-react/lib/tokens.ts.
+      // fidelity. Runtime-computed colors live in lib/tokens.ts.
       colors: {
         nexus: {
           bg: "#f3ece3",

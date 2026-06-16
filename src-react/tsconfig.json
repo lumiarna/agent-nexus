@@ -20,7 +20,8 @@
     "noFallthroughCasesInSwitch": true,
 
     "baseUrl": ".",
-    "paths": { "@/*": ["src-react/*"] }
+    "paths": { "@/*": ["src/*"] }
   },
-  "include": ["src-react"]
+  "include": ["src"],
+  "exclude": ["dist", "node_modules"]
 }

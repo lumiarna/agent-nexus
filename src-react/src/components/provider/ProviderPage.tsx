@@ -4,13 +4,13 @@ import { toast } from "sonner";
 import { Button, IconButton } from "@/components/ui/button";
 import { Dot, Input } from "@/components/ui/primitives";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
+import { Segmented } from "@/components/ui/segmented";
 import { Toggle } from "@/components/ui/toggle";
 import { ScreenScroll } from "@/components/shell/screen";
-import { useNav } from "@/lib/nav";
 import { nexus } from "@/lib/mock";
 import { quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
-import type { Provider } from "@/types";
+import type { Provider, TrayMetric } from "@/types";
 
 const MSG: Record<string, { title: string; body: string }> = {
   expired: {
@@ -32,7 +32,6 @@ function actionLabel(st: ProviderUiStatus, loading: boolean): string {
 }
 
 export function ProviderPage() {
-  const { go } = useNav();
   const [providers] = useState<Provider[]>(() => nexus.providers());
   const [order, setOrder] = useState<string[]>(() => providers.map((p) => p.id));
   const [cardVisible, setCardVisible] = useState<Record<string, boolean>>(() =>
@@ -44,7 +43,7 @@ export function ProviderPage() {
   const [configId, setConfigId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [dragId, setDragId] = useState<string | null>(null);
-  const trayMetric = useState(() => nexus.settings().trayMetric)[0];
+  const [trayMetric, setTrayMetric] = useState<TrayMetric>(() => nexus.settings().trayMetric);
 
   const timers = useRef<Record<string, number>>({});
   useEffect(
@@ -287,6 +286,29 @@ export function ProviderPage() {
         </div>
       ) : null}
 
+      {/* Tray metric */}
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-[14px] border border-nexus-border bg-nexus-sand2 px-[18px] py-[14px]">
+        <div className="max-w-[520px]">
+          <div className="text-[13px] font-bold text-nexus-body">
+            Quota metric shown in the tray icon
+          </div>
+          <div className="mt-[3px] text-[11.5px] leading-[1.5] text-[#a99a89]">
+            Applied globally across all providers so side-by-side icons read consistently.
+          </div>
+        </div>
+        <Segmented<TrayMetric>
+          options={[
+            { value: "Used", label: "Used" },
+            { value: "Remaining", label: "Remaining" },
+          ]}
+          value={trayMetric}
+          onChange={(m) => {
+            setTrayMetric(m);
+            toast(`Tray metric set to ${m} (global)`);
+          }}
+        />
+      </div>
+
       <Modal open={!!cfg} onClose={() => setConfigId(null)}>
         {cfg ? (
           <>
@@ -369,17 +391,9 @@ export function ProviderPage() {
                     <Toggle checked={!!trayVisible[cfg.id]} onChange={() => {}} />
                   </div>
                 </div>
-                <div className="mt-2.5 flex items-center justify-between gap-2.5 rounded-[11px] border border-nexus-border bg-nexus-bg px-[13px] py-[11px]">
-                  <div className="text-[11.5px] leading-[1.5] text-[#8a7a68]">
+                <div className="mt-2.5 rounded-[11px] border border-nexus-border bg-nexus-bg px-[13px] py-[11px] text-[11.5px] leading-[1.5] text-[#8a7a68]">
                     Taskbar metric (<b className="text-[#6a6055]">used / remaining</b>) is a
-                    global setting. Currently <b className="text-[#6a6055]">{trayMetric}</b>.
-                  </div>
-                  <button
-                    onClick={() => go("settings")}
-                    className="flex-none text-[11.5px] font-semibold text-nexus-accent hover:underline"
-                  >
-                    Settings →
-                  </button>
+                    global setting — configured above the cards on this page. Currently <b className="text-[#6a6055]">{trayMetric}</b>.
                 </div>
               </div>
             </div>
