@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    margin: 0;
+    height: 100%;
+  }
+  body {
+    background: #f3ece3;
+    color: #3a302a;
+    font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont,
+      sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root {
+    height: 100%;
+  }
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+  input {
+    font-family: inherit;
+  }
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(90, 70, 45, 0.16);
+    border-radius: 6px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(90, 70, 45, 0.28);
+    background-clip: content-box;
+  }
+}

@@ -1,4 +1,4 @@
-# 原型反馈 B
+# 原型反馈
 
 - Provider 卡片可拖拽排序
 - 示例 Project Key 不要用那么多 github 仓库名，容易造成误解；考虑到 Project Key 如果支持编辑，还要考虑什么时候编辑，所以感觉去掉编辑功能吧，始终使用项目文件夹名称作为 Project Key
