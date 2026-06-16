@@ -1,8 +1,4 @@
-# ADR 0002: 数据库 Schema 设计
-
-- **状态**: 已接受
-- **日期**: 2026-06-16
-- **关联**: [ADR 0001](./adr0001-产品技术栈和架构设计.md)（技术栈选型确定 rusqlite）
+# 数据库 Schema 设计
 
 ## 背景
 
@@ -26,7 +22,7 @@ Agent Nexus 的领域模型（见 `CONTEXT.md`）包含以下核心实体：
 2. **传播关系独立建表** — Distribution 是 Skill/Prompt 到 Agent 的 many-to-many 关系，拆为 `skill_distributions` / `prompt_distributions`，而非 JSON 字段
 3. **Session 正文不入库** — `session_index` 只存元数据 + 摘要；正文留在文件系统或 WebDAV
 4. **FTS 用 content-sync 模式** — `session_fts` 是 `session_index` 的外部内容 FTS5 表，需手动同步
-5. **JSON 字段仅用于弱结构数据** — `tasks.targets`（路径数组）、`providers.connection_params`（可变键值对）
+5. **JSON 字段仅用于弱结构数据** — `providers.connection_params`（可变键值对）；`Sync Task` targets 独立建表以获得去重、级联删除和可约束性
 6. **时间戳统一用 Unix epoch 整数（秒）** — 不用 ISO 字符串
 7. **主键统一用 UUID（TEXT）** — 除自增辅助表（`provider_windows`）外
 
@@ -43,11 +39,11 @@ INSERT INTO schema_version (version) VALUES (1);
 -- ─── Workspace ────────────────────────────────────────────────
 
 -- Project: 被 Agent Nexus 收录的 Git repository root
--- CONTEXT.md: Project Key 是跨设备归并的稳定身份键，默认取目录名
+-- CONTEXT.md: Project Key 是跨设备归并的稳定身份键；MVP 默认取目录名，未来可通过受控编辑/迁移流程修改
 CREATE TABLE projects (
     id TEXT PRIMARY KEY,                              -- UUID
     name TEXT NOT NULL,                               -- 显示名（初始 = 目录名）
-    key TEXT NOT NULL UNIQUE,                         -- 稳定身份键（= 目录名）
+    key TEXT NOT NULL UNIQUE,                         -- 稳定身份键（MVP 默认 = 目录名）
     path TEXT NOT NULL,                               -- 当前本地仓库路径（可变）
     status TEXT NOT NULL DEFAULT 'active'             -- active | stale | hidden
         CHECK (status IN ('active', 'stale', 'hidden')),
@@ -88,6 +84,11 @@ CREATE TABLE skill_distributions (
     agent TEXT NOT NULL,                              -- Agent 名：Agents | Claude Code | CodeX | Copilot | OpenCode
     role TEXT NOT NULL CHECK (role IN ('source', 'target', 'none')),
     target_path TEXT,                                 -- target 的 Placement 路径（source/none 时为 NULL）
+    CHECK (
+        (role = 'target' AND target_path IS NOT NULL)
+        OR
+        (role IN ('source', 'none') AND target_path IS NULL)
+    ),
     PRIMARY KEY (skill_id, agent),
     FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE
 );
@@ -108,6 +109,11 @@ CREATE TABLE prompt_distributions (
     agent TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('source', 'target', 'none')),
     target_path TEXT,
+    CHECK (
+        (role = 'target' AND target_path IS NOT NULL)
+        OR
+        (role IN ('source', 'none') AND target_path IS NULL)
+    ),
     PRIMARY KEY (prompt_id, agent),
     FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
 );
@@ -182,7 +188,6 @@ CREATE TABLE tasks (
         CHECK (direction IN ('Distribution', 'Backup', 'Restore/Pull')),
     action TEXT NOT NULL CHECK (action IN ('symlink', 'copy')),
     source TEXT NOT NULL,
-    targets TEXT NOT NULL,                            -- JSON array of target paths
     schedule TEXT NOT NULL DEFAULT 'manual',          -- 'manual' | CRON 表达式
     sort_index INTEGER,
     last_run_at INTEGER,
@@ -190,6 +195,16 @@ CREATE TABLE tasks (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
+);
+
+-- Task Target: Sync Task 的目标落点
+-- CONTEXT.md: 单个 Task 遵守 single source -> multiple targets；显式反向同步需创建另一个 Task
+CREATE TABLE task_targets (
+    task_id TEXT NOT NULL,
+    target_path TEXT NOT NULL,
+    sort_index INTEGER,
+    PRIMARY KEY (task_id, target_path),
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
 -- ─── Settings ────────────────────────────────────────────────
@@ -206,11 +221,29 @@ CREATE TABLE settings (
 ```sql
 CREATE INDEX idx_skills_scope ON skills(scope);
 CREATE INDEX idx_skills_project ON skills(project_id) WHERE project_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_skill_distributions_one_source
+    ON skill_distributions(skill_id)
+    WHERE role = 'source';
+CREATE UNIQUE INDEX idx_prompt_distributions_one_source
+    ON prompt_distributions(prompt_id)
+    WHERE role = 'source';
 CREATE INDEX idx_session_index_project ON session_index(project_id);
 CREATE INDEX idx_session_index_source ON session_index(source);
 CREATE INDEX idx_tasks_group ON tasks(group_id);
 CREATE INDEX idx_provider_windows_provider ON provider_windows(provider_id);
 ```
+
+### Service 层不变量
+
+以下不变量不能只依赖 UI，必须由 Service 事务统一维护：
+
+- `Agent Matrix` 每个 asset 的 agent 集合必须完整且无重复。
+- `Agent Matrix` 每个 asset 必须且只能有一个 `source`；partial unique index 只能保证“最多一个”，Service 负责保证“至少一个”。
+- `target_path` 由系统按 agent 与上下文计算，前端不能直接提交任意目标路径。
+- 更新某个 asset 的 Matrix 时，使用单个事务删除旧 rows、插入新 rows、校验 source 数量后提交。
+- `Sync Task` 的 `source` 不能等于任一 `task_targets.target_path`；target 也不能在同一个 Task 内回流为 source。
+- 如果用户需要配置文件多设备同步，应创建两个独立的显式反向 Task pair，例如 `A -> B` 与 `B -> A`，而不是在单个 Task 中表达双向同步。
+- Runner 执行前必须 canonicalize source/target 并生成 dry-run 计划，成功落盘后再记录 placement 或 last-run 状态。
 
 ### 初始设置种子
 
@@ -247,7 +280,7 @@ pub fn migrate(conn: &Connection) -> Result<(), AppError> {
 ## 不做的事
 
 - **不用 ORM** — rusqlite 直写 SQL，DAO 方法按领域拆文件（`impl Database` 块）。原因：ORM 在 Rust 生态（diesel/sea-orm）增加编译时间和 schema 同步复杂度，对本地桌面应用收益不足。
-- **不做双向同步** — `tasks.direction` 只有单向值，遵循 CONTEXT.md "不合并成一个双向任务" 的约束。
+- **不做单任务双向同步** — `tasks.direction` 只有单向值，遵循 CONTEXT.md "不合并成一个双向任务" 的约束；若用户需要双向效果，必须配置两个独立的显式反向 Task pair。
 - **不将 Session 正文入库** — 索引 + FTS 搜索摘要即可，正文通过文件路径按需读取。
 - **不做 soft delete** — `projects.status = 'hidden'` 是显式状态，不是删除标记；真正删除直接 `DELETE`。
 
@@ -257,12 +290,14 @@ pub fn migrate(conn: &Connection) -> Result<(), AppError> {
 
 - Schema 严格对齐 CONTEXT.md 词汇表，代码与领域语言一致
 - 传播关系独立建表，Agent Matrix 的 CRUD 操作清晰
+- `task_targets` 独立建表后，Sync Task 目标可去重、可排序、可级联删除，避免将核心执行边界藏在 JSON 数组中
 - FTS5 为未来 Session 全文检索做好准备
 - 迁移策略简单可靠（cc-switch 已验证）
 
 ### 负面
 
-- JSON 字段（`targets`、`connection_params`）无法被 SQLite 索引或约束
+- JSON 字段（`providers.connection_params`）无法被 SQLite 索引或约束
+- `task_targets` 拆表增加少量 DAO 与事务更新代码
 - 手写 SQL 需要人工保证类型安全（无编译期校验）
 - FTS content-sync 模式需要在 INSERT/UPDATE/DELETE session_index 时手动同步 FTS 表
 

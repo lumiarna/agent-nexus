@@ -1,8 +1,4 @@
-# ADR 0001: 产品技术栈和架构设计
-
-- **状态**: 已接受
-- **日期**: 2026-06-16
-- **取代**: 早期关于 Electron 的 MVP 讨论
+# 产品技术栈和架构设计
 
 ## 背景
 
@@ -148,7 +144,7 @@ agent-nexus/
 ### 阶段四：系统能力
 
 - 系统托盘 + Provider flyout（borderless webview 复用卡片组件）
-- Provider quota 并行轮询（参考 agent-quota-monitor）
+- Provider quota 按 surface 触发并发刷新（参考 cc-switch 托盘刷新模型）
 - 自动启动、窗口状态恢复
 
 ## 核心架构模式
@@ -224,11 +220,13 @@ type View = "provider" | "project" | "skill" | "prompt" | "session" | "sync" | "
 - 上传：先传 artifacts（db.sql、skills.zip），最后传 manifest.json
 - 下载：拉 manifest → 校验 SHA-256 → 应用快照
 - 自动同步：SQLite `update_hook` → 防抖上传（1s 延迟，10s 最大等待）
+- 单个 `Sync Task` 永远保持 `single source -> multiple targets`；如需配置文件多设备同步，使用两个显式反向 Task pair（例如 `A -> B` 与 `B -> A`），而不是让单个 Task 具备双向回流语义。
 
-### 8. Provider 托盘 + Flyout（参考 agent-quota-monitor + Tauri 多窗口）
+### 8. Provider 托盘 + Flyout（参考 cc-switch + agent-quota-monitor + Tauri 多窗口）
 
-- 多 Provider 并行轮询（每 provider 一个线程，总延迟 = 最慢者；参考 agent-quota-monitor）
+- Provider quota 刷新采用 cc-switch 的按需模型：托盘 hover/click 或页面操作触发，短时间节流，只刷新当前 surface 需要展示的可见 provider，并发执行后写穿进程内缓存。
 - 每个 provider 独立隔离：失败不影响其他 provider 展示
+- 官方 CLI Provider 优先只读既有凭据来源（例如 CLI 凭据文件或系统 Keychain），不接管第三方登录生命周期；手动配置的 Provider connection params 可进入本地数据库，但 UI 与日志必须脱敏。
 - 托盘图标：单图标 + 右键菜单（快捷操作、退出）
 - **Flyout 悬停详情**：Tauri 第二窗口（borderless webview），渲染与 Provider 页面相同的卡片组件
   - 悬停/点击托盘图标时定位到图标附近弹出
@@ -239,7 +237,7 @@ type View = "provider" | "project" | "skill" | "prompt" | "session" | "sync" | "
 
 ## 数据库设计
 
-详见 [ADR 0002: 数据库 Schema 设计](./0002-database-schema.md)。
+详见 [ADR 0002: 数据库 Schema 设计](./adr0002-数据库 Schema 设计.md)。
 
 ## 后果
 
@@ -251,7 +249,8 @@ type View = "provider" | "project" | "skill" | "prompt" | "session" | "sync" | "
 - cc-switch 为每个主要子系统提供了经验证的模式
 - SQLite FTS5 支撑未来 Session 全文检索
 - WebDAV auto-sync via DB hook 优雅且防抖安全
-- agent-quota-monitor 验证了 Provider 托盘轮询的可行性
+- cc-switch 验证了托盘触发的 Provider quota 刷新、节流和缓存模型
+- agent-quota-monitor 验证了 Provider 托盘展示、flyout 和图标渲染的可行性
 - 文件系统、WebDAV、托盘等外部副作用被端口隔离，降低 Service 层测试和替换成本
 
 ### 负面
@@ -282,9 +281,9 @@ type View = "provider" | "project" | "skill" | "prompt" | "session" | "sync" | "
 
 | 参考 | 路径 | 用途 |
 |------|------|------|
-| cc-switch | `D:\Sample\cc-switch\` | 整体架构、WebDAV sync、SQLite DAO、service 分层、前端模式 |
+| cc-switch | `D:\Sample\cc-switch\` | 整体架构、WebDAV sync、SQLite DAO、service 分层、前端模式、Provider quota 刷新模型 |
 | cc-switch sync protocol | `src-tauri/src/services/sync_protocol.rs` | manifest 同步协议设计 |
 | cc-switch schema | `src-tauri/src/database/schema.rs` | 迁移模式、表设计参考 |
-| agent-quota-monitor | `D:\Workspace\agent-quota-monitor\` | Windows 托盘、Provider 轮询、flyout、图标渲染 |
+| agent-quota-monitor | `D:\Workspace\agent-quota-monitor\` | Windows 托盘、flyout、图标渲染 |
 | Agent Nexus prototype | `prototype/*.dc.html` | 视觉和交互参考 |
 | Agent Nexus 领域模型 | `CONTEXT.md` | 实体定义与边界 |

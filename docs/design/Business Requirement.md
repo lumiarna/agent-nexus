@@ -3,7 +3,7 @@
 ## Hero
 
 - 标题：`A Nexus for Shared Agent Assets`
-- 副标题：`Your agents may be different, but the assets they rely on do not have to be. Manage one shared layer for skills, prompts, sessions, projects, and quotas.`
+- 副标题：`Your agents may be different, but the assets they rely on do not have to be. Manage one shared layer for providers, projects, skills, prompts, and sessions.`
 
 ## 基本要求
 
@@ -14,6 +14,10 @@
 
 ## Agents
 
+- Generic Agent
+	- `${GENERIC_AGENT_CONFIG_DIR}`: `~/.agents`
+	- `${GENERIC_AGENT_SKILLS_DIR}`: `${GENERIC_AGENT_CONFIG_DIR}/skills`
+	- `${GENERIC_AGENT_PROMPT_FILE}`: `${GENERIC_AGENT_CONFIG_DIR}/AGENTS.md`
 - Claude Code
 	- `${CLAUDE_CODE_CONFIG_DIR}`: `~/.claude`
 	- `${CLAUDE_CODE_SKILLS_DIR}`: `${CLAUDE_CODE_CONFIG_DIR}/skills`
@@ -24,7 +28,7 @@
 	- `${CODEX_SKILLS_DIR}`: `${CODEX_CONFIG_DIR}/skills`
 	- `${CODEX_PROMPT_FILE}`: `${CODEX_CONFIG_DIR}/AGENTS.md`
 - Copilot
-	- `${COPILOT_CONFIG_DIR}`: `~/.agents`
+	- `${COPILOT_CONFIG_DIR}`: `~/.github`
 	- `${COPILOT_SKILLS_DIR}`: `${COPILOT_CONFIG_DIR}/skills`
 	- `${COPILOT_PROMPT_FILE}`: `${COPILOT_CONFIG_DIR}/AGENTS.md`
 - OpenCode
@@ -36,10 +40,6 @@
 ## 资产对象
 
 ### Provider
-
-- ? 具体逻辑参考代码，可能有出入
-
----
 
 - Claude Code
 	- Quota 数据来源：`${CLAUDE_CODE_CONFIG_DIR}`
@@ -82,6 +82,14 @@
 	- 手动添加的可以不支持 Symlink，如有需求，手动在 Symlink & Copy 管理里添加
 - 支持快捷打开文件所在位置
 - 支持 WebDAV 备份
+
+#### Project Skill Direction
+
+- Generic Agent: `${project_dir}/.agents/skills`
+- Claude Code: `${project_dir}/.claude/skills`
+- CodeX: `${project_dir}/.codex/skills`
+- Copilot: `${project_dir}/.github/skills`
+- OpenCode: `${project_dir}/.opencode/skills`
 
 ### Prompt
 

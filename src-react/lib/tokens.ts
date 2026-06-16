@@ -2,7 +2,7 @@
 // tints with alpha suffixes, quota thresholds) and therefore consumed via inline
 // `style`, not Tailwind classes. Mirrors prototype/nexus-data.js.
 
-import type { AgentName, ProviderStatus } from "@/types";
+import type { AgentName, CellRole, Cells, ProviderStatus } from "@/types";
 
 /** Canonical agent display/distribution order. "Agents" is the generic ~/.agents
  *  default and sits leftmost in the Agent Matrix. */
@@ -67,4 +67,17 @@ export function statusInfo(st: ProviderUiStatus): { label: string; color: string
     default:
       return { label: "No credentials", color: palette.muted };
   }
+}
+
+/** First agent holding the canonical source in a matrix row (fallback: leftmost). */
+export function srcAgentOf(cells: Cells): AgentName {
+  for (const a of AGENT_ORDER) if (cells[a] === "source") return a;
+  return AGENT_ORDER[0];
+}
+
+/** Toggle a matrix cell target↔none. The source cell is fixed (no-op). */
+export function toggleCellRole(cells: Cells, agent: AgentName): Cells {
+  if (cells[agent] === "source") return cells;
+  const next: CellRole = cells[agent] === "target" ? "none" : "target";
+  return { ...cells, [agent]: next };
 }
