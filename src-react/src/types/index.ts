@@ -117,7 +117,7 @@ export interface Task {
   source: string;
   targetType: LocationType;
   target: string;
-  /** "manual" or a CRON expression. */
+  /** "manual" or a schedule expression. */
   schedule: string;
   lastRun: string;
   status: TaskStatus;

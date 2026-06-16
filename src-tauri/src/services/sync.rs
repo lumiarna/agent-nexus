@@ -3,10 +3,12 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-use rusqlite::{OptionalExtension, Row};
-use serde::Serialize;
+use rusqlite::{params, OptionalExtension, Row};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::{
     database::Database,
@@ -28,6 +30,47 @@ pub struct ProjectSymlink {
     pub target_project_name: Option<String>,
     pub link_kind: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Task {
+    pub id: String,
+    pub direction: String,
+    pub action: String,
+    pub source_type: String,
+    pub source: String,
+    pub target_type: String,
+    pub target: String,
+    pub schedule: String,
+    pub last_run: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskGroup {
+    pub id: String,
+    pub name: String,
+    pub tasks: Vec<Task>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTaskInput {
+    pub action: String,
+    pub source_type: String,
+    pub source: String,
+    pub target_type: String,
+    pub target: String,
+    pub schedule: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTaskGroupInput {
+    pub name: String,
+    pub tasks: Vec<CreateTaskInput>,
 }
 
 #[derive(Clone)]
@@ -71,6 +114,160 @@ impl SyncService {
         Ok(links)
     }
 
+    pub fn list_task_groups(&self) -> AppResult<Vec<TaskGroup>> {
+        let conn = self.db.connection()?;
+        let mut group_stmt = conn.prepare(
+            r#"
+            SELECT id, name
+            FROM task_groups
+            ORDER BY sort_index IS NULL, sort_index, created_at, name
+            "#,
+        )?;
+        let group_rows = group_stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut groups = Vec::new();
+        for group_row in group_rows {
+            let (id, name) = group_row?;
+            groups.push(TaskGroup {
+                tasks: list_tasks_for_group(&conn, &id)?,
+                id,
+                name,
+            });
+        }
+
+        Ok(groups)
+    }
+
+    pub fn create_task_group(&self, input: CreateTaskGroupInput) -> AppResult<TaskGroup> {
+        let name = input.name.trim();
+        if name.is_empty() {
+            return Err(AppError::Validation(
+                "task group name is required".to_string(),
+            ));
+        }
+        if input.tasks.is_empty() {
+            return Err(AppError::Validation(
+                "at least one task is required".to_string(),
+            ));
+        }
+
+        let now = now_epoch_seconds()?;
+        let group_id = Uuid::new_v4().to_string();
+        let mut conn = self.db.connection()?;
+        let tx = conn.transaction()?;
+
+        tx.execute(
+            r#"
+            INSERT INTO task_groups (id, name, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?3)
+            "#,
+            params![group_id, name, now],
+        )?;
+
+        for (index, task) in input.tasks.iter().enumerate() {
+            let action = validate_one_of(&task.action, &["Symlink", "Copy"], "task action")?;
+            let source_type =
+                validate_one_of(&task.source_type, &["Local", "Cloud"], "source type")?;
+            let target_type =
+                validate_one_of(&task.target_type, &["Local", "Cloud"], "target type")?;
+            if source_type == "Cloud" || target_type == "Cloud" {
+                return Err(AppError::Validation(
+                    "cloud sync tasks are not implemented yet".to_string(),
+                ));
+            }
+            let source = required_trimmed(&task.source, "task source")?;
+            let target = required_trimmed(&task.target, "task target")?;
+            if action == "Symlink" && (source_type != "Local" || target_type != "Local") {
+                return Err(AppError::Validation(
+                    "symlink tasks require local source and target".to_string(),
+                ));
+            }
+            let schedule = task.schedule.trim();
+            let schedule = if schedule.is_empty() {
+                "manual"
+            } else {
+                schedule
+            };
+            if schedule != "manual" {
+                return Err(AppError::Validation(
+                    "scheduled sync tasks are not implemented yet".to_string(),
+                ));
+            }
+            let direction = derive_direction(source_type, target_type);
+
+            tx.execute(
+                r#"
+                INSERT INTO tasks (
+                    id, group_id, direction, action, source_type, source, target_type, target,
+                    schedule, sort_index, last_status, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'never', ?11, ?11)
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    group_id,
+                    direction,
+                    action,
+                    source_type,
+                    source,
+                    target_type,
+                    target,
+                    schedule,
+                    index as i64,
+                    now,
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        drop(conn);
+
+        self.list_task_groups()?
+            .into_iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| AppError::Internal("created task group was not found".to_string()))
+    }
+
+    pub fn delete_task(&self, id: String) -> AppResult<()> {
+        let id = required_trimmed(&id, "task id")?;
+        let conn = self.db.connection()?;
+        let task = conn
+            .query_row(
+                r#"
+                SELECT action, target_type, target
+                FROM tasks
+                WHERE id = ?1
+                "#,
+                [id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        let Some((action, target_type, target)) = task else {
+            return Ok(());
+        };
+
+        if action == "Symlink" && target_type == "Local" {
+            remove_symlink_if_present(Path::new(&target))?;
+        }
+
+        conn.execute("DELETE FROM tasks WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn delete_project_symlink(&self, target_path: String) -> AppResult<()> {
+        let target_path = required_trimmed(&target_path, "project symlink target path")?;
+        remove_symlink(Path::new(target_path))
+    }
+
     fn list_existing_project_roots(&self) -> AppResult<Vec<ProjectRoot>> {
         let conn = self.db.connection()?;
         let mut stmt = conn.prepare(
@@ -112,6 +309,99 @@ impl SyncService {
                 .collect(),
         })
     }
+}
+
+fn remove_symlink(path: &Path) -> AppResult<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_symlink() {
+        return Err(AppError::Validation(
+            "project symlink target path must be a symlink".to_string(),
+        ));
+    }
+
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+fn remove_symlink_if_present(path: &Path) -> AppResult<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => remove_symlink(path),
+        Ok(_) | Err(_) => Ok(()),
+    }
+}
+
+fn list_tasks_for_group(conn: &rusqlite::Connection, group_id: &str) -> AppResult<Vec<Task>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            id,
+            direction,
+            action,
+            source_type,
+            source,
+            target_type,
+            target,
+            schedule,
+            COALESCE(strftime('%m-%d %H:%M', last_run_at, 'unixepoch'), '—') AS last_run,
+            COALESCE(last_status, 'never') AS status
+        FROM tasks
+        WHERE group_id = ?1
+        ORDER BY sort_index IS NULL, sort_index, created_at
+        "#,
+    )?;
+
+    let rows = stmt.query_map([group_id], task_from_row)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
+    Ok(Task {
+        id: row.get(0)?,
+        direction: row.get(1)?,
+        action: row.get(2)?,
+        source_type: row.get(3)?,
+        source: row.get(4)?,
+        target_type: row.get(5)?,
+        target: row.get(6)?,
+        schedule: row.get(7)?,
+        last_run: row.get(8)?,
+        status: row.get(9)?,
+    })
+}
+
+fn derive_direction(source_type: &str, target_type: &str) -> &'static str {
+    if source_type == "Local" && target_type == "Local" {
+        "Distribution"
+    } else if source_type == "Local" && target_type == "Cloud" {
+        "Push"
+    } else {
+        "Pull"
+    }
+}
+
+fn required_trimmed<'a>(value: &'a str, label: &str) -> AppResult<&'a str> {
+    let value = value.trim();
+    if value.is_empty() {
+        Err(AppError::Validation(format!("{label} is required")))
+    } else {
+        Ok(value)
+    }
+}
+
+fn validate_one_of<'a>(value: &'a str, allowed: &[&str], label: &str) -> AppResult<&'a str> {
+    let value = value.trim();
+    if allowed.contains(&value) {
+        Ok(value)
+    } else {
+        Err(AppError::Validation(format!("invalid {label}")))
+    }
+}
+
+fn now_epoch_seconds() -> AppResult<i64> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| AppError::Internal(error.to_string()))?
+        .as_secs() as i64)
 }
 
 fn collect_project_symlinks(

@@ -143,11 +143,11 @@ Agent Nexus 的任务与预设工作域。它统一承载 `Distribution`、`Push
 _Avoid_: Asset page, file manager, two-way sync engine
 
 **Sync Task**:
-一个具体的单向执行任务，严格遵守 `1 source → 1 target` 规则。它是运行对象，不是模板，也不是资产本体。`Direction` 由 source 与 target 的 `Location Type` 自动派生，不由用户手选。`Task` 可独立配置 `manual` 或 `CRON` 调度，并由 Agent Nexus 内建执行。
+一个具体的单向执行任务，严格遵守 `1 source → 1 target` 规则。它是运行对象，不是模板，也不是资产本体。`Direction` 由 source 与 target 的 `Location Type` 自动派生，不由用户手选。`Task` 可独立配置 `Manual` 或 `Schedule` 调度，并由 Agent Nexus 内建执行。
 _Avoid_: Template, relationship only, background daemon, task group as execution type, multi-target task
 
 **Task Group**:
-一个包含一个或多个 `Sync Task` 的组织与编排容器。它用于创建、排序、批量查看与批量触发，但不承载 `Backup` / `Distribution` / `Restore/Pull` 等执行方向语义。MVP 中 `Create custom task` 的默认创建单位是 `Task Group`，单任务只是单元素 group。
+一个包含一个或多个 `Sync Task` 的组织与编排容器。它用于创建、排序、批量查看与批量触发，但不承载 `Distribution` / `Push/Pull` 等执行方向语义。MVP 中 `Create custom task` 的默认创建单位是 `Task Group`，单任务只是单元素 group。
 _Avoid_: Execution type, workflow engine, task type
 
 **Template**:

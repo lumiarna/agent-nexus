@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,13 @@ import { Dot, Input } from "@/components/ui/primitives";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
-import { useProjectSymlinksQuery } from "@/lib/query/sync";
+import {
+  useCreateTaskGroupMutation,
+  useDeleteProjectSymlinkMutation,
+  useDeleteTaskMutation,
+  useProjectSymlinksQuery,
+  useTaskGroupsQuery,
+} from "@/lib/query/sync";
 import { nexus } from "@/lib/mock";
 import { palette } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
@@ -20,7 +26,7 @@ import type {
   LocationType,
 } from "@/types";
 
-const CRON_PRESETS = [
+const SCHEDULE_PRESETS = [
   { label: "Hourly", expr: "0 * * * *" },
   { label: "Daily 05:00", expr: "0 5 * * *" },
   { label: "Weekly Sun 03:00", expr: "0 3 * * 0" },
@@ -71,7 +77,7 @@ function cronHuman(expr: string): string {
     "0 3 * * 0": "Every Sunday at 03:00.",
     "0 4 * * *": "Every day at 04:00.",
   };
-  return m[expr] ?? "Custom CRON expression.";
+  return m[expr] ?? "Custom schedule expression.";
 }
 
 function DirBadge({ direction }: { direction: TaskDirection }) {
@@ -84,12 +90,6 @@ function DirBadge({ direction }: { direction: TaskDirection }) {
       {direction}
     </span>
   );
-}
-
-function deriveDirection(sourceType: LocationType, targetType: LocationType): TaskDirection {
-  if (sourceType === "Local" && targetType === "Local") return "Distribution";
-  if (sourceType === "Local" && targetType === "Cloud") return "Push";
-  return "Pull";
 }
 
 let ntSeq = 0;
@@ -129,7 +129,11 @@ interface SchedState {
 }
 
 export function SyncPage() {
+  const taskGroupsQuery = useTaskGroupsQuery();
+  const createTaskGroupMutation = useCreateTaskGroupMutation();
+  const deleteTaskMutation = useDeleteTaskMutation();
   const projectSymlinksQuery = useProjectSymlinksQuery();
+  const deleteProjectSymlinkMutation = useDeleteProjectSymlinkMutation();
   const [groups, setGroups] = useState<TaskGroup[]>(() => nexus.taskGroups());
   const [templates] = useState(() => nexus.templates());
   const [system] = useState(() => nexus.systemSync());
@@ -144,6 +148,12 @@ export function SyncPage() {
   const projectSymlinkError = projectSymlinksQuery.error
     ? getErrorMessage(projectSymlinksQuery.error)
     : null;
+
+  useEffect(() => {
+    if (taskGroupsQuery.data) {
+      setGroups(taskGroupsQuery.data);
+    }
+  }, [taskGroupsQuery.data]);
 
   // ── mutations ──
   function updateTask(groupId: string, taskId: string, patch: Partial<Task>) {
@@ -183,6 +193,29 @@ export function SyncPage() {
     );
   }
 
+  async function deleteTask(groupId: string, task: Task) {
+    try {
+      await deleteTaskMutation.mutateAsync(task.id);
+      setGroups((gs) =>
+        gs.map((g) =>
+          g.id === groupId ? { ...g, tasks: g.tasks.filter((t) => t.id !== task.id) } : g,
+        ),
+      );
+      toast(`Deleted · ${task.direction} · ${task.source || "task"}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function deleteProjectSymlink(targetPath: string) {
+    try {
+      await deleteProjectSymlinkMutation.mutateAsync(targetPath);
+      toast("Project symlink deleted");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
   // ── create-modal helpers ──
   function openCreate() {
     setTpl("blank");
@@ -203,30 +236,28 @@ export function SyncPage() {
           : [newTask()],
     });
   }
-  function submitCreate() {
+  async function submitCreate() {
     const name = form.name.trim() || "Untitled group";
-    const tasks: Task[] = form.tasks.flatMap((tk, i) => {
+    const tasks = form.tasks.flatMap((tk) => {
       const validTargets = tk.targets.filter((t) => t.path.trim());
       if (!validTargets.length) validTargets.push({ type: tk.targets[0]?.type ?? "Local", path: "(target)" });
-      return validTargets.map((tgt, j) => {
-        const direction = deriveDirection(tk.sourceType, tgt.type);
-        return {
-          id: `g${Date.now()}_${i}_${j}`,
-          direction,
+      return validTargets.map((tgt) => ({
           action: tk.action,
           sourceType: tk.sourceType,
           source: tk.source || "(source)",
           targetType: tgt.type,
           target: tgt.path.trim() || "(target)",
           schedule: (tk.schedule || "manual").trim() || "manual",
-          lastRun: "—",
-          status: "never" as TaskStatus,
-        };
-      });
+      }));
     });
-    setGroups((gs) => [...gs, { id: `grp${Date.now()}`, name, tasks }]);
-    setCreateOpen(false);
-    toast(`Task group "${name}" created · ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`);
+    try {
+      const created = await createTaskGroupMutation.mutateAsync({ name, tasks });
+      setGroups((gs) => [...gs.filter((g) => g.id !== created.id), created]);
+      setCreateOpen(false);
+      toast(`Task group "${name}" created · ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
   }
 
   const sysSections: {
@@ -396,7 +427,7 @@ export function SyncPage() {
                           </span>
                         )}
                         <span
-                          onClick={() => toast(`Delete · ${t.direction} · ${t.source || "task"}`)}
+                          onClick={() => void deleteTask(g.id, t)}
                           className="cursor-pointer text-[11px] font-bold text-nexus-crit hover:underline"
                         >
                           Delete
@@ -487,7 +518,7 @@ export function SyncPage() {
                   </div>
                   <div className="justify-self-end">
                     <span
-                      onClick={() => toast(`Delete symlink · ${link.sourceProjectName ?? "External"} → ${link.targetProjectName ?? "External"}`)}
+                      onClick={() => void deleteProjectSymlink(link.targetPath)}
                       className="cursor-pointer text-[11px] font-bold text-nexus-crit hover:underline"
                     >
                       Delete
@@ -718,7 +749,7 @@ export function SyncPage() {
                           size="sm"
                           options={[
                             { value: "manual", label: "Manual" },
-                            { value: "cron", label: "CRON" },
+                            { value: "cron", label: "Schedule" },
                           ]}
                           value={isCron ? "cron" : "manual"}
                           onChange={(v) => patchFormTask(i, { schedule: v === "manual" ? "manual" : isCron ? tk.schedule : "0 5 * * *" })}
@@ -734,7 +765,7 @@ export function SyncPage() {
                       </div>
                       {isCron ? (
                         <div className="mt-[7px] flex flex-wrap gap-1.5">
-                          {CRON_PRESETS.map((cp) => (
+                          {SCHEDULE_PRESETS.map((cp) => (
                             <Chip key={cp.expr} mono active={tk.schedule === cp.expr} onClick={() => patchFormTask(i, { schedule: cp.expr })}>
                               {cp.expr}
                             </Chip>
@@ -771,7 +802,7 @@ export function SyncPage() {
             <ModalHeader
               title={`Schedule · ${sched.taskName}`}
               titleClassName="text-[16px]"
-              subtitle="Per-task trigger. CRON runs are executed by Agent Nexus while the app is running."
+               subtitle="Per-task trigger. Scheduled runs are not implemented yet."
             />
             <div className="flex flex-col gap-3.5 px-[22px] py-5">
               <Segmented<"manual" | "cron">
@@ -779,7 +810,7 @@ export function SyncPage() {
                 size="sm"
                 options={[
                   { value: "manual", label: "Manual" },
-                  { value: "cron", label: "CRON" },
+                  { value: "cron", label: "Schedule" },
                 ]}
                 value={sched.mode}
                 onChange={(v) => setSched((s) => (s ? { ...s, mode: v } : s))}
@@ -793,7 +824,7 @@ export function SyncPage() {
                     onChange={(e) => setSched((s) => (s ? { ...s, cronExpr: e.target.value } : s))}
                   />
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    {CRON_PRESETS.map((cp) => (
+                    {SCHEDULE_PRESETS.map((cp) => (
                       <Chip key={cp.expr} mono active={sched.cronExpr === cp.expr} onClick={() => setSched((s) => (s ? { ...s, cronExpr: cp.expr } : s))}>
                         {cp.expr}
                       </Chip>

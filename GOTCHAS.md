@@ -1,1 +1,2 @@
-- tauri.conf.json` 已限制 `minWidth: 1100` / `minHeight: 720`
+- `tauri.conf.json` 已限制 `minWidth: 1100` / `minHeight: 720`，无需考虑小屏适配
+- UI 允许超前，后端如果还未实现，交互时只提示/无反应均可，但不要删除或隐藏相关 UI 元素

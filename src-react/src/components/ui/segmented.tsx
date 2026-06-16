@@ -61,13 +61,13 @@ interface ChipProps {
   active: boolean;
   onClick: () => void;
   children: ReactNode;
-  /** Monospace label (CRON presets). */
+  /** Monospace label (schedule presets). */
   mono?: boolean;
   className?: string;
   title?: string;
 }
 
-/** Filled-when-active pill (project filters, template/CRON-preset chips). */
+/** Filled-when-active pill (project filters, template/schedule-preset chips). */
 export function Chip({ active, onClick, children, mono, className, title }: ChipProps) {
   return (
     <div

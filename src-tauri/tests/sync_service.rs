@@ -2,7 +2,10 @@ use std::{fs, path::Path, sync::Arc};
 
 use agent_nexus_lib::{
     database::Database,
-    services::{projects::ProjectService, sync::SyncService},
+    services::{
+        projects::ProjectService,
+        sync::{CreateTaskGroupInput, CreateTaskInput, SyncService},
+    },
 };
 use tempfile::TempDir;
 
@@ -34,6 +37,143 @@ fn symlink_dir(source: &Path, target: &Path) {
 #[cfg(windows)]
 fn symlink_dir(source: &Path, target: &Path) {
     std::os::windows::fs::symlink_dir(source, target).expect("create directory symlink");
+}
+
+#[test]
+fn creates_and_lists_custom_task_group() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+
+    sync.create_task_group(CreateTaskGroupInput {
+        name: "TAP symlinks".to_string(),
+        tasks: vec![CreateTaskInput {
+            action: "Symlink".to_string(),
+            source_type: "Local".to_string(),
+            source: "/workspace/tap/src".to_string(),
+            target_type: "Local".to_string(),
+            target: "/workspace/app/src/tap".to_string(),
+            schedule: "manual".to_string(),
+        }],
+    })
+    .expect("create task group");
+
+    let groups = sync.list_task_groups().expect("list task groups");
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].name, "TAP symlinks");
+    assert_eq!(groups[0].tasks.len(), 1);
+    assert_eq!(groups[0].tasks[0].direction, "Distribution");
+    assert_eq!(groups[0].tasks[0].action, "Symlink");
+    assert_eq!(groups[0].tasks[0].source, "/workspace/tap/src");
+    assert_eq!(groups[0].tasks[0].target, "/workspace/app/src/tap");
+    assert_eq!(groups[0].tasks[0].schedule, "manual");
+    assert_eq!(groups[0].tasks[0].last_run, "—");
+    assert_eq!(groups[0].tasks[0].status, "never");
+}
+
+#[test]
+fn rejects_cloud_task_until_cloud_sync_is_implemented() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+
+    let error = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Cloud task".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: "/workspace/config".to_string(),
+                target_type: "Cloud".to_string(),
+                target: "config".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect_err("cloud tasks are not implemented");
+
+    assert!(error.to_string().contains("cloud sync tasks"));
+}
+
+#[test]
+fn rejects_scheduled_task_until_scheduler_is_implemented() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+
+    let error = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Scheduled task".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: "/workspace/config".to_string(),
+                target_type: "Local".to_string(),
+                target: "/workspace/target".to_string(),
+                schedule: "0 5 * * *".to_string(),
+            }],
+        })
+        .expect_err("scheduled tasks are not implemented");
+
+    assert!(error.to_string().contains("scheduled sync tasks"));
+}
+
+#[test]
+fn deletes_symlink_task_and_its_local_symlink_placement() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("source");
+    let target_link = root.path().join("target-link");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    symlink_dir(&source_dir, &target_link);
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Local symlink".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Symlink".to_string(),
+                source_type: "Local".to_string(),
+                source: source_dir.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: target_link.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    sync.delete_task(created.tasks[0].id.clone())
+        .expect("delete task");
+
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert_eq!(groups[0].tasks.len(), 0);
+    assert!(!target_link.exists());
+}
+
+#[test]
+fn deletes_scanned_project_symlink_without_task_record() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_repo = git_repo(&root, "source-project");
+    let target_repo = git_repo(&root, "target-project");
+    let source_dir = Path::new(&source_repo).join("shared");
+    let target_link = Path::new(&target_repo).join("shared");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    symlink_dir(&source_dir, &target_link);
+    projects
+        .record_project(source_repo)
+        .expect("record source project");
+    projects
+        .record_project(target_repo)
+        .expect("record target project");
+
+    let links = sync.list_project_symlinks().expect("list project symlinks");
+    sync.delete_project_symlink(links[0].target_path.clone())
+        .expect("delete project symlink");
+
+    assert!(sync
+        .list_project_symlinks()
+        .expect("list project symlinks")
+        .is_empty());
+    assert!(!target_link.exists());
 }
 
 #[test]
