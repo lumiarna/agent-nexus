@@ -37,7 +37,7 @@
       Agent Nexus
     </div>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px;color:#a99a89;font-size:11.5px;">
-      <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;">Search assets <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#b8a890;border:1px solid #e7ddce;border-radius:4px;padding:0 4px;">⌘K</span></span>
+      <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;">Search assets <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#b8a890;border:1px solid #e7ddce;border-radius:4px;padding:2px 6px;">⌘K</span></span>
       <a href="Settings.dc.html" title="Settings" style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;background:#fcf9f4;border:1px solid #e7ddce;color:#8a7a68;font-size:14px;" style-hover="background:#f6efe5;color:#9d7a64;">⚙</a>
     </div>
   </div>
@@ -63,6 +63,12 @@
       <div style="margin-top:14px;display:flex;align-items:center;gap:12px;">
         <input value="{{ search }}" onInput="{{ setSearch }}" placeholder="{{ searchPlaceholder }}" style="flex:1;padding:10px 14px;border:1px solid #e7ddce;border-radius:999px;font-size:13px;outline:none;background:#fcf9f4;color:#3a302a;" />
         <span style="font-size:11.5px;color:#b3a999;white-space:nowrap;">{{ sourceNote }}</span>
+      </div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:#b3a999;">Project</span>
+        <sc-for list="{{ projectChips }}" as="c" hint-placeholder-count="6">
+          <div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.name }}</div>
+        </sc-for>
       </div>
     </div>
 
@@ -131,7 +137,7 @@
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
   projColors = { 'agent-nexus':'#9d7a64', 'oll-context':'#4f7a6a', 'tap':'#c2410c', 'tap-kit':'#7a5c9e', 'awesome-vibe-coding':'#b07d2e' };
-  state = { ready: false, sessions: null, source: 'cloud', search: '', selectedId: 's1', cloudAvailable: true, toast: '' };
+  state = { ready: false, sessions: null, source: 'cloud', search: '', selectedId: 's1', cloudAvailable: true, projectId: null, toast: '' };
   accent = '#9d7a64';
 
   componentDidMount() {
@@ -151,7 +157,7 @@ class Component extends DCLogic {
   renderVals() {
     const s = this.state;
     const seg0 = (on) => ({ padding:'7px 18px', borderRadius:'999px', fontSize:'13px', fontWeight:on?700:600, cursor:'pointer', color:on?'#9d7a64':'#a99a89', background:on?'#fcf9f4':'transparent', boxShadow:on?'0 1px 2px rgba(50,40,25,.06)':'none', transition:'all .12s' });
-    const v = { tabs: this.navTabs('session'), toast: s.toast, toastShown: !!s.toast, search: s.search, setSearch: (e) => this.setState({ search: e.target.value }), localStyle: seg0(s.source === 'local'), cloudStyle: seg0(s.source === 'cloud'), searchPlaceholder: 'Search ' + (s.source === 'cloud' ? 'Cloud' : 'Local') + ' sessions by name or content', sourceNote: s.source === 'cloud' ? 'Cloud · aggregated (read-only)' : 'Local · this device', localClick: () => this.setState({ source: 'local', selectedId: null }), cloudClick: () => this.setState({ source: 'cloud', selectedId: null }) };
+    const v = { tabs: this.navTabs('session'), toast: s.toast, toastShown: !!s.toast, search: s.search, setSearch: (e) => this.setState({ search: e.target.value }), localStyle: seg0(s.source === 'local'), cloudStyle: seg0(s.source === 'cloud'), searchPlaceholder: 'Search ' + (s.source === 'cloud' ? 'Cloud' : 'Local') + ' sessions by name or content', sourceNote: s.source === 'cloud' ? 'Cloud · aggregated (read-only)' : 'Local · this device', localClick: () => this.setState({ source: 'local', selectedId: null }), cloudClick: () => this.setState({ source: 'cloud', selectedId: null }), projectChips: [] };
     if (!s.ready) return v;
 
     const src = s.source;
@@ -162,8 +168,14 @@ class Component extends DCLogic {
     v.searchPlaceholder = 'Search ' + (src === 'cloud' ? 'Cloud' : 'Local') + ' sessions by name or content';
     v.sourceNote = src === 'cloud' ? 'Cloud · aggregated (read-only)' : 'Local · this device';
 
+    const D = window.NexusData;
+    const projects = D.projects().filter(p => p.status === 'active');
+    const chipStyle = (on) => ({ padding:'5px 12px', borderRadius:'999px', fontSize:'12px', fontWeight:on ? 700 : 600, cursor:'pointer', color:on ? '#fff' : '#7a6f60', background:on ? this.accent : '#fcf9f4', border:'1px solid ' + (on ? this.accent : '#e7ddce') });
+    v.projectChips = [{ key: '_all', name: 'All', onClick: () => this.setState({ projectId: null, selectedId: null }), style: chipStyle(s.projectId === null) }].concat(projects.map(p => ({ key: p.id, name: p.name, onClick: () => this.setState({ projectId: p.id, selectedId: null }), style: chipStyle(s.projectId === p.id) })));
+
     const cloudDown = src === 'cloud' && !s.cloudAvailable;
     let sess = s.sessions.filter(se => se.source === src || se.source === 'both');
+    if (s.projectId) sess = sess.filter(se => se.project === s.projectId);
     const q = s.search.trim().toLowerCase();
     if (q) sess = sess.filter(se => se.title.toLowerCase().includes(q) || se.excerpt.toLowerCase().includes(q) || se.body.toLowerCase().includes(q) || se.project.toLowerCase().includes(q));
     let selId = s.selectedId;

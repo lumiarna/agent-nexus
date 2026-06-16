@@ -37,7 +37,7 @@
       Agent Nexus
     </div>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px;color:#a99a89;font-size:11.5px;">
-      <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;">Search assets <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#b8a890;border:1px solid #e7ddce;border-radius:4px;padding:0 4px;">⌘K</span></span>
+      <span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;background:#fcf9f4;border:1px solid #e7ddce;border-radius:999px;">Search assets <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#b8a890;border:1px solid #e7ddce;border-radius:4px;padding:2px 6px;">⌘K</span></span>
       <a href="Settings.dc.html" title="Settings" style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;background:#fcf9f4;border:1px solid #e7ddce;color:#8a7a68;font-size:14px;" style-hover="background:#f6efe5;color:#9d7a64;">⚙</a>
     </div>
   </div>
@@ -131,7 +131,7 @@
 </x-dc>
 <script type="text/x-dc" data-dc-script>
 class Component extends DCLogic {
-  state = { ready: false, skills: null, scope: 'global', projectId: 'oll-context', search: '', toast: '' };
+  state = { ready: false, skills: null, scope: 'global', projectId: null, search: '', toast: '' };
   accent = '#9d7a64';
 
   componentDidMount() {
@@ -180,14 +180,14 @@ class Component extends DCLogic {
     v.scopeGlobalStyle = segB(!isProj); v.scopeProjectStyle = segB(isProj);
     v.scopeGlobalClick = () => this.setState({ scope: 'global' }); v.scopeProjectClick = () => this.setState({ scope: 'project' });
     v.setSearch = (e) => this.setState({ search: e.target.value });
-    v.projectChips = projects.map(p => ({ key: p.id, name: p.name, onClick: () => this.setState({ projectId: p.id }), style: { padding:'5px 12px', borderRadius:'999px', fontSize:'12px', fontWeight:s.projectId === p.id ? 700 : 600, cursor:'pointer', color:s.projectId === p.id ? '#fff' : '#7a6f60', background:s.projectId === p.id ? this.accent : '#fcf9f4', border:'1px solid '+(s.projectId === p.id ? this.accent : '#e7ddce') } }));
+    v.projectChips = [{ key: '_all', name: 'All', onClick: () => this.setState({ projectId: null }), style: { padding:'5px 12px', borderRadius:'999px', fontSize:'12px', fontWeight:s.projectId === null ? 700 : 600, cursor:'pointer', color:s.projectId === null ? '#fff' : '#7a6f60', background:s.projectId === null ? this.accent : '#fcf9f4', border:'1px solid '+(s.projectId === null ? this.accent : '#e7ddce') } }].concat(projects.map(p => ({ key: p.id, name: p.name, onClick: () => this.setState({ projectId: p.id }), style: { padding:'5px 12px', borderRadius:'999px', fontSize:'12px', fontWeight:s.projectId === p.id ? 700 : 600, cursor:'pointer', color:s.projectId === p.id ? '#fff' : '#7a6f60', background:s.projectId === p.id ? this.accent : '#fcf9f4', border:'1px solid '+(s.projectId === p.id ? this.accent : '#e7ddce') } })));
 
     const q = s.search.trim().toLowerCase();
-    let set = s.skills.filter(k => isProj ? (k.scope === 'project' && k.projectId === s.projectId) : k.scope === 'global');
+    let set = s.skills.filter(k => isProj ? (k.scope === 'project' && (s.projectId === null || k.projectId === s.projectId)) : k.scope === 'global');
     if (q) set = set.filter(k => k.name.toLowerCase().includes(q) || k.desc.toLowerCase().includes(q));
     v.hasRows = set.length > 0; v.isEmpty = set.length === 0;
     if (q && set.length === 0) { v.emptyTitle = 'No matching skills'; v.emptyBody = 'No skill matches “' + s.search + '” in this scope.'; }
-    else if (isProj) { const pn = (projects.find(p => p.id === s.projectId) || {}).name; v.emptyTitle = 'No project skills'; v.emptyBody = 'No project-scoped skills recorded for ' + pn + '.'; }
+    else if (isProj) { const pn = s.projectId === null ? 'any project' : (projects.find(p => p.id === s.projectId) || {}).name; v.emptyTitle = 'No project skills'; v.emptyBody = 'No project-scoped skills recorded for ' + pn + '.'; }
     else { v.emptyTitle = 'No global skills'; v.emptyBody = 'No global skills discovered across agents yet.'; }
 
     v.rows = set.map(k => {
