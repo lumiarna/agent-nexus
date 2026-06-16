@@ -6,8 +6,8 @@ Agent Nexus 是一个跨平台（Mac + Windows）桌面应用，管理多个 AI 
 
 两个参考实现验证了此栈的可行性：
 
-1. **cc-switch**（`D:\Sample\cc-switch\`，Tauri 2 v3.16.x）— 与 Agent Nexus 高度重叠的产品：多 Agent provider/skill/session 管理 + WebDAV 同步 + SQLite + 托盘。已在 Windows/macOS/Linux 上线。
-2. **agent-quota-monitor**（`D:\Workspace\agent-quota-monitor\`）— 纯 Rust Windows 任务栏 + 托盘 Provider 用量监视器。验证了 Provider quota 抓取、多 provider 并行轮询、飞出窗口（flyout）、图标渲染等能力。
+1. **cc-switch**（`${ROOT}\Sample\cc-switch\`，Tauri 2 v3.16.x）— 与 Agent Nexus 高度重叠的产品：多 Agent provider/skill/session 管理 + WebDAV 同步 + SQLite + 托盘。已在 Windows/macOS/Linux 上线。
+2. **agent-quota-monitor**（`${ROOT}\Workspace\agent-quota-monitor\`）— 纯 Rust Windows 任务栏 + 托盘 Provider 用量监视器。验证了 Provider quota 抓取、多 provider 并行轮询、飞出窗口（flyout）、图标渲染等能力。
 
 ## 决定
 
@@ -253,10 +253,10 @@ type View = "provider" | "project" | "skill" | "prompt" | "session" | "sync" | "
 
 | 参考 | 路径 | 用途 |
 |------|------|------|
-| cc-switch | `D:\Sample\cc-switch\` | 整体架构、WebDAV sync、SQLite DAO、service 分层、前端模式、Provider quota 刷新模型 |
+| cc-switch | `${ROOT}\Sample\cc-switch\` | 整体架构、WebDAV sync、SQLite DAO、service 分层、前端模式、Provider quota 刷新模型 |
 | cc-switch AGENTS | `AGENTS.md` | 高信号仓库布局、命令清单与模块入口导航 |
 | cc-switch sync protocol | `src-tauri/src/services/sync_protocol.rs` | manifest 同步协议设计 |
 | cc-switch schema | `src-tauri/src/database/schema.rs` | 迁移模式、表设计参考 |
-| agent-quota-monitor | `D:\Workspace\agent-quota-monitor\` | Windows 托盘、flyout、图标渲染 |
+| agent-quota-monitor | `${ROOT}\Workspace\agent-quota-monitor\` | Windows 托盘、flyout、图标渲染 |
 | Agent Nexus prototype | `prototype/*.dc.html` | 视觉和交互参考 |
 | Agent Nexus 领域模型 | `CONTEXT.md` | 实体定义与边界 |

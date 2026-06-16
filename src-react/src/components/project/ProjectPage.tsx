@@ -329,7 +329,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-[14.5px] font-bold text-nexus-ink">{p.name}</span>
+                    <span className="text-[14px] font-bold text-nexus-ink">{p.name}</span>
                     <span className="rounded-[5px] bg-[#e9eed8] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#5f7a3e]">
                       Active
                     </span>
@@ -342,7 +342,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                 <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-[#8a8073]">
                   {p.path}
                 </div>
-                <div className="flex justify-end gap-[7px]">
+                <div className="flex justify-end gap-[6px]">
                   {[
                     { label: "SKILL", n: p.skills },
                     { label: "SESSION", n: p.sessions },
@@ -350,9 +350,9 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                   ].map((c) => (
                     <div
                       key={c.label}
-                      className="flex min-w-[48px] flex-col items-center rounded-[10px] bg-nexus-bg py-1.5"
+                      className="flex items-center gap-[5px] rounded-[7px] bg-nexus-bg px-[9px] py-[5px]"
                     >
-                      <span className="text-[14px] font-extrabold text-nexus-body">{c.n}</span>
+                      <span className="text-[12px] font-extrabold text-nexus-body">{c.n}</span>
                       <span className="text-[9px] tracking-[.03em] text-[#b3a999]">{c.label}</span>
                     </div>
                   ))}
@@ -371,7 +371,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                 key={p.id}
                 {...dragProps(p.id)}
                 className={cn(
-                  "grid items-center gap-4 border-b border-[#f3eee5] bg-[#faf3e8] px-5 py-4",
+                  "grid items-center gap-4 border-b border-[#f3eee5] bg-[#faf3e8] px-5 py-[13px]",
                   dragId === p.id && "opacity-50",
                 )}
                 style={{ gridTemplateColumns: LIST_COLS }}
@@ -381,7 +381,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-[14.5px] font-bold text-[#6a6055]">{p.name}</span>
+                    <span className="text-[14px] font-bold text-[#6a6055]">{p.name}</span>
                     <span className="rounded-[5px] bg-[#f7eccb] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#9a6f0a]">
                       Stale
                     </span>
