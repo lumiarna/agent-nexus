@@ -73,6 +73,16 @@ pub struct CreateTaskGroupInput {
     pub tasks: Vec<CreateTaskInput>,
 }
 
+struct PreparedTask {
+    action: String,
+    source_type: String,
+    source: String,
+    target_type: String,
+    target: String,
+    schedule: String,
+    direction: String,
+}
+
 #[derive(Clone)]
 pub struct SyncService {
     db: Arc<Database>,
@@ -153,81 +163,66 @@ impl SyncService {
             ));
         }
 
-        let now = now_epoch_seconds()?;
-        let group_id = Uuid::new_v4().to_string();
-        let mut conn = self.db.connection()?;
-        let tx = conn.transaction()?;
+        let tasks = input
+            .tasks
+            .iter()
+            .map(prepare_task)
+            .collect::<AppResult<Vec<_>>>()?;
+        let created_symlinks = create_symlink_placements(&tasks)?;
 
-        tx.execute(
-            r#"
-            INSERT INTO task_groups (id, name, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?3)
-            "#,
-            params![group_id, name, now],
-        )?;
-
-        for (index, task) in input.tasks.iter().enumerate() {
-            let action = validate_one_of(&task.action, &["Symlink", "Copy"], "task action")?;
-            let source_type =
-                validate_one_of(&task.source_type, &["Local", "Cloud"], "source type")?;
-            let target_type =
-                validate_one_of(&task.target_type, &["Local", "Cloud"], "target type")?;
-            if source_type == "Cloud" || target_type == "Cloud" {
-                return Err(AppError::Validation(
-                    "cloud sync tasks are not implemented yet".to_string(),
-                ));
-            }
-            let source = required_trimmed(&task.source, "task source")?;
-            let target = required_trimmed(&task.target, "task target")?;
-            if action == "Symlink" && (source_type != "Local" || target_type != "Local") {
-                return Err(AppError::Validation(
-                    "symlink tasks require local source and target".to_string(),
-                ));
-            }
-            let schedule = task.schedule.trim();
-            let schedule = if schedule.is_empty() {
-                "manual"
-            } else {
-                schedule
-            };
-            if schedule != "manual" {
-                return Err(AppError::Validation(
-                    "scheduled sync tasks are not implemented yet".to_string(),
-                ));
-            }
-            let direction = derive_direction(source_type, target_type);
+        let result = (|| -> AppResult<TaskGroup> {
+            let now = now_epoch_seconds()?;
+            let group_id = Uuid::new_v4().to_string();
+            let mut conn = self.db.connection()?;
+            let tx = conn.transaction()?;
 
             tx.execute(
                 r#"
-                INSERT INTO tasks (
-                    id, group_id, direction, action, source_type, source, target_type, target,
-                    schedule, sort_index, last_status, created_at, updated_at
-                )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'never', ?11, ?11)
+                INSERT INTO task_groups (id, name, created_at, updated_at)
+                VALUES (?1, ?2, ?3, ?3)
                 "#,
-                params![
-                    Uuid::new_v4().to_string(),
-                    group_id,
-                    direction,
-                    action,
-                    source_type,
-                    source,
-                    target_type,
-                    target,
-                    schedule,
-                    index as i64,
-                    now,
-                ],
+                params![group_id, name, now],
             )?;
+
+            for (index, task) in tasks.iter().enumerate() {
+                tx.execute(
+                    r#"
+                    INSERT INTO tasks (
+                        id, group_id, direction, action, source_type, source, target_type, target,
+                        schedule, sort_index, last_status, created_at, updated_at
+                    )
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'never', ?11, ?11)
+                    "#,
+                    params![
+                        Uuid::new_v4().to_string(),
+                        group_id,
+                        task.direction,
+                        task.action,
+                        task.source_type,
+                        task.source,
+                        task.target_type,
+                        task.target,
+                        task.schedule,
+                        index as i64,
+                        now,
+                    ],
+                )?;
+            }
+
+            tx.commit()?;
+            drop(conn);
+
+            self.list_task_groups()?
+                .into_iter()
+                .find(|group| group.id == group_id)
+                .ok_or_else(|| AppError::Internal("created task group was not found".to_string()))
+        })();
+
+        if result.is_err() {
+            remove_created_symlinks(&created_symlinks);
         }
 
-        tx.commit()?;
-        drop(conn);
-
-        self.list_task_groups()?
-            .into_iter()
-            .find(|group| group.id == group_id)
-            .ok_or_else(|| AppError::Internal("created task group was not found".to_string()))
+        result
     }
 
     pub fn delete_task(&self, id: String) -> AppResult<()> {
@@ -308,6 +303,107 @@ impl SyncService {
                 .map(|value| value.to_string())
                 .collect(),
         })
+    }
+}
+
+fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
+    let action = validate_one_of(&task.action, &["Symlink", "Copy"], "task action")?;
+    let source_type = validate_one_of(&task.source_type, &["Local", "Cloud"], "source type")?;
+    let target_type = validate_one_of(&task.target_type, &["Local", "Cloud"], "target type")?;
+    if source_type == "Cloud" || target_type == "Cloud" {
+        return Err(AppError::Validation(
+            "cloud sync tasks are not implemented yet".to_string(),
+        ));
+    }
+    let source = required_trimmed(&task.source, "task source")?;
+    let target = required_trimmed(&task.target, "task target")?;
+    if action == "Symlink" && (source_type != "Local" || target_type != "Local") {
+        return Err(AppError::Validation(
+            "symlink tasks require local source and target".to_string(),
+        ));
+    }
+    let schedule = task.schedule.trim();
+    let schedule = if schedule.is_empty() {
+        "manual"
+    } else {
+        schedule
+    };
+    if schedule != "manual" {
+        return Err(AppError::Validation(
+            "scheduled sync tasks are not implemented yet".to_string(),
+        ));
+    }
+    let direction = derive_direction(source_type, target_type);
+
+    Ok(PreparedTask {
+        action: action.to_string(),
+        source_type: source_type.to_string(),
+        source: source.to_string(),
+        target_type: target_type.to_string(),
+        target: target.to_string(),
+        schedule: schedule.to_string(),
+        direction: direction.to_string(),
+    })
+}
+
+fn create_symlink_placements(tasks: &[PreparedTask]) -> AppResult<Vec<PathBuf>> {
+    let mut created = Vec::new();
+
+    for task in tasks {
+        if task.action != "Symlink" {
+            continue;
+        }
+
+        let source = Path::new(&task.source);
+        let target = Path::new(&task.target);
+        create_symlink_placement(source, target).inspect_err(|_| {
+            remove_created_symlinks(&created);
+        })?;
+        created.push(target.to_path_buf());
+    }
+
+    Ok(created)
+}
+
+fn create_symlink_placement(source: &Path, target: &Path) -> AppResult<()> {
+    if !source.exists() {
+        return Err(AppError::Validation(format!(
+            "symlink source does not exist: {}",
+            source.display()
+        )));
+    }
+    if fs::symlink_metadata(target).is_ok() {
+        return Err(AppError::Validation(format!(
+            "symlink target already exists: {}",
+            target.display()
+        )));
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    create_symlink(source, target)
+}
+
+#[cfg(unix)]
+fn create_symlink(source: &Path, target: &Path) -> AppResult<()> {
+    std::os::unix::fs::symlink(source, target)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn create_symlink(source: &Path, target: &Path) -> AppResult<()> {
+    if source.is_dir() {
+        std::os::windows::fs::symlink_dir(source, target)?;
+    } else {
+        std::os::windows::fs::symlink_file(source, target)?;
+    }
+    Ok(())
+}
+
+fn remove_created_symlinks(paths: &[PathBuf]) {
+    for path in paths.iter().rev() {
+        let _ = remove_symlink_if_present(path);
     }
 }
 

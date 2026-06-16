@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     let current = current_version(conn)?;
@@ -15,8 +15,13 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
 
     if current == 0 {
         migrate_to_v1(conn)?;
-    } else if current < 2 {
-        migrate_to_v2(conn)?;
+    } else {
+        if current < 2 {
+            migrate_to_v2(conn)?;
+        }
+        if current < 3 {
+            migrate_to_v3(conn)?;
+        }
     }
 
     Ok(())
@@ -48,7 +53,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (2);
+        INSERT INTO schema_version (version) VALUES (3);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -187,8 +192,6 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
         );
 
-        -- (task_targets removed: Task is now 1 source → 1 target)
-
         CREATE TABLE settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -253,6 +256,43 @@ fn migrate_to_v2(conn: &Connection) -> AppResult<()> {
             Err(error)
         }
     }
+}
+
+fn migrate_to_v3(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        DROP TABLE IF EXISTS tasks;
+        CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL,
+            direction TEXT NOT NULL
+                CHECK (direction IN ('Distribution', 'Push', 'Pull')),
+            action TEXT NOT NULL CHECK (action IN ('Symlink', 'Copy')),
+            source_type TEXT NOT NULL CHECK (source_type IN ('Local', 'Cloud')),
+            source TEXT NOT NULL,
+            target_type TEXT NOT NULL CHECK (target_type IN ('Local', 'Cloud')),
+            target TEXT NOT NULL,
+            schedule TEXT NOT NULL DEFAULT 'manual',
+            sort_index INTEGER,
+            last_run_at INTEGER,
+            last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
+        );
+        DROP INDEX IF EXISTS idx_tasks_group;
+        CREATE INDEX idx_tasks_group ON tasks(group_id);
+        UPDATE schema_version SET version = 3;
+        COMMIT;
+        "#,
+    )
+    .or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    Ok(())
 }
 
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {

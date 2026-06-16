@@ -39,19 +39,29 @@ fn symlink_dir(source: &Path, target: &Path) {
     std::os::windows::fs::symlink_dir(source, target).expect("create directory symlink");
 }
 
+fn assert_symlink_points_to(source: &Path, target: &Path) {
+    let metadata = fs::symlink_metadata(target).expect("read target link metadata");
+    assert!(metadata.file_type().is_symlink());
+    assert_eq!(fs::read_link(target).expect("read target link"), source);
+}
+
 #[test]
-fn creates_and_lists_custom_task_group() {
+fn creates_symlink_placement_and_lists_custom_task_group() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("source");
+    let target_link = root.path().join("target-link");
+    fs::create_dir_all(&source_dir).expect("create source dir");
 
     sync.create_task_group(CreateTaskGroupInput {
         name: "TAP symlinks".to_string(),
         tasks: vec![CreateTaskInput {
             action: "Symlink".to_string(),
             source_type: "Local".to_string(),
-            source: "/workspace/tap/src".to_string(),
+            source: source_dir.to_string_lossy().into_owned(),
             target_type: "Local".to_string(),
-            target: "/workspace/app/src/tap".to_string(),
+            target: target_link.to_string_lossy().into_owned(),
             schedule: "manual".to_string(),
         }],
     })
@@ -64,11 +74,12 @@ fn creates_and_lists_custom_task_group() {
     assert_eq!(groups[0].tasks.len(), 1);
     assert_eq!(groups[0].tasks[0].direction, "Distribution");
     assert_eq!(groups[0].tasks[0].action, "Symlink");
-    assert_eq!(groups[0].tasks[0].source, "/workspace/tap/src");
-    assert_eq!(groups[0].tasks[0].target, "/workspace/app/src/tap");
+    assert_eq!(groups[0].tasks[0].source, source_dir.to_string_lossy());
+    assert_eq!(groups[0].tasks[0].target, target_link.to_string_lossy());
     assert_eq!(groups[0].tasks[0].schedule, "manual");
     assert_eq!(groups[0].tasks[0].last_run, "—");
     assert_eq!(groups[0].tasks[0].status, "never");
+    assert_symlink_points_to(&source_dir, &target_link);
 }
 
 #[test]
@@ -123,7 +134,6 @@ fn deletes_symlink_task_and_its_local_symlink_placement() {
     let source_dir = root.path().join("source");
     let target_link = root.path().join("target-link");
     fs::create_dir_all(&source_dir).expect("create source dir");
-    symlink_dir(&source_dir, &target_link);
     let created = sync
         .create_task_group(CreateTaskGroupInput {
             name: "Local symlink".to_string(),
