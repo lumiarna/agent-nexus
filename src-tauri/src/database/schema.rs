@@ -1,0 +1,225 @@
+use rusqlite::{params, Connection};
+
+use crate::error::{AppError, AppResult};
+
+const CURRENT_SCHEMA_VERSION: i64 = 1;
+
+pub fn migrate(conn: &Connection) -> AppResult<()> {
+    let current = current_version(conn)?;
+
+    if current > CURRENT_SCHEMA_VERSION {
+        return Err(AppError::Database(format!(
+            "database schema version {current} is newer than this app supports"
+        )));
+    }
+
+    if current == 0 {
+        migrate_to_v1(conn)?;
+    }
+
+    Ok(())
+}
+
+fn current_version(conn: &Connection) -> AppResult<i64> {
+    let has_table: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    if has_table == 0 {
+        return Ok(0);
+    }
+
+    Ok(
+        conn.query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
+            row.get(0)
+        })?,
+    )
+}
+
+fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        BEGIN;
+
+        CREATE TABLE schema_version (
+            version INTEGER NOT NULL
+        );
+        INSERT INTO schema_version (version) VALUES (1);
+
+        CREATE TABLE projects (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            key TEXT NOT NULL UNIQUE,
+            path TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'stale', 'hidden')),
+            sessions_dir TEXT NOT NULL DEFAULT '__sessions',
+            sort_index INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE git_base_folders (
+            id TEXT PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE,
+            added_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE skills (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
+            project_id TEXT,
+            description TEXT,
+            canonical_path TEXT NOT NULL,
+            disabled INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE skill_distributions (
+            skill_id TEXT NOT NULL,
+            agent TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('source', 'target', 'none')),
+            target_path TEXT,
+            CHECK (
+                (role = 'target' AND target_path IS NOT NULL)
+                OR
+                (role IN ('source', 'none') AND target_path IS NULL)
+            ),
+            PRIMARY KEY (skill_id, agent),
+            FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE prompts (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            canonical_path TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE prompt_distributions (
+            prompt_id TEXT NOT NULL,
+            agent TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('source', 'target', 'none')),
+            target_path TEXT,
+            CHECK (
+                (role = 'target' AND target_path IS NOT NULL)
+                OR
+                (role IN ('source', 'none') AND target_path IS NULL)
+            ),
+            PRIMARY KEY (prompt_id, agent),
+            FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE providers (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            plan TEXT,
+            status TEXT NOT NULL CHECK (status IN ('available', 'expired', 'failed', 'nocreds')),
+            credential_source TEXT,
+            connection_params TEXT,
+            is_agent INTEGER NOT NULL DEFAULT 0,
+            sort_index INTEGER,
+            card_visible INTEGER NOT NULL DEFAULT 1,
+            tray_visible INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE provider_windows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider_id TEXT NOT NULL,
+            label TEXT NOT NULL,
+            used_percent INTEGER NOT NULL,
+            reset_label TEXT,
+            FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE session_index (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            excerpt TEXT,
+            source TEXT NOT NULL CHECK (source IN ('local', 'cloud', 'both')),
+            size_bytes INTEGER,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE VIRTUAL TABLE session_fts USING fts5(
+            title, excerpt,
+            content=session_index,
+            content_rowid=rowid
+        );
+
+        CREATE TABLE task_groups (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            sort_index INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE tasks (
+            id TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL,
+            direction TEXT NOT NULL
+                CHECK (direction IN ('Distribution', 'Backup', 'Restore/Pull')),
+            action TEXT NOT NULL CHECK (action IN ('symlink', 'copy')),
+            source TEXT NOT NULL,
+            schedule TEXT NOT NULL DEFAULT 'manual',
+            sort_index INTEGER,
+            last_run_at INTEGER,
+            last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE task_targets (
+            task_id TEXT NOT NULL,
+            target_path TEXT NOT NULL,
+            sort_index INTEGER,
+            PRIMARY KEY (task_id, target_path),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_skills_scope ON skills(scope);
+        CREATE INDEX idx_skills_project ON skills(project_id) WHERE project_id IS NOT NULL;
+        CREATE UNIQUE INDEX idx_skill_distributions_one_source
+            ON skill_distributions(skill_id)
+            WHERE role = 'source';
+        CREATE UNIQUE INDEX idx_prompt_distributions_one_source
+            ON prompt_distributions(prompt_id)
+            WHERE role = 'source';
+        CREATE INDEX idx_session_index_project ON session_index(project_id);
+        CREATE INDEX idx_session_index_source ON session_index(source);
+        CREATE INDEX idx_tasks_group ON tasks(group_id);
+        CREATE INDEX idx_provider_windows_provider ON provider_windows(provider_id);
+
+        INSERT INTO settings (key, value) VALUES ('tray_metric_mode', 'Remaining');
+        INSERT INTO settings (key, value) VALUES ('webdav_url', '');
+        INSERT INTO settings (key, value) VALUES ('webdav_user', '');
+        INSERT INTO settings (key, value) VALUES ('webdav_pass', '');
+
+        COMMIT;
+        "#,
+    )
+    .or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    Ok(())
+}

@@ -103,50 +103,6 @@ agent-nexus/
 └── package.json
 ```
 
-## 实施计划
-
-分四阶段推进，前端先行、后端渐进：
-
-### 阶段一：前端全量页面（Mock）
-
-- 初始化 Vite React 项目（`src-react/`，dev port 3000）
-- 前端：App shell + 视图切换器 + 顶部 tab 导航
-- 根据 `prototype/*.dc.html` 将所有页面迁移为 React 组件
-- 6 个一级页面：Provider、Project、Skill、Prompt、Session、Sync + Settings
-- 含所有交互：modal、overflow menu、agent matrix、拖拽排序（范围依 CONTEXT.md Display Order：Provider / Project / Task Group / Task）、toast
-- 数据来源：前端内存 mock（等价于 `nexus-data.js`），不经 IPC
-- 原型已完整，此阶段目标是 1:1 复刻交互，不做功能裁剪
-- 能通过 `pnpm dev` 在浏览器中验证全部页面和交互
-
-### 阶段二：Tauri 项目骨架
-
-- 初始化 Tauri 2 项目（`src-tauri/`，参考 cc-switch 的 `tauri.conf.json`、`package.json`）
-- 配置 Tauri 使用已有 `src-react/` 前端：`devUrl` 指向 `http://localhost:3000`，`frontendDist` 指向 `../src-react/dist`
-- Rust 侧采用正式装配结构：`main.rs` 极薄、`lib.rs` 负责 builder/setup/命令注册、`store.rs` 为最小占位
-- 增加一个最小只读 IPC：`get_desktop_health`，返回 `{ ok, appName, appVersion }`，仅用于验证桌面宿主联通
-- 前端继续保留 `pnpm dev` 纯浏览器开发模式；通过 `src-react/lib/runtime.ts` 集中判断 Tauri 环境，并在 Tauri 环境首屏挂载后静默探测一次，不自动重试
-- `desktopHealth` 仅作为 `App.tsx` 本地开发态辅助状态，失败静默降级为 `unavailable`，不阻塞主渲染、不引入 React Query 或正式 `lib/api/`
-- `pnpm tauri dev` 应一条命令拉起桌面开发所需进程；阶段二不要求手动先启动 `pnpm dev`
-- 阶段二仅创建当前参与编译与注册的最小 Rust 文件，不预建 `services/`、`orchestration/`、`ports/`、`adapters/`、`database/` 空目录
-- 不引入 `rusqlite`、`tokio`、`reqwest` 等阶段三依赖；此阶段只验证桌面壳、窗口启动、前端静态资源加载与最小 IPC 链路
-- Tauri 侧只配置一个 `main` 主窗口：原生标题栏、可调整大小、初始尺寸 `1280x840`、最小尺寸 `1100x720`；关闭主窗口即退出应用
-- 阶段二不引任何可选 Tauri 插件，不提前开启文件系统、托盘、网络等未来能力
-
-### 阶段三：IPC 接线 + 真实后端
-
-- Rust 侧引入 rusqlite，建 schema，写 DAO + Services
-- 前端切换到 `src-react/lib/api/` → `invoke()` → React Query
-- 逐页面从 mock 切到真实数据源
-- Services 层实现：Project 扫描、Skill SSOT、Session 索引、Distribution 规则
-- Orchestration 层实现：WebDAV 同步、Sync Task 执行、auto-sync 编排
-- 定时任务、auto-sync
-
-### 阶段四：系统能力
-
-- 系统托盘 + Provider flyout（borderless webview 复用卡片组件）
-- Provider quota 按 surface 触发并发刷新（参考 cc-switch 托盘刷新模型）
-- 自动启动、窗口状态恢复
-
 ## 核心架构模式
 
 ### 1. Command / Service 分离（参考 cc-switch）

@@ -1,21 +1,30 @@
 use serde::Serialize;
-use std::{error::Error, fmt};
+use thiserror::Error;
 
 pub type AppResult<T> = Result<T, AppError>;
 
 #[allow(dead_code)]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Error, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "message")]
 pub enum AppError {
+    #[error("{0}")]
+    Validation(String),
+    #[error("database error: {0}")]
+    Database(String),
+    #[error("io error: {0}")]
+    Io(String),
+    #[error("{0}")]
     Internal(String),
 }
 
-impl fmt::Display for AppError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Internal(message) => write!(f, "{message}"),
-        }
+impl From<rusqlite::Error> for AppError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Database(error.to_string())
     }
 }
 
-impl Error for AppError {}
+impl From<std::io::Error> for AppError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error.to_string())
+    }
+}

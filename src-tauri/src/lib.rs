@@ -1,15 +1,27 @@
-mod commands;
-mod error;
-mod store;
+pub mod commands;
+pub mod database;
+pub mod error;
+pub mod services;
+pub mod store;
 
+use database::Database;
 use store::AppState;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState)
-        .invoke_handler(tauri::generate_handler![commands::app::get_desktop_health])
+        .setup(|app| {
+            let app_data_dir = app.path().app_data_dir()?;
+            let db = Database::open(app_data_dir.join("agent-nexus.sqlite3"))?;
+            app.manage(AppState::new(db));
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::app::get_desktop_health,
+            commands::projects::list_projects,
+            commands::projects::record_project,
+        ])
         .on_window_event(|window, event| {
             if window.label() == "main"
                 && matches!(event, tauri::WindowEvent::CloseRequested { .. })

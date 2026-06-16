@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, Dot } from "@/components/ui/primitives";
@@ -8,6 +8,7 @@ import { SkillRow } from "@/components/skill/SkillRow";
 import { ScreenScroll } from "@/components/shell/screen";
 import { useNav } from "@/lib/nav";
 import { nexus } from "@/lib/mock";
+import { useProjectsQuery, useRecordProjectMutation } from "@/lib/query/projects";
 import { palette, toggleCellRole } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type { AgentName, GitBaseFolder, Project } from "@/types";
@@ -21,10 +22,36 @@ interface MenuState {
   right: number;
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return "Unexpected error";
+}
+
+function deriveProjectKey(path: string): string {
+  const parts = path
+    .trim()
+    .replace(/[\\/]+$/, "")
+    .split(/[\\/]/)
+    .filter(Boolean);
+  return parts[parts.length - 1] ?? "";
+}
+
 export function ProjectPage({ initialProjectId }: { initialProjectId?: string }) {
   const { go } = useNav();
-  const [projects] = useState(() => nexus.projects());
-  const [order, setOrder] = useState<string[]>(() => projects.map((p) => p.id));
+  const projectsQuery = useProjectsQuery();
+  const recordProject = useRecordProjectMutation();
+  const projects = projectsQuery.data ?? [];
+  const projectError = projectsQuery.error ? getErrorMessage(projectsQuery.error) : null;
+  const [order, setOrder] = useState<string[]>([]);
   const [dragId, setDragId] = useState<string | null>(null);
   const [skills, setSkills] = useState(() => nexus.skills());
   const [screen, setScreen] = useState<"list" | "detail">(
@@ -41,6 +68,17 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const [scanSel, setScanSel] = useState<Record<string, boolean>>({});
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteAck, setDeleteAck] = useState(false);
+  const [addPath, setAddPath] = useState("");
+  const addKey = deriveProjectKey(addPath);
+
+  useEffect(() => {
+    setOrder((current) => {
+      const ids = projects.map((p) => p.id);
+      const known = current.filter((id) => ids.includes(id));
+      const added = ids.filter((id) => !known.includes(id));
+      return [...known, ...added];
+    });
+  }, [projects]);
 
   const hidden = (id: string) => hiddenIds.includes(id);
   const byId = Object.fromEntries(projects.map((p) => [p.id, p]));
@@ -96,8 +134,8 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
 
   // Detail derived state
   const dp = projects.find((p) => p.id === detailId) ?? projects[0];
-  const dpSkills = skills.filter((k) => k.scope === "project" && k.projectId === dp.id);
-  const dpSessions = nexus.sessionsForProject(dp.id, detailSource);
+  const dpSkills = dp ? skills.filter((k) => k.scope === "project" && k.projectId === dp.id) : [];
+  const dpSessions = dp ? nexus.sessionsForProject(dp.id, detailSource) : [];
 
   const toggleCell = (id: string, agent: AgentName) =>
     setSkills((s) =>
@@ -105,6 +143,25 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
     );
   const toggleDmi = (id: string) =>
     setSkills((s) => s.map((k) => (k.id === id ? { ...k, disabled: !k.disabled } : k)));
+
+  async function submitAddProject() {
+    const path = addPath.trim();
+    if (!path) {
+      toast("Project path is required");
+      return;
+    }
+
+    try {
+      const project = await recordProject.mutateAsync(path);
+      setAddOpen(false);
+      setAddPath("");
+      setDetailId(project.id);
+      setScreen("detail");
+      toast(`Project recorded · key "${project.key}"`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
 
   const menuItem =
     "cursor-pointer rounded-[8px] px-3.5 py-[9px] text-[12.5px] font-semibold";
@@ -143,6 +200,24 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               <div className="text-right">Assets</div>
               <div />
             </div>
+
+            {projectsQuery.isLoading ? (
+              <div className="px-5 py-8 text-center text-[12.5px] text-[#b3a999]">
+                Loading projects...
+              </div>
+            ) : null}
+
+            {projectError ? (
+              <div className="mx-5 my-5 rounded-[12px] border border-[#ecd0c6] bg-[#f8ebe6] px-4 py-3 text-[12.5px] text-nexus-crit">
+                {projectError}
+              </div>
+            ) : null}
+
+            {!projectsQuery.isLoading && !projectError && ordered.length === 0 ? (
+              <div className="mx-5 my-5 rounded-[12px] border border-dashed border-nexus-border2 bg-nexus-sand p-[18px] text-center text-[12px] text-[#b3a999]">
+                No projects recorded yet. Add an existing Git repository root to create the first Project.
+              </div>
+            ) : null}
 
             {active.map((p) => (
               <div
@@ -253,7 +328,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
             Status set is <b className="text-[#9a8f80]">active / stale / hidden</b>.
           </p>
         </ScreenScroll>
-      ) : (
+      ) : dp ? (
         <ScreenScroll>
           <button
             onClick={() => setScreen("list")}
@@ -436,6 +511,18 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
             </div>
           </Card>
         </ScreenScroll>
+      ) : (
+        <ScreenScroll>
+          <button
+            onClick={() => setScreen("list")}
+            className="mb-3.5 inline-flex items-center gap-1.5 text-[12px] text-[#9a8f80] hover:text-nexus-accent"
+          >
+            ← Project
+          </button>
+          <Card className="p-[22px] text-[12.5px] text-[#9a8f80]">
+            No project is selected.
+          </Card>
+        </ScreenScroll>
       )}
 
       {/* Add Project modal */}
@@ -444,17 +531,23 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
         <div className="flex flex-col gap-4 px-[22px] py-5">
           <div>
             <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">Repository root</div>
-            <div className="flex items-center gap-2 rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055]">
-              D:/Workspace/new-service
-              <span className="ml-auto cursor-pointer font-sans text-[11px] font-semibold text-nexus-accent">
-                Browse…
-              </span>
-            </div>
+            <input
+              value={addPath}
+              onChange={(event) => setAddPath(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !recordProject.isPending) {
+                  void submitAddProject();
+                }
+              }}
+              placeholder="/Users/lumiarna/Workspace/agent-nexus"
+              className="w-full rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055] outline-none focus:border-nexus-accent"
+              autoFocus
+            />
           </div>
           <div>
             <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">Project Key</div>
             <div className="flex items-center gap-2 rounded-[10px] border border-nexus-border2 bg-nexus-bg px-3 py-[9px] font-mono text-[12.5px] text-[#6a6055]">
-              new-service
+              {addKey || "folder-name"}
             </div>
             <div className="mt-2 rounded-[11px] border border-nexus-border bg-nexus-bg px-3.5 py-[11px] text-[11.5px] leading-[1.55] text-[#8a7a68]">
               The Project Key is always the folder name. It is the stable identity used to merge the
@@ -468,9 +561,10 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
           </Button>
           <Button
             variant="primary"
-            onClick={() => { setAddOpen(false); toast("Project recorded \u00b7 key \u201cnew-service\u201d (folder name)"); }}
+            onClick={() => void submitAddProject()}
+            disabled={recordProject.isPending || !addPath.trim()}
           >
-            Record project
+            {recordProject.isPending ? "Recording..." : "Record project"}
           </Button>
         </ModalFooter>
       </Modal>
