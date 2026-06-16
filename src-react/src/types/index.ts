@@ -6,18 +6,11 @@
 
 // ─── Agents / distribution ──────────────────────────────────────────────────
 
-export type AgentName = "Agents" | "Claude Code" | "CodeX" | "Copilot" | "OpenCode";
+export type AgentName = "Generic Agent" | "Claude Code" | "CodeX" | "Copilot" | "OpenCode";
 
 /** Role of an agent in a Skill/Prompt Agent Matrix row. One source per row. */
 export type CellRole = "source" | "target" | "none";
 export type Cells = Record<AgentName, CellRole>;
-
-export interface AgentMeta {
-  abbr: string;
-  color: string;
-  configDir: string;
-  generic?: boolean;
-}
 
 // ─── Provider ───────────────────────────────────────────────────────────────
 
@@ -187,16 +180,4 @@ export interface WebdavSettings {
 export interface Settings {
   webdav: WebdavSettings;
   trayMetric: TrayMetric;
-}
-
-export interface AgentConfigDir {
-  envKey: string;
-  value: string;
-  derived?: boolean;
-}
-
-export interface AgentConfigRoot {
-  name: AgentName;
-  generic: boolean;
-  dirs: AgentConfigDir[];
 }

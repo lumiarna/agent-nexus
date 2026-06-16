@@ -3,38 +3,16 @@
 // `style`, not Tailwind classes. Mirrors prototype/nexus-data.js.
 
 import type { AgentName, CellRole, Cells, ProviderStatus } from "@/types";
+import { AGENTS, AGENT_ORDER } from "@/config/agents";
 
-/** Canonical agent display/distribution order. "Agents" is the generic ~/.agents
- *  default and sits leftmost in the Agent Matrix. */
-export const AGENT_ORDER: AgentName[] = [
-  "Agents",
-  "Claude Code",
-  "CodeX",
-  "Copilot",
-  "OpenCode",
-];
-
-interface AgentMetaEntry {
-  abbr: string;
-  color: string;
-  configDir: string;
-  generic?: boolean;
-}
-
-export const AGENT_META: Record<AgentName, AgentMetaEntry> = {
-  Agents: { abbr: "AG", color: "#9a7b53", configDir: "~/.agents", generic: true },
-  "Claude Code": { abbr: "CC", color: "#c2410c", configDir: "~/.claude" },
-  CodeX: { abbr: "CX", color: "#4f7a6a", configDir: "~/.codex" },
-  Copilot: { abbr: "CP", color: "#5a7894", configDir: "~/.github" },
-  OpenCode: { abbr: "OC", color: "#7a5c9e", configDir: "~/.config/opencode" },
-};
+export { AGENT_ORDER } from "@/config/agents";
 
 export function agentAbbr(a: AgentName): string {
-  return AGENT_META[a]?.abbr ?? "?";
+  return AGENTS.find((x) => x.name === a)?.abbr ?? "?";
 }
 
 export function agentColor(a: AgentName): string {
-  return AGENT_META[a]?.color ?? "#a99a89";
+  return AGENTS.find((x) => x.name === a)?.color ?? "#a99a89";
 }
 
 /** Status/accent palette. */

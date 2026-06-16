@@ -5,6 +5,7 @@ import { Card, Dot, Input } from "@/components/ui/primitives";
 import { ScreenScroll } from "@/components/shell/screen";
 import { useNav } from "@/lib/nav";
 import { nexus } from "@/lib/mock";
+import { AGENTS } from "@/config/agents";
 import { agentAbbr, agentColor } from "@/lib/tokens";
 
 type WebdavStatus = "ok" | "testing" | "untested";
@@ -24,7 +25,7 @@ export function SettingsPage() {
   const [webdavStatus, setWebdavStatus] = useState<WebdavStatus>(
     init.webdav.status === "ok" ? "ok" : "untested",
   );
-  const [agents] = useState(() => nexus.agentConfigRoots());
+  const [agents] = useState(AGENTS);
 
   const ws = WS_INFO[webdavStatus];
 
@@ -115,7 +116,7 @@ export function SettingsPage() {
         <div className="flex flex-wrap items-center gap-2.5">
           <h2 className="m-0 text-[15px] font-extrabold text-nexus-ink">Agent config roots</h2>
           <span className="text-[11px] text-[#b3a999]">
-            Where Skill &amp; Prompt placements are written · order Agents / Claude Code / CodeX /
+            Where Skill &amp; Prompt placements are written · order Generic Agent / Claude Code / CodeX /
             Copilot / OpenCode
           </span>
         </div>
@@ -133,11 +134,7 @@ export function SettingsPage() {
                   {agentAbbr(a.name)}
                 </span>
                 <span className="text-[13.5px] font-bold text-nexus-ink">{a.name}</span>
-                {a.generic ? (
-                  <span className="rounded-[5px] border border-[#e0d4c2] bg-[#efe7d4] px-1.5 py-px text-[9.5px] font-bold uppercase tracking-[.04em] text-[#8a7d5a]">
-                    Generic default
-                  </span>
-                ) : null}
+
               </div>
               <div className="mt-[11px] grid grid-cols-3 gap-3">
                 {a.dirs.map((d) => (
@@ -148,8 +145,8 @@ export function SettingsPage() {
                     <div className="mt-[3px] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
                       {d.value}
                     </div>
-                    {d.derived ? (
-                      <div className="mt-0.5 text-[9.5px] text-[#bca37a]">derived from root</div>
+                    {d.derivedFrom ? (
+                      <div className="mt-0.5 text-[9.5px] text-[#bca37a]">derived from {d.derivedFrom}</div>
                     ) : null}
                   </div>
                 ))}

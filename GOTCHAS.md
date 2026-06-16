@@ -1,0 +1,1 @@
+- tauri.conf.json` 已限制 `minWidth: 1100` / `minHeight: 720`

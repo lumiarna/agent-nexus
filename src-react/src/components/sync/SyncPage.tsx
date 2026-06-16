@@ -11,7 +11,6 @@ import { nexus } from "@/lib/mock";
 import { palette } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type {
-  ProjectSymlink,
   SystemSyncRow,
   Task,
   TaskAction,
@@ -26,9 +25,18 @@ const CRON_PRESETS = [
   { label: "Daily 05:00", expr: "0 5 * * *" },
   { label: "Weekly Sun 03:00", expr: "0 3 * * 0" },
 ];
-const TASK_COLS = "24px 132px 1.3fr 1.4fr 132px 116px";
+const TASK_COLS = "24px 132px 1.3fr 1.4fr 132px 150px";
 const LINK_COLS =
-  "minmax(90px,1.05fr) minmax(0,1.25fr) minmax(90px,1.05fr) minmax(0,1.25fr) 92px";
+  "minmax(70px,.6fr) minmax(0,1.6fr) minmax(70px,.6fr) minmax(0,1.6fr) 60px";
+
+/** Strip path up to (and including) the project name directory segment, showing only the relative remainder. */
+function relPath(fullPath: string, projectName?: string | null): string {
+  if (!projectName) return fullPath;
+  const marker = `/${projectName}/`;
+  const idx = fullPath.indexOf(marker);
+  if (idx === -1) return fullPath;
+  return fullPath.slice(idx + marker.length) || "/";
+}
 
 function dirColors(d: TaskDirection): { fg: string; bg: string } {
   if (d === "Backup") return { fg: "#9a6f0a", bg: "#f7eccb" };
@@ -54,11 +62,6 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return "Unexpected error";
-}
-
-function symlinkStatusOf(st: ProjectSymlink["status"]): { label: string; fg: string; dot: string } {
-  if (st === "ok") return { label: "OK", fg: "#5f7a3e", dot: palette.good };
-  return { label: "Missing", fg: "#9a6f0a", dot: palette.warn };
 }
 
 function cronHuman(expr: string): string {
@@ -278,12 +281,14 @@ export function SyncPage() {
                     {g.tasks.length} {g.tasks.length === 1 ? "task" : "tasks"}
                   </span>
                   <div className="ml-auto flex gap-[7px]">
-                    <button
-                      onClick={() => toast(`Run group · ${g.name} (${g.tasks.length} tasks, serial)`)}
-                      className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
-                    >
-                      Run group
-                    </button>
+                    {g.tasks.some((t) => t.action === "copy") && (
+                      <button
+                        onClick={() => toast(`Run group · ${g.name} (${g.tasks.length} tasks, serial)`)}
+                        className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
+                      >
+                        Run group
+                      </button>
+                    )}
                     <button
                       onClick={() => toast(`Add task to ${g.name}`)}
                       className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-[#7a6f60] hover:bg-[#ece2d5]"
@@ -302,12 +307,13 @@ export function SyncPage() {
                   <div>Source</div>
                   <div>Target</div>
                   <div>Schedule</div>
-                  <div className="text-right">Status</div>
+                  <div className="text-right">Actions</div>
                 </div>
 
                 {g.tasks.map((t) => {
-                  const st = statusOf(t.status);
                   const isCron = t.schedule !== "manual";
+                  const isCopy = t.action === "copy";
+                  const st = isCopy ? statusOf(t.status) : null;
                   const tDragging = dragTask != null && dragTask.groupId === g.id && dragTask.taskId === t.id;
                   const targetLabel =
                     t.targets.length > 1 ? `${t.targets[0]}  +${t.targets.length - 1}` : t.targets[0] || "—";
@@ -361,14 +367,24 @@ export function SyncPage() {
                         <div className="mt-[3px] text-[10px] text-[#c3b9a8]">last {t.lastRun}</div>
                       </div>
                       <div className="flex items-center justify-end gap-[9px]">
-                        <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: st.fg }}>
-                          <Dot color={st.dot} /> {st.label}
-                        </span>
+                        {st && (
+                          <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: st.fg }}>
+                            <Dot color={st.dot} /> {st.label}
+                          </span>
+                        )}
+                        {isCopy && (
+                          <span
+                            onClick={() => toast(`Run · ${t.direction} · ${t.source || "task"}`)}
+                            className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
+                          >
+                            Run
+                          </span>
+                        )}
                         <span
-                          onClick={() => toast(`Run · ${t.direction} · ${t.source || "task"}`)}
-                          className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
+                          onClick={() => toast(`Delete · ${t.direction} · ${t.source || "task"}`)}
+                          className="cursor-pointer text-[11px] font-bold text-nexus-crit hover:underline"
                         >
-                          Run
+                          Delete
                         </span>
                       </div>
                     </div>
@@ -414,7 +430,7 @@ export function SyncPage() {
             <div>Source Path</div>
             <div>Target Project</div>
             <div>Target Path</div>
-            <div className="text-right">Status</div>
+            <div className="text-right">Actions</div>
           </div>
           {projectSymlinksQuery.isLoading ? (
             <div className="px-5 py-6 text-[12.5px] text-[#9a8f80]">Scanning Project symlinks...</div>
@@ -431,7 +447,6 @@ export function SyncPage() {
             </div>
           ) : (
             projectSymlinks.map((link) => {
-              const st = symlinkStatusOf(link.status);
               return (
                 <div
                   key={link.id}
@@ -446,17 +461,22 @@ export function SyncPage() {
                       {link.linkKind}
                     </div>
                   </div>
-                  <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]">
-                    {link.sourcePath}
+                  <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]" title={link.sourcePath}>
+                    {relPath(link.sourcePath, link.sourceProjectName)}
                   </div>
                   <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">
                     {link.targetProjectName ?? "External"}
                   </div>
-                  <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]">
-                    {link.targetPath}
+                  <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]" title={link.targetPath}>
+                    {relPath(link.targetPath, link.targetProjectName)}
                   </div>
-                  <div className="inline-flex items-center gap-1.5 justify-self-end text-[11px] font-bold" style={{ color: st.fg }}>
-                    <Dot color={st.dot} /> {st.label}
+                  <div className="justify-self-end">
+                    <span
+                      onClick={() => toast(`Delete symlink · ${link.sourceProjectName ?? "External"} → ${link.targetProjectName ?? "External"}`)}
+                      className="cursor-pointer text-[11px] font-bold text-nexus-crit hover:underline"
+                    >
+                      Delete
+                    </span>
                   </div>
                 </div>
               );

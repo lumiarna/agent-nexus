@@ -5,8 +5,6 @@
 // Phase 3 replaces this module with lib/api/* (typed invoke) + React Query.
 
 import type {
-  AgentConfigRoot,
-  AgentName,
   GitBaseFolder,
   Project,
   Prompt,
@@ -20,7 +18,6 @@ import type {
   TaskGroup,
   Template,
 } from "@/types";
-import { AGENT_META, AGENT_ORDER } from "@/lib/tokens";
 
 const clone = <T>(x: T): T => structuredClone(x);
 
@@ -100,23 +97,23 @@ const SCAN_RESULTS: ScanResult[] = [
 // ─── Skills (cells keyed by agent name; one source per row) ─────────────────
 
 const SKILLS: Skill[] = [
-  { id: "sk1", name: "tap-builder", scope: "global", desc: "Scaffold TAP modules from a spec file", path: "~/.claude/skills/tap-builder", disabled: false, cells: { Agents: "none", "Claude Code": "source", CodeX: "target", Copilot: "target", OpenCode: "none" } },
-  { id: "sk2", name: "commit-helper", scope: "global", desc: "Generate conventional commit messages", path: "~/.claude/skills/commit-helper", disabled: false, cells: { Agents: "target", "Claude Code": "source", CodeX: "target", Copilot: "target", OpenCode: "target" } },
-  { id: "sk3", name: "issue-triage", scope: "global", desc: "Apply canonical triage labels to issues", path: "~/.config/opencode/skills/issue-triage", disabled: true, cells: { Agents: "none", "Claude Code": "none", CodeX: "none", Copilot: "none", OpenCode: "source" } },
-  { id: "sk4", name: "pdf-extractor", scope: "global", desc: "Extract structured data from PDFs", path: "~/.codex/skills/pdf-extractor", disabled: false, cells: { Agents: "target", "Claude Code": "none", CodeX: "source", Copilot: "none", OpenCode: "target" } },
-  { id: "sk5", name: "domain-doctor", scope: "global", desc: "Maintain CONTEXT.md domain docs", path: "~/.claude/skills/domain-doctor", disabled: false, cells: { Agents: "none", "Claude Code": "source", CodeX: "none", Copilot: "target", OpenCode: "none" } },
-  { id: "sk6", name: "tap-builder", scope: "project", projectId: "oll-context", desc: "Project-scoped TAP scaffolder", path: ".github/skills/tap-builder", disabled: false, cells: { Agents: "none", "Claude Code": "source", CodeX: "target", Copilot: "target", OpenCode: "none" } },
-  { id: "sk7", name: "test-runner", scope: "project", projectId: "oll-context", desc: "Run and summarize the test suite", path: ".codex/skills/test-runner", disabled: false, cells: { Agents: "none", "Claude Code": "none", CodeX: "source", Copilot: "none", OpenCode: "none" } },
-  { id: "sk8", name: "release-notes", scope: "project", projectId: "tap", desc: "Draft release notes from merged PRs", path: ".claude/skills/release-notes", disabled: false, cells: { Agents: "none", "Claude Code": "source", CodeX: "none", Copilot: "target", OpenCode: "none" } },
-  { id: "sk9", name: "vibe-lint", scope: "project", projectId: "awesome-vibe-coding", desc: "Lint vibe-coding examples", path: ".agents/skills/vibe-lint", disabled: false, cells: { Agents: "target", "Claude Code": "none", CodeX: "none", Copilot: "none", OpenCode: "source" } },
-  { id: "sk10", name: "context-doctor", scope: "project", projectId: "agent-nexus", desc: "Maintain CONTEXT.md domain docs", path: ".claude/skills/context-doctor", disabled: false, cells: { Agents: "none", "Claude Code": "source", CodeX: "target", Copilot: "none", OpenCode: "none" } },
+  { id: "sk1", name: "tap-builder", scope: "global", desc: "Scaffold TAP modules from a spec file", path: "~/.claude/skills/tap-builder", disabled: false, cells: { "Generic Agent": "none", "Claude Code": "source", CodeX: "target", Copilot: "target", OpenCode: "none" } },
+  { id: "sk2", name: "commit-helper", scope: "global", desc: "Generate conventional commit messages", path: "~/.claude/skills/commit-helper", disabled: false, cells: { "Generic Agent": "target", "Claude Code": "source", CodeX: "target", Copilot: "target", OpenCode: "target" } },
+  { id: "sk3", name: "issue-triage", scope: "global", desc: "Apply canonical triage labels to issues", path: "~/.config/opencode/skills/issue-triage", disabled: true, cells: { "Generic Agent": "none", "Claude Code": "none", CodeX: "none", Copilot: "none", OpenCode: "source" } },
+  { id: "sk4", name: "pdf-extractor", scope: "global", desc: "Extract structured data from PDFs", path: "~/.codex/skills/pdf-extractor", disabled: false, cells: { "Generic Agent": "target", "Claude Code": "none", CodeX: "source", Copilot: "none", OpenCode: "target" } },
+  { id: "sk5", name: "domain-doctor", scope: "global", desc: "Maintain CONTEXT.md domain docs", path: "~/.claude/skills/domain-doctor", disabled: false, cells: { "Generic Agent": "none", "Claude Code": "source", CodeX: "none", Copilot: "target", OpenCode: "none" } },
+  { id: "sk6", name: "tap-builder", scope: "project", projectId: "oll-context", desc: "Project-scoped TAP scaffolder", path: ".github/skills/tap-builder", disabled: false, cells: { "Generic Agent": "none", "Claude Code": "source", CodeX: "target", Copilot: "target", OpenCode: "none" } },
+  { id: "sk7", name: "test-runner", scope: "project", projectId: "oll-context", desc: "Run and summarize the test suite", path: ".codex/skills/test-runner", disabled: false, cells: { "Generic Agent": "none", "Claude Code": "none", CodeX: "source", Copilot: "none", OpenCode: "none" } },
+  { id: "sk8", name: "release-notes", scope: "project", projectId: "tap", desc: "Draft release notes from merged PRs", path: ".claude/skills/release-notes", disabled: false, cells: { "Generic Agent": "none", "Claude Code": "source", CodeX: "none", Copilot: "target", OpenCode: "none" } },
+  { id: "sk9", name: "vibe-lint", scope: "project", projectId: "awesome-vibe-coding", desc: "Lint vibe-coding examples", path: ".agents/skills/vibe-lint", disabled: false, cells: { "Generic Agent": "target", "Claude Code": "none", CodeX: "none", Copilot: "none", OpenCode: "source" } },
+  { id: "sk10", name: "context-doctor", scope: "project", projectId: "agent-nexus", desc: "Maintain CONTEXT.md domain docs", path: ".claude/skills/context-doctor", disabled: false, cells: { "Generic Agent": "none", "Claude Code": "source", CodeX: "target", Copilot: "none", OpenCode: "none" } },
 ];
 
 // ─── Prompts (global single-file assets) ────────────────────────────────────
 
 const PROMPTS: Prompt[] = [
-  { id: "pr1", name: "Global Instructions", path: "~/.claude/CLAUDE.md", cells: { Agents: "target", "Claude Code": "source", CodeX: "target", Copilot: "target", OpenCode: "target" } },
-  { id: "pr2", name: "Agent Conventions", path: "~/.codex/AGENTS.md", cells: { Agents: "target", "Claude Code": "none", CodeX: "source", Copilot: "none", OpenCode: "target" } },
+  { id: "pr1", name: "Global Instructions", path: "~/.claude/CLAUDE.md", cells: { "Generic Agent": "target", "Claude Code": "source", CodeX: "target", Copilot: "target", OpenCode: "target" } },
+  { id: "pr2", name: "Agent Conventions", path: "~/.codex/AGENTS.md", cells: { "Generic Agent": "target", "Claude Code": "none", CodeX: "source", Copilot: "none", OpenCode: "target" } },
 ];
 
 // ─── Sessions ───────────────────────────────────────────────────────────────
@@ -193,23 +190,6 @@ const SETTINGS: Settings = {
   trayMetric: "Remaining",
 };
 
-/** Agent config roots, derived from AGENT_META in canonical order. */
-function agentConfigRoots(): AgentConfigRoot[] {
-  return AGENT_ORDER.map((name: AgentName) => {
-    const root = AGENT_META[name].configDir;
-    const keyBase = name === "Agents" ? "AGENTS" : name.toUpperCase().replace(/[^A-Z]/g, "");
-    return {
-      name,
-      generic: !!AGENT_META[name].generic,
-      dirs: [
-        { envKey: keyBase + "_CONFIG_DIR", value: root },
-        { envKey: keyBase + "_SKILLS_DIR", value: root + "/skills", derived: true },
-        { envKey: keyBase + "_PROMPT_FILE", value: root + "/" + (name === "Claude Code" ? "CLAUDE.md" : "AGENTS.md"), derived: true },
-      ],
-    };
-  });
-}
-
 // ─── Public API (mirrors prototype window.NexusData) ────────────────────────
 
 export const nexus = {
@@ -231,5 +211,4 @@ export const nexus = {
   templates: (): Template[] => clone(TEMPLATES),
   systemSync: (): SystemSync => clone(SYSTEM_SYNC),
   settings: (): Settings => clone(SETTINGS),
-  agentConfigRoots,
 };
