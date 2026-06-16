@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Agent Nexus",
+  "version": "0.1.0",
+  "identifier": "com.lumiarna.agentnexus",
+  "build": {
+    "beforeDevCommand": "pnpm --dir src-react dev",
+    "beforeBuildCommand": "pnpm --dir src-react build",
+    "devUrl": "http://localhost:3000",
+    "frontendDist": "../src-react/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Agent Nexus",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 1100,
+        "minHeight": 720,
+        "resizable": true,
+        "decorations": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.png"]
+  }
+}

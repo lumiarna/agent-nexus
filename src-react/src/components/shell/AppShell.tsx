@@ -13,7 +13,7 @@ const TABS: { key: View; label: string }[] = [
   { key: "sync", label: "Sync" },
 ];
 
-function TitleBar() {
+function AppHeader() {
   const { view, go } = useNav();
   const onSettings = view === "settings";
   return (
@@ -75,12 +75,12 @@ function TabNav() {
   );
 }
 
-/** Full-window chrome: 40px title bar + tab bar + page content slot.
+/** App content shell: header + tab bar + page content slot.
  *  Pages own their own scroll/padding inside the flex-1 region. */
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden bg-nexus-bg">
-      <TitleBar />
+      <AppHeader />
       <TabNav />
       {children}
     </div>

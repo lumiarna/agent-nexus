@@ -1,0 +1,20 @@
+use serde::Serialize;
+
+use crate::error::AppResult;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopHealth {
+    pub ok: bool,
+    pub app_name: &'static str,
+    pub app_version: &'static str,
+}
+
+#[tauri::command]
+pub fn get_desktop_health() -> AppResult<DesktopHealth> {
+    Ok(DesktopHealth {
+        ok: true,
+        app_name: "Agent Nexus",
+        app_version: env!("CARGO_PKG_VERSION"),
+    })
+}

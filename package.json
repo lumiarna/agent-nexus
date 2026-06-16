@@ -1,0 +1,16 @@
+{
+  "name": "agent-nexus-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --dir src-react dev",
+    "build": "pnpm --dir src-react build",
+    "typecheck": "pnpm --dir src-react typecheck",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.2"
+  },
+  "packageManager": "pnpm@11.6.0"
+}

@@ -1,5 +1,10 @@
 .DS_Store
 __sessions/
+.agents/
+
+# build
 node_modules/
 dist/
+src-tauri/gen/schemas/
+src-tauri/target/
 *.tsbuildinfo
