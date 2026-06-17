@@ -1,0 +1,4 @@
+packages:
+  - src-react
+allowBuilds:
+  esbuild: true
