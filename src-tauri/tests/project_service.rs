@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, path::Path};
 
 use agent_nexus_lib::{database::Database, services::projects::ProjectService};
 use tempfile::TempDir;
@@ -7,6 +7,25 @@ fn git_repo(parent: &TempDir, name: &str) -> String {
     let path = parent.path().join(name);
     fs::create_dir_all(path.join(".git")).expect("create test git repo");
     path.to_string_lossy().into_owned()
+}
+
+fn canonical_display_path(path: impl AsRef<Path>) -> String {
+    let path = fs::canonicalize(path)
+        .expect("canonicalize path")
+        .to_string_lossy()
+        .into_owned();
+
+    #[cfg(windows)]
+    {
+        if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{}", path);
+        }
+
+        return path.strip_prefix(r"\\?\").unwrap_or(&path).to_string();
+    }
+
+    #[cfg(not(windows))]
+    path
 }
 
 #[test]
@@ -26,10 +45,7 @@ fn records_git_project_and_lists_it_by_folder_key() {
     assert_eq!(recorded.status, "active");
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].id, recorded.id);
-    assert_eq!(
-        projects[0].path,
-        fs::canonicalize(repo).unwrap().to_string_lossy()
-    );
+    assert_eq!(projects[0].path, canonical_display_path(repo));
 }
 
 #[test]
@@ -49,10 +65,7 @@ fn recording_same_project_key_updates_path_without_duplicate() {
 
     assert_eq!(second.id, first.id);
     assert_eq!(projects.len(), 1);
-    assert_eq!(
-        projects[0].path,
-        fs::canonicalize(new_repo).unwrap().to_string_lossy()
-    );
+    assert_eq!(projects[0].path, canonical_display_path(new_repo));
 }
 
 #[test]
@@ -68,9 +81,12 @@ fn records_git_base_folder_and_lists_canonical_path() {
         .list_git_base_folders()
         .expect("list git base folders");
 
-    assert_eq!(
-        recorded.path,
-        fs::canonicalize(root.path()).unwrap().to_string_lossy()
+    assert_eq!(recorded.path, canonical_display_path(root.path()));
+    #[cfg(windows)]
+    assert!(
+        !recorded.path.starts_with(r"\\?\"),
+        "recorded base folder should not expose a Windows verbatim path: {}",
+        recorded.path
     );
     assert_eq!(folders, vec![recorded]);
 }
@@ -97,16 +113,10 @@ fn scans_registered_base_folders_and_marks_recorded_projects() {
 
     assert_eq!(scan.len(), 2);
     assert_eq!(scan[0].key, "existing");
-    assert_eq!(
-        scan[0].path,
-        fs::canonicalize(existing_repo).unwrap().to_string_lossy()
-    );
+    assert_eq!(scan[0].path, canonical_display_path(existing_repo));
     assert_eq!(scan[0].state, "recorded");
     assert_eq!(scan[1].key, "new");
-    assert_eq!(
-        scan[1].path,
-        fs::canonicalize(new_repo).unwrap().to_string_lossy()
-    );
+    assert_eq!(scan[1].path, canonical_display_path(new_repo));
     assert_eq!(scan[1].state, "new");
 }
 

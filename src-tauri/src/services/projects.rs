@@ -321,8 +321,22 @@ fn project_key(path: &Path) -> AppResult<String> {
 
 fn path_to_string(path: &Path) -> AppResult<String> {
     path.to_str()
-        .map(ToOwned::to_owned)
+        .map(display_path)
         .ok_or_else(|| AppError::Validation("project path must be valid UTF-8".to_string()))
+}
+
+#[cfg(windows)]
+fn display_path(path: &str) -> String {
+    if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{}", path);
+    }
+
+    path.strip_prefix(r"\\?\").unwrap_or(path).to_string()
+}
+
+#[cfg(not(windows))]
+fn display_path(path: &str) -> String {
+    path.to_string()
 }
 
 fn discover_git_repositories(base: &Path) -> AppResult<Vec<DiscoveredRepo>> {
