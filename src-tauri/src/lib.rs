@@ -35,8 +35,12 @@ pub fn run() {
             commands::sync::create_task_group,
             commands::sync::delete_project_symlink,
             commands::sync::delete_task,
+            commands::sync::get_webdav_settings,
             commands::sync::list_project_symlinks,
             commands::sync::list_task_groups,
+            commands::sync::run_task,
+            commands::sync::save_webdav_settings,
+            commands::sync::test_webdav_connection,
         ])
         .on_window_event(|window, event| {
             if window.label() == "main"

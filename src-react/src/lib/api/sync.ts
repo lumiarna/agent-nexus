@@ -1,4 +1,4 @@
-import type { ProjectSymlink, TaskAction, TaskGroup, LocationType } from "@/types";
+import type { ProjectSymlink, TaskAction, TaskGroup, LocationType, WebdavSettings } from "@/types";
 import { invokeCommand } from "@/lib/api/tauri";
 
 export interface CreateTaskInput {
@@ -15,7 +15,23 @@ export interface CreateTaskGroupInput {
   tasks: CreateTaskInput[];
 }
 
+export interface SaveWebdavSettingsInput {
+  url: string;
+  user: string;
+  pass: string;
+  remoteRoot: string;
+}
+
 export const syncApi = {
+  getWebdavSettings(): Promise<WebdavSettings> {
+    return invokeCommand<WebdavSettings>("get_webdav_settings");
+  },
+  saveWebdavSettings(input: SaveWebdavSettingsInput): Promise<WebdavSettings> {
+    return invokeCommand<WebdavSettings>("save_webdav_settings", { input });
+  },
+  testWebdavConnection(input: SaveWebdavSettingsInput): Promise<void> {
+    return invokeCommand<void>("test_webdav_connection", { input });
+  },
   listTaskGroups(): Promise<TaskGroup[]> {
     return invokeCommand<TaskGroup[]>("list_task_groups");
   },
@@ -24,6 +40,9 @@ export const syncApi = {
   },
   deleteTask(id: string): Promise<void> {
     return invokeCommand<void>("delete_task", { id });
+  },
+  runTask(id: string): Promise<TaskGroup["tasks"][number]> {
+    return invokeCommand<TaskGroup["tasks"][number]>("run_task", { id });
   },
   listProjectSymlinks(): Promise<ProjectSymlink[]> {
     return invokeCommand<ProjectSymlink[]>("list_project_symlinks");

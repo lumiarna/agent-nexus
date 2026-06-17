@@ -8,16 +8,23 @@ use std::{
 
 use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
+use url::Url;
 use uuid::Uuid;
 
 use crate::{
     database::Database,
     error::{AppError, AppResult},
     services::symlink::{create_symlink_placement, remove_symlink, remove_symlink_if_present},
+    services::webdav,
 };
 
 const PROJECT_SYMLINK_IGNORED_DIRS_SETTING: &str = "sync_project_symlink_ignored_dirs";
 const DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &[&str] = &[".git", ".venv", "node_modules"];
+const WEBDAV_URL_SETTING: &str = "webdav_url";
+const WEBDAV_USER_SETTING: &str = "webdav_user";
+const WEBDAV_PASS_SETTING: &str = "webdav_pass";
+const WEBDAV_REMOTE_ROOT_SETTING: &str = "webdav_remote_root";
+const DEFAULT_WEBDAV_REMOTE_ROOT: &str = "agent-nexus-sync";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +81,24 @@ pub struct CreateTaskGroupInput {
     pub tasks: Vec<CreateTaskInput>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebdavSettings {
+    pub url: String,
+    pub user: String,
+    pub pass: String,
+    pub remote_root: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebdavSettingsInput {
+    pub url: String,
+    pub user: String,
+    pub pass: String,
+    pub remote_root: String,
+}
+
 struct PreparedTask {
     action: String,
     source_type: String,
@@ -99,6 +124,60 @@ struct ProjectRoot {
 impl SyncService {
     pub fn new(db: Arc<Database>) -> Self {
         Self { db }
+    }
+
+    pub fn get_webdav_settings(&self) -> AppResult<WebdavSettings> {
+        let conn = self.db.connection()?;
+        Ok(WebdavSettings {
+            url: read_setting(&conn, WEBDAV_URL_SETTING)?.unwrap_or_default(),
+            user: read_setting(&conn, WEBDAV_USER_SETTING)?.unwrap_or_default(),
+            pass: read_setting(&conn, WEBDAV_PASS_SETTING)?.unwrap_or_default(),
+            remote_root: read_setting(&conn, WEBDAV_REMOTE_ROOT_SETTING)?
+                .unwrap_or_else(|| DEFAULT_WEBDAV_REMOTE_ROOT.to_string()),
+        })
+    }
+
+    pub fn save_webdav_settings(&self, input: WebdavSettingsInput) -> AppResult<WebdavSettings> {
+        let settings = normalize_webdav_settings(input)?;
+        let mut conn = self.db.connection()?;
+        let tx = conn.transaction()?;
+
+        upsert_setting(&tx, WEBDAV_URL_SETTING, &settings.url)?;
+        upsert_setting(&tx, WEBDAV_USER_SETTING, &settings.user)?;
+        upsert_setting(&tx, WEBDAV_PASS_SETTING, &settings.pass)?;
+        upsert_setting(&tx, WEBDAV_REMOTE_ROOT_SETTING, &settings.remote_root)?;
+        tx.commit()?;
+
+        Ok(settings)
+    }
+
+    pub async fn test_webdav_connection(&self, input: WebdavSettingsInput) -> AppResult<()> {
+        let settings = normalize_webdav_settings(input)?;
+        let auth = webdav::auth_from_credentials(&settings.user, &settings.pass);
+        webdav::test_connection(&settings.url, &auth).await?;
+        let segments = webdav::path_segments(&settings.remote_root)
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        webdav::ensure_remote_directories(&settings.url, &segments, &auth).await
+    }
+
+    pub async fn run_task(&self, id: String) -> AppResult<Task> {
+        let id = required_trimmed(&id, "task id")?.to_string();
+        let task = self
+            .find_task(&id)?
+            .ok_or_else(|| AppError::Validation("task not found".to_string()))?;
+
+        let result = self.run_task_operation(&task).await;
+        match result {
+            Ok(()) => self.record_task_run(&id, "ok")?,
+            Err(error) => {
+                let _ = self.record_task_run(&id, "failed");
+                return Err(error);
+            }
+        }
+
+        self.find_task(&id)?
+            .ok_or_else(|| AppError::Internal("completed task was not found".to_string()))
     }
 
     pub fn list_project_symlinks(&self) -> AppResult<Vec<ProjectSymlink>> {
@@ -264,6 +343,79 @@ impl SyncService {
         remove_symlink(Path::new(target_path))
     }
 
+    async fn run_task_operation(&self, task: &Task) -> AppResult<()> {
+        if task.action != "Copy" {
+            return Err(AppError::Validation(
+                "only Copy tasks can be run manually".to_string(),
+            ));
+        }
+
+        match (task.source_type.as_str(), task.target_type.as_str()) {
+            ("Local", "Cloud") => {
+                let settings = self.valid_webdav_settings()?;
+                push_local_to_cloud(task, &settings).await
+            }
+            ("Cloud", "Local") => Err(AppError::Validation(
+                "Cloud to Local copy is not implemented yet".to_string(),
+            )),
+            ("Local", "Local") => Err(AppError::Validation(
+                "Local to Local copy is not implemented yet".to_string(),
+            )),
+            _ => Err(AppError::Validation(
+                "Cloud to Cloud copy is not supported".to_string(),
+            )),
+        }
+    }
+
+    fn valid_webdav_settings(&self) -> AppResult<WebdavSettings> {
+        let settings = self.get_webdav_settings()?;
+        normalize_webdav_settings(WebdavSettingsInput {
+            url: settings.url,
+            user: settings.user,
+            pass: settings.pass,
+            remote_root: settings.remote_root,
+        })
+    }
+
+    fn find_task(&self, id: &str) -> AppResult<Option<Task>> {
+        let conn = self.db.connection()?;
+        conn.query_row(
+            r#"
+            SELECT
+                id,
+                direction,
+                action,
+                source_type,
+                source,
+                target_type,
+                target,
+                schedule,
+                COALESCE(strftime('%m-%d %H:%M', last_run_at, 'unixepoch'), '—') AS last_run,
+                COALESCE(last_status, 'never') AS status
+            FROM tasks
+            WHERE id = ?1
+            "#,
+            [id],
+            task_from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    fn record_task_run(&self, id: &str, status: &str) -> AppResult<()> {
+        let now = now_epoch_seconds()?;
+        let conn = self.db.connection()?;
+        conn.execute(
+            r#"
+            UPDATE tasks
+            SET last_run_at = ?2, last_status = ?3, updated_at = ?2
+            WHERE id = ?1
+            "#,
+            params![id, now, status],
+        )?;
+        Ok(())
+    }
+
     fn list_existing_project_roots(&self) -> AppResult<Vec<ProjectRoot>> {
         let conn = self.db.connection()?;
         let mut stmt = conn.prepare(
@@ -311,9 +463,9 @@ fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
     let action = validate_one_of(&task.action, &["Symlink", "Copy"], "task action")?;
     let source_type = validate_one_of(&task.source_type, &["Local", "Cloud"], "source type")?;
     let target_type = validate_one_of(&task.target_type, &["Local", "Cloud"], "target type")?;
-    if source_type == "Cloud" || target_type == "Cloud" {
+    if source_type == "Cloud" && target_type == "Cloud" {
         return Err(AppError::Validation(
-            "cloud sync tasks are not implemented yet".to_string(),
+            "Cloud to Cloud sync tasks are not supported".to_string(),
         ));
     }
     let source = required_trimmed(&task.source, "task source")?;
@@ -345,6 +497,164 @@ fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
         schedule: schedule.to_string(),
         direction: direction.to_string(),
     })
+}
+
+fn normalize_webdav_url(raw: &str) -> AppResult<String> {
+    let value = required_trimmed(raw, "WebDAV URL")?;
+    let url = Url::parse(value)
+        .map_err(|error| AppError::Validation(format!("invalid WebDAV URL: {error}")))?;
+    match url.scheme() {
+        "http" | "https" => Ok(value.to_string()),
+        _ => Err(AppError::Validation(
+            "WebDAV URL must use http or https".to_string(),
+        )),
+    }
+}
+
+fn normalize_webdav_remote_root(raw: &str) -> String {
+    let value = raw.trim().trim_matches('/');
+    if value.is_empty() {
+        DEFAULT_WEBDAV_REMOTE_ROOT.to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn normalize_webdav_settings(input: WebdavSettingsInput) -> AppResult<WebdavSettings> {
+    Ok(WebdavSettings {
+        url: normalize_webdav_url(&input.url)?,
+        user: input.user.trim().to_string(),
+        pass: input.pass,
+        remote_root: normalize_webdav_remote_root(&input.remote_root),
+    })
+}
+
+async fn push_local_to_cloud(task: &Task, settings: &WebdavSettings) -> AppResult<()> {
+    let source = Path::new(&task.source);
+    let auth = webdav::auth_from_credentials(&settings.user, &settings.pass);
+
+    if source.is_file() {
+        push_local_file_to_cloud(source, &task.target, settings, &auth).await
+    } else if source.is_dir() {
+        push_local_directory_to_cloud(source, &task.target, settings, &auth).await
+    } else {
+        Err(AppError::Validation(format!(
+            "local source does not exist: {}",
+            task.source
+        )))
+    }
+}
+
+async fn push_local_file_to_cloud(
+    source: &Path,
+    target: &str,
+    settings: &WebdavSettings,
+    auth: &webdav::WebdavAuth,
+) -> AppResult<()> {
+    let mut file_segments = remote_segments(settings, target)?;
+    if target.trim().ends_with('/') {
+        file_segments.push(required_file_name(source)?);
+    }
+    if file_segments.len() < 2 {
+        return Err(AppError::Validation(
+            "cloud file target must include a file path".to_string(),
+        ));
+    }
+
+    let parent_segments = file_segments[..file_segments.len() - 1].to_vec();
+    webdav::ensure_remote_directories(&settings.url, &parent_segments, auth).await?;
+    let url = webdav::build_remote_url(&settings.url, &file_segments)?;
+    webdav::put_bytes(&url, auth, fs::read(source)?, "application/octet-stream").await
+}
+
+async fn push_local_directory_to_cloud(
+    source: &Path,
+    target: &str,
+    settings: &WebdavSettings,
+    auth: &webdav::WebdavAuth,
+) -> AppResult<()> {
+    let target_segments = remote_segments(settings, target)?;
+    let mut directories = Vec::new();
+    let mut files = Vec::new();
+    collect_local_directory_push(source, target_segments, &mut directories, &mut files)?;
+
+    for directory in directories {
+        webdav::ensure_remote_directories(&settings.url, &directory, auth).await?;
+    }
+
+    for (path, file_segments) in files {
+        let url = webdav::build_remote_url(&settings.url, &file_segments)?;
+        webdav::put_bytes(&url, auth, fs::read(path)?, "application/octet-stream").await?;
+    }
+
+    Ok(())
+}
+
+fn collect_local_directory_push(
+    source: &Path,
+    target_segments: Vec<String>,
+    directories: &mut Vec<Vec<String>>,
+    files: &mut Vec<(PathBuf, Vec<String>)>,
+) -> AppResult<()> {
+    directories.push(target_segments.clone());
+
+    let mut entries = fs::read_dir(source)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+
+    for entry in entries {
+        let path = entry.path();
+        let mut child_segments = target_segments.clone();
+        child_segments.push(required_file_name(&path)?);
+        let metadata = fs::metadata(&path)?;
+        if metadata.is_dir() {
+            collect_local_directory_push(&path, child_segments, directories, files)?;
+        } else if metadata.is_file() {
+            files.push((path, child_segments));
+        }
+    }
+
+    Ok(())
+}
+
+fn remote_segments(settings: &WebdavSettings, cloud_path: &str) -> AppResult<Vec<String>> {
+    let mut segments = webdav::path_segments(&settings.remote_root)
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    segments.extend(webdav::path_segments(cloud_path).map(ToOwned::to_owned));
+    if segments.is_empty() {
+        Err(AppError::Validation(
+            "cloud target path is required".to_string(),
+        ))
+    } else {
+        Ok(segments)
+    }
+}
+
+fn required_file_name(path: &Path) -> AppResult<String> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| AppError::Validation("path file name must be valid UTF-8".to_string()))
+}
+
+fn read_setting(conn: &rusqlite::Connection, key: &str) -> AppResult<Option<String>> {
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+        row.get::<_, String>(0)
+    })
+    .optional()
+    .map_err(Into::into)
+}
+
+fn upsert_setting(conn: &rusqlite::Connection, key: &str, value: &str) -> AppResult<()> {
+    conn.execute(
+        r#"
+        INSERT INTO settings (key, value)
+        VALUES (?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        "#,
+        params![key, value],
+    )?;
+    Ok(())
 }
 
 fn create_symlink_placements(tasks: &[PreparedTask]) -> AppResult<Vec<PathBuf>> {

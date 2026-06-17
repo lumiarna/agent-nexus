@@ -4,9 +4,33 @@ import { syncApi } from "@/lib/api/sync";
 import type { CreateTaskGroupInput } from "@/lib/api/sync";
 
 export const syncKeys = {
+  webdavSettings: ["sync", "webdavSettings"] as const,
   taskGroups: ["sync", "taskGroups"] as const,
   projectSymlinks: ["sync", "projectSymlinks"] as const,
 };
+
+export function useWebdavSettingsQuery() {
+  return useQuery({
+    queryKey: syncKeys.webdavSettings,
+    queryFn: syncApi.getWebdavSettings,
+  });
+}
+
+export function useSaveWebdavSettingsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: syncApi.saveWebdavSettings,
+    onSuccess: (settings) => {
+      queryClient.setQueryData(syncKeys.webdavSettings, settings);
+    },
+  });
+}
+
+export function useTestWebdavConnectionMutation() {
+  return useMutation({
+    mutationFn: syncApi.testWebdavConnection,
+  });
+}
 
 export function useTaskGroupsQuery() {
   return useQuery({
@@ -27,6 +51,14 @@ export function useDeleteTaskMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => syncApi.deleteTask(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: syncKeys.taskGroups }),
+  });
+}
+
+export function useRunTaskMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => syncApi.runTask(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: syncKeys.taskGroups }),
   });
 }

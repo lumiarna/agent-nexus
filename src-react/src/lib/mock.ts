@@ -187,7 +187,13 @@ const SYSTEM_SYNC: SystemSync = {
 // ─── Settings ───────────────────────────────────────────────────────────────
 
 const SETTINGS: Settings = {
-  webdav: { url: "https://nas.local/webdav/agent-nexus", user: "nexus", pass: "", status: "ok" },
+  webdav: {
+    url: "https://nas.local/webdav/agent-nexus",
+    user: "nexus",
+    pass: "",
+    remoteRoot: "agent-nexus-sync",
+    status: "ok",
+  },
   trayMetric: "Remaining",
 };
 

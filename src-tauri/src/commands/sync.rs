@@ -2,9 +2,32 @@ use tauri::State;
 
 use crate::{
     error::AppResult,
-    services::sync::{CreateTaskGroupInput, ProjectSymlink, TaskGroup},
+    services::sync::{
+        CreateTaskGroupInput, ProjectSymlink, Task, TaskGroup, WebdavSettings, WebdavSettingsInput,
+    },
     store::AppState,
 };
+
+#[tauri::command]
+pub fn get_webdav_settings(state: State<'_, AppState>) -> AppResult<WebdavSettings> {
+    state.sync.get_webdav_settings()
+}
+
+#[tauri::command]
+pub fn save_webdav_settings(
+    state: State<'_, AppState>,
+    input: WebdavSettingsInput,
+) -> AppResult<WebdavSettings> {
+    state.sync.save_webdav_settings(input)
+}
+
+#[tauri::command]
+pub async fn test_webdav_connection(
+    state: State<'_, AppState>,
+    input: WebdavSettingsInput,
+) -> AppResult<()> {
+    state.sync.test_webdav_connection(input).await
+}
 
 #[tauri::command]
 pub fn list_task_groups(state: State<'_, AppState>) -> AppResult<Vec<TaskGroup>> {
@@ -22,6 +45,11 @@ pub fn create_task_group(
 #[tauri::command]
 pub fn delete_task(state: State<'_, AppState>, id: String) -> AppResult<()> {
     state.sync.delete_task(id)
+}
+
+#[tauri::command]
+pub async fn run_task(state: State<'_, AppState>, id: String) -> AppResult<Task> {
+    state.sync.run_task(id).await
 }
 
 #[tauri::command]

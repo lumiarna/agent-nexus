@@ -107,7 +107,7 @@ export interface Session {
 export type TaskDirection = "Distribution" | "Push" | "Pull";
 export type TaskAction = "Symlink" | "Copy";
 export type LocationType = "Local" | "Cloud";
-export type TaskStatus = "ok" | "pending" | "never";
+export type TaskStatus = "ok" | "pending" | "failed" | "never";
 
 export interface Task {
   id: string;
@@ -177,7 +177,8 @@ export interface WebdavSettings {
   url: string;
   user: string;
   pass: string;
-  status: string;
+  remoteRoot: string;
+  status?: string;
 }
 
 export interface Settings {

@@ -1,4 +1,11 @@
-use std::{fs, path::Path, sync::Arc};
+use std::{
+    fs,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    path::Path,
+    sync::{Arc, Mutex},
+    thread::JoinHandle,
+};
 
 use agent_nexus_lib::{
     database::Database,
@@ -45,6 +52,246 @@ fn assert_symlink_points_to(source: &Path, target: &Path) {
     assert_eq!(fs::read_link(target).expect("read target link"), source);
 }
 
+fn http_response(status: &str) -> String {
+    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+}
+
+fn spawn_webdav_server(
+    responses: Vec<String>,
+) -> (String, Arc<Mutex<Vec<String>>>, JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test webdav server");
+    let url = format!("http://{}/webdav/", listener.local_addr().unwrap());
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let requests_for_thread = Arc::clone(&requests);
+
+    let handle = std::thread::spawn(move || {
+        for response in responses {
+            let (mut stream, _) = listener.accept().expect("accept webdav request");
+            let request = read_http_request(&mut stream);
+            let raw = String::from_utf8_lossy(&request);
+            let request_line = raw.lines().next().unwrap_or("").to_string();
+            let depth = raw
+                .lines()
+                .find(|line| line.to_ascii_lowercase().starts_with("depth:"))
+                .unwrap_or("")
+                .to_string();
+            requests_for_thread
+                .lock()
+                .expect("lock request log")
+                .push(format!("{request_line} {depth}\n{raw}"));
+            stream
+                .write_all(response.as_bytes())
+                .expect("write webdav response");
+        }
+    });
+
+    (url, requests, handle)
+}
+
+fn read_http_request(stream: &mut TcpStream) -> Vec<u8> {
+    let mut data = Vec::new();
+    let mut buffer = [0_u8; 1024];
+
+    loop {
+        let size = stream.read(&mut buffer).expect("read webdav request");
+        if size == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..size]);
+
+        let Some(header_end) = find_header_end(&data) else {
+            continue;
+        };
+        let header = String::from_utf8_lossy(&data[..header_end]);
+        let content_length = header
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                if name.eq_ignore_ascii_case("content-length") {
+                    value.trim().parse::<usize>().ok()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+        if data.len() >= header_end + 4 + content_length {
+            break;
+        }
+    }
+
+    data
+}
+
+fn find_header_end(data: &[u8]) -> Option<usize> {
+    data.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+#[test]
+fn saves_and_reads_webdav_settings() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+
+    let saved = sync
+        .save_webdav_settings(agent_nexus_lib::services::sync::WebdavSettingsInput {
+            url: " https://dav.example.com/root/ ".to_string(),
+            user: " alice ".to_string(),
+            pass: "secret".to_string(),
+            remote_root: " nexus-sync ".to_string(),
+        })
+        .expect("save webdav settings");
+
+    assert_eq!(saved.url, "https://dav.example.com/root/");
+    assert_eq!(saved.user, "alice");
+    assert_eq!(saved.pass, "secret");
+    assert_eq!(saved.remote_root, "nexus-sync");
+    assert_eq!(
+        sync.get_webdav_settings().expect("read webdav settings"),
+        saved
+    );
+}
+
+#[test]
+fn defaults_blank_webdav_remote_root() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+
+    let saved = sync
+        .save_webdav_settings(agent_nexus_lib::services::sync::WebdavSettingsInput {
+            url: "https://dav.example.com/root/".to_string(),
+            user: "alice".to_string(),
+            pass: "secret".to_string(),
+            remote_root: " ".to_string(),
+        })
+        .expect("save webdav settings");
+
+    assert_eq!(saved.remote_root, "agent-nexus-sync");
+}
+
+#[tokio::test]
+async fn tests_webdav_connection_and_creates_remote_root() {
+    let (url, requests, server) = spawn_webdav_server(vec![
+        http_response("207 Multi-Status"),
+        http_response("201 Created"),
+    ]);
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+
+    sync.test_webdav_connection(agent_nexus_lib::services::sync::WebdavSettingsInput {
+        url,
+        user: "alice".to_string(),
+        pass: "secret".to_string(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .await
+    .expect("test webdav connection");
+
+    server.join().expect("join webdav server");
+    let requests = requests.lock().expect("lock request log");
+    assert!(requests[0].starts_with("PROPFIND /webdav/ HTTP/1.1"));
+    assert!(requests[0].contains("depth: 0") || requests[0].contains("Depth: 0"));
+    assert!(requests[1].starts_with("MKCOL /webdav/agent-nexus-sync/ HTTP/1.1"));
+}
+
+#[tokio::test]
+async fn runs_local_file_copy_task_to_webdav() {
+    let (url, requests, server) = spawn_webdav_server(vec![
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+    ]);
+    let root = TempDir::new().expect("create temp dir");
+    let source_file = root.path().join("settings.toml");
+    fs::write(&source_file, "theme = 'dark'\n").expect("write source file");
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    sync.save_webdav_settings(agent_nexus_lib::services::sync::WebdavSettingsInput {
+        url,
+        user: "alice".to_string(),
+        pass: "secret".to_string(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Warp".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: source_file.to_string_lossy().into_owned(),
+                target_type: "Cloud".to_string(),
+                target: "config/warp/settings.toml".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create cloud copy task");
+
+    let task = sync
+        .run_task(created.tasks[0].id.clone())
+        .await
+        .expect("run cloud copy task");
+
+    assert_eq!(task.status, "ok");
+    assert_ne!(task.last_run, "—");
+    server.join().expect("join webdav server");
+    let requests = requests.lock().expect("lock request log");
+    assert!(requests[0].starts_with("MKCOL /webdav/agent-nexus-sync/ HTTP/1.1"));
+    assert!(requests[1].starts_with("MKCOL /webdav/agent-nexus-sync/config/ HTTP/1.1"));
+    assert!(requests[2].starts_with("MKCOL /webdav/agent-nexus-sync/config/warp/ HTTP/1.1"));
+    assert!(
+        requests[3].starts_with("PUT /webdav/agent-nexus-sync/config/warp/settings.toml HTTP/1.1")
+    );
+    assert!(requests[3].contains("theme = 'dark'"));
+}
+
+#[tokio::test]
+async fn runs_local_directory_copy_task_to_webdav() {
+    let (url, requests, server) = spawn_webdav_server(vec![
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+    ]);
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("ssh");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    fs::write(source_dir.join("config"), "Host *\n").expect("write source file");
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    sync.save_webdav_settings(agent_nexus_lib::services::sync::WebdavSettingsInput {
+        url,
+        user: "alice".to_string(),
+        pass: "secret".to_string(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "SSH".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: source_dir.to_string_lossy().into_owned(),
+                target_type: "Cloud".to_string(),
+                target: "backups/ssh/".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create cloud copy task");
+
+    sync.run_task(created.tasks[0].id.clone())
+        .await
+        .expect("run cloud copy task");
+
+    server.join().expect("join webdav server");
+    let requests = requests.lock().expect("lock request log");
+    assert!(requests[0].starts_with("MKCOL /webdav/agent-nexus-sync/ HTTP/1.1"));
+    assert!(requests[1].starts_with("MKCOL /webdav/agent-nexus-sync/backups/ HTTP/1.1"));
+    assert!(requests[2].starts_with("MKCOL /webdav/agent-nexus-sync/backups/ssh/ HTTP/1.1"));
+    assert!(requests[3].starts_with("PUT /webdav/agent-nexus-sync/backups/ssh/config HTTP/1.1"));
+    assert!(requests[3].contains("Host *"));
+}
+
 #[test]
 fn creates_symlink_placement_and_lists_custom_task_group() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
@@ -83,7 +330,7 @@ fn creates_symlink_placement_and_lists_custom_task_group() {
 }
 
 #[test]
-fn rejects_cloud_task_until_cloud_sync_is_implemented() {
+fn rejects_cloud_to_cloud_task() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db);
 
@@ -92,16 +339,16 @@ fn rejects_cloud_task_until_cloud_sync_is_implemented() {
             name: "Cloud task".to_string(),
             tasks: vec![CreateTaskInput {
                 action: "Copy".to_string(),
-                source_type: "Local".to_string(),
-                source: "/workspace/config".to_string(),
+                source_type: "Cloud".to_string(),
+                source: "config".to_string(),
                 target_type: "Cloud".to_string(),
-                target: "config".to_string(),
+                target: "backup/config".to_string(),
                 schedule: "manual".to_string(),
             }],
         })
-        .expect_err("cloud tasks are not implemented");
+        .expect_err("cloud to cloud tasks are unsupported");
 
-    assert!(error.to_string().contains("cloud sync tasks"));
+    assert!(error.to_string().contains("Cloud to Cloud"));
 }
 
 #[test]

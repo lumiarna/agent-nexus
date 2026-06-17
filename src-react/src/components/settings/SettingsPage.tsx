@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, Dot, Input } from "@/components/ui/primitives";
 import { ScreenScroll } from "@/components/shell/screen";
 import { useNav } from "@/lib/nav";
 import { nexus } from "@/lib/mock";
+import {
+  useSaveWebdavSettingsMutation,
+  useTestWebdavConnectionMutation,
+  useWebdavSettingsQuery,
+} from "@/lib/query/sync";
 import { AGENTS } from "@/config/agents";
 import { agentAbbr, agentColor } from "@/lib/tokens";
 
@@ -16,12 +21,30 @@ const WS_INFO: Record<WebdavStatus, { label: string; fg: string; dot: string }> 
   untested: { label: "Not tested", fg: "#a99a89", dot: "#d9c9b3" },
 };
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return "Unexpected error";
+}
+
 export function SettingsPage() {
   const { go } = useNav();
+  const webdavSettingsQuery = useWebdavSettingsQuery();
+  const saveWebdavSettingsMutation = useSaveWebdavSettingsMutation();
+  const testWebdavConnectionMutation = useTestWebdavConnectionMutation();
   const [init] = useState(() => nexus.settings());
   const [url, setUrl] = useState(init.webdav.url);
   const [user, setUser] = useState(init.webdav.user);
   const [pass, setPass] = useState(init.webdav.pass);
+  const [remoteRoot, setRemoteRoot] = useState(init.webdav.remoteRoot);
   const [webdavStatus, setWebdavStatus] = useState<WebdavStatus>(
     init.webdav.status === "ok" ? "ok" : "untested",
   );
@@ -29,10 +52,49 @@ export function SettingsPage() {
 
   const ws = WS_INFO[webdavStatus];
 
-  function testWebdav() {
+  useEffect(() => {
+    if (!webdavSettingsQuery.data) return;
+    setUrl(webdavSettingsQuery.data.url);
+    setUser(webdavSettingsQuery.data.user);
+    setPass(webdavSettingsQuery.data.pass);
+    setRemoteRoot(webdavSettingsQuery.data.remoteRoot);
+    setWebdavStatus(webdavSettingsQuery.data.status === "ok" ? "ok" : "untested");
+  }, [webdavSettingsQuery.data]);
+
+  async function testWebdav() {
     setWebdavStatus("testing");
-    toast("Testing WebDAV connection…");
-    window.setTimeout(() => setWebdavStatus("ok"), 1100);
+    try {
+      await testWebdavConnectionMutation.mutateAsync({
+        url,
+        user,
+        pass,
+        remoteRoot,
+      });
+      setWebdavStatus("ok");
+      toast("WebDAV connection ok");
+    } catch (error) {
+      setWebdavStatus("untested");
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function saveWebdav() {
+    try {
+      const saved = await saveWebdavSettingsMutation.mutateAsync({
+        url,
+        user,
+        pass,
+        remoteRoot,
+      });
+      setUrl(saved.url);
+      setUser(saved.user);
+      setPass(saved.pass);
+      setRemoteRoot(saved.remoteRoot);
+      setWebdavStatus("untested");
+      toast("WebDAV settings saved");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
   }
 
   return (
@@ -81,7 +143,10 @@ export function SettingsPage() {
               className="font-mono"
               placeholder="nexus"
               value={user}
-              onChange={(e) => setUser(e.target.value)}
+              onChange={(e) => {
+                setUser(e.target.value);
+                setWebdavStatus("untested");
+              }}
             />
           </label>
           <label className="block">
@@ -93,20 +158,50 @@ export function SettingsPage() {
               type="password"
               placeholder="••••••••"
               value={pass}
-              onChange={(e) => setPass(e.target.value)}
+              onChange={(e) => {
+                setPass(e.target.value);
+                setWebdavStatus("untested");
+              }}
+            />
+          </label>
+          <label className="col-span-2 block">
+            <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">
+              Remote root directory
+            </div>
+            <Input
+              className="font-mono"
+              placeholder="agent-nexus-sync"
+              value={remoteRoot}
+              onChange={(e) => {
+                setRemoteRoot(e.target.value);
+                setWebdavStatus("untested");
+              }}
             />
           </label>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-[9px]">
-          <Button variant="primary" size="md" className="px-4" onClick={testWebdav}>
-            Test connection
+          <Button
+            variant="primary"
+            size="md"
+            className="px-4"
+            onClick={() => void testWebdav()}
+            disabled={testWebdavConnectionMutation.isPending}
+          >
+            {testWebdavConnectionMutation.isPending ? "Testing..." : "Test connection"}
           </Button>
-          <Button variant="subtle" size="md" className="px-4" onClick={() => toast("WebDAV settings saved")}>
-            Save
+          <Button
+            variant="subtle"
+            size="md"
+            className="px-4"
+            onClick={() => void saveWebdav()}
+            disabled={saveWebdavSettingsMutation.isPending}
+          >
+            {saveWebdavSettingsMutation.isPending ? "Saving..." : "Save"}
           </Button>
           <span className="text-[11px] text-[#c3b9a8]">
-            Archive layout: <span className="font-mono">&lt;endpoint&gt;/&lt;project key&gt;/</span> ·
-            shown as <b className="text-[#9a8f80]">Cloud</b> in the app
+            Archive layout:{" "}
+            <span className="font-mono">&lt;endpoint&gt;/&lt;remote root&gt;/&lt;task path&gt;</span>{" "}
+            · shown as <b className="text-[#9a8f80]">Cloud</b> in the app
           </span>
         </div>
       </Card>

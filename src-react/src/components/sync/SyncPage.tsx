@@ -11,6 +11,7 @@ import {
   useDeleteProjectSymlinkMutation,
   useDeleteTaskMutation,
   useProjectSymlinksQuery,
+  useRunTaskMutation,
   useTaskGroupsQuery,
 } from "@/lib/query/sync";
 import { nexus } from "@/lib/mock";
@@ -53,6 +54,7 @@ function dirColors(d: TaskDirection): { fg: string; bg: string } {
 function statusOf(st: TaskStatus): { label: string; fg: string; dot: string } {
   if (st === "ok") return { label: "OK", fg: "#5f7a3e", dot: palette.good };
   if (st === "pending") return { label: "Pending", fg: "#9a6f0a", dot: palette.warn };
+  if (st === "failed") return { label: "Failed", fg: palette.crit, dot: palette.crit };
   return { label: "Never", fg: "#a99a89", dot: "#d9c9b3" };
 }
 
@@ -132,6 +134,7 @@ export function SyncPage() {
   const taskGroupsQuery = useTaskGroupsQuery();
   const createTaskGroupMutation = useCreateTaskGroupMutation();
   const deleteTaskMutation = useDeleteTaskMutation();
+  const runTaskMutation = useRunTaskMutation();
   const projectSymlinksQuery = useProjectSymlinksQuery();
   const deleteProjectSymlinkMutation = useDeleteProjectSymlinkMutation();
   const [groups, setGroups] = useState<TaskGroup[]>(() => nexus.taskGroups());
@@ -203,6 +206,31 @@ export function SyncPage() {
         ),
       );
       toast(`Deleted · ${task.direction} · ${task.source || "task"}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function runTask(groupId: string, task: Task) {
+    try {
+      const updated = await runTaskMutation.mutateAsync(task.id);
+      updateTask(groupId, task.id, updated);
+      toast(`Run complete · ${task.direction} · ${task.source || "task"}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function runGroup(group: TaskGroup) {
+    const runnable = group.tasks.filter((task) => task.action === "Copy");
+    if (!runnable.length) return;
+
+    try {
+      for (const task of runnable) {
+        const updated = await runTaskMutation.mutateAsync(task.id);
+        updateTask(group.id, task.id, updated);
+      }
+      toast(`Run group complete · ${group.name}`);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -331,7 +359,7 @@ export function SyncPage() {
                   <div className="ml-auto flex gap-[7px]">
                     {g.tasks.some((t) => t.action === "Copy") && (
                       <button
-                        onClick={() => toast(`Run group · ${g.name} (${g.tasks.length} tasks, serial)`)}
+                        onClick={() => void runGroup(g)}
                         className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
                       >
                         Run group
@@ -414,7 +442,7 @@ export function SyncPage() {
                               Schedule
                             </span>
                             <span
-                              onClick={() => toast(`Run · ${t.direction} · ${t.source || "task"}`)}
+                              onClick={() => void runTask(g.id, t)}
                               className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
                             >
                               Run

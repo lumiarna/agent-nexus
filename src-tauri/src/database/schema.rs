@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     let current = current_version(conn)?;
@@ -21,6 +21,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         }
         if current < 3 {
             migrate_to_v3(conn)?;
+        }
+        if current < 4 {
+            migrate_to_v4(conn)?;
         }
     }
 
@@ -53,7 +56,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (3);
+        INSERT INTO schema_version (version) VALUES (4);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -214,6 +217,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         INSERT INTO settings (key, value) VALUES ('webdav_url', '');
         INSERT INTO settings (key, value) VALUES ('webdav_user', '');
         INSERT INTO settings (key, value) VALUES ('webdav_pass', '');
+        INSERT INTO settings (key, value) VALUES ('webdav_remote_root', 'agent-nexus-sync');
         INSERT INTO settings (key, value)
         VALUES ('sync_project_symlink_ignored_dirs', '.git
 .venv
@@ -293,6 +297,37 @@ fn migrate_to_v3(conn: &Connection) -> AppResult<()> {
     })?;
 
     Ok(())
+}
+
+fn migrate_to_v4(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch("BEGIN;").or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    let result = (|| -> AppResult<()> {
+        conn.execute(
+            r#"
+            INSERT INTO settings (key, value)
+            VALUES ('webdav_remote_root', 'agent-nexus-sync')
+            ON CONFLICT(key) DO NOTHING
+            "#,
+            [],
+        )?;
+        conn.execute("UPDATE schema_version SET version = 4", [])?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = conn.execute("ROLLBACK", params![]);
+            Err(error)
+        }
+    }
 }
 
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
