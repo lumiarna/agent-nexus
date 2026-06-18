@@ -16,3 +16,9 @@ Windows 公司开发机上的安全软件会对 `rusqlite` 的 `bundled` SQLite 
 - CI 和本地开发需要固定 SQLite 版本并校验来源，不能依赖系统或其他软件目录中偶然存在的 DLL。
 - Tauri 打包时必须把 `sqlite3.dll` 随应用分发或放到运行时可解析的位置。
 - 动态链接解决的是安全软件误报；Windows symlink 权限导致的 `os error 1314` 是独立问题，需要单独处理。
+
+## Implementation Notes
+
+- Windows 通过 `scripts/with-sqlite-windows.ps1` 固定下载 `sqlite-dll-win-x64-3530200.zip`，校验 SHA-256 `5D40DE68DA94CEE0FBB01A7CAAE96C9226872549FB007E826F63CD7BB464B463` 后用 MSVC `lib.exe` 从 `sqlite3.def` 生成 `sqlite3.lib`。
+- `pnpm tauri ...` 和 `pnpm rust:test` 通过 `scripts/with-sqlite.mjs` 包装，在 Windows 下设置 `SQLITE3_LIB_DIR` 与 DLL `PATH`；非 Windows 直接透传原命令。
+- `src-tauri/Cargo.toml` 仅在 Windows 使用动态 `rusqlite`，非 Windows 继续使用 bundled，避免把 Windows 公司机约束扩散到其他平台。

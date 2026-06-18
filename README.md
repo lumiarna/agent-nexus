@@ -11,6 +11,7 @@
 | [Rust](https://rustup.rs/) | stable（通过 rustup 安装）|
 
 > macOS 还需安装 Xcode Command Line Tools；Windows 需安装 [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)。
+> Windows 下 `pnpm tauri ...` 和 `pnpm rust:test` 会自动下载并校验官方 SQLite DLL，生成 `sqlite3.lib` 后动态链接。
 
 ## 安装依赖
 
@@ -48,6 +49,9 @@ pnpm build
 
 # TypeScript 类型检查
 pnpm typecheck
+
+# Rust 测试（Windows 会先准备动态 SQLite）
+pnpm rust:test
 ```
 
 ## 项目结构

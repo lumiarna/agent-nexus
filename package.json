@@ -7,7 +7,9 @@
     "dev": "pnpm --dir src-react dev",
     "build": "pnpm --dir src-react build",
     "typecheck": "pnpm --dir src-react typecheck",
-    "tauri": "tauri"
+    "rust:test": "node scripts/with-sqlite.mjs cargo test --manifest-path src-tauri/Cargo.toml",
+    "sqlite:setup": "node scripts/with-sqlite.mjs --setup-only",
+    "tauri": "node scripts/with-sqlite.mjs tauri"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.2"

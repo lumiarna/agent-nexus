@@ -7,4 +7,5 @@ node_modules/
 dist/
 src-tauri/gen/schemas/
 src-tauri/target/
+src-tauri/vendor/sqlite/windows-x64/
 *.tsbuildinfo

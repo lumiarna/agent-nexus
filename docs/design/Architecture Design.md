@@ -51,7 +51,7 @@ Agent Nexus 是一个跨平台（Mac + Windows）桌面应用，管理多个 AI 
 |------|------|
 | 运行时 | Tauri 2.8+ |
 | 语言 | Rust（edition 2021） |
-| 数据库 | rusqlite（bundled，含 FTS5） |
+| 数据库 | rusqlite（Windows 动态链接官方 SQLite；非 Windows 使用 bundled） |
 | 异步 | Tokio（multi-thread） |
 | HTTP | reqwest（rustls-tls） |
 | 序列化 | serde + serde_json |
