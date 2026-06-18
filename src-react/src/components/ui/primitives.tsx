@@ -1,4 +1,5 @@
 import { forwardRef, type HTMLAttributes, type InputHTMLAttributes } from "react";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** The standard `#fcf9f4` rounded, bordered surface used across pages. */
@@ -50,3 +51,8 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
   ),
 );
 Input.displayName = "Input";
+
+/** Muted spinning loader for in-progress fetches. */
+export function Spinner({ size = 14, className }: { size?: number; className?: string }) {
+  return <Loader2 size={size} className={cn("animate-spin text-[#b3a999]", className)} />;
+}

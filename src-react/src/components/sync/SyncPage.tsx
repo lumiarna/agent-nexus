@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Dot, Input } from "@/components/ui/primitives";
+import { Dot, Input, Spinner } from "@/components/ui/primitives";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
@@ -70,6 +70,28 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return "Unexpected error";
+}
+
+async function copyPath(path: string) {
+  try {
+    await navigator.clipboard.writeText(path);
+    toast(`Copied · ${path}`);
+  } catch (error) {
+    toast(getErrorMessage(error));
+  }
+}
+
+function CopyPathButton({ path }: { path: string }) {
+  return (
+    <button
+      type="button"
+      title="Copy absolute path"
+      onClick={() => void copyPath(path)}
+      className="flex-none text-[#c3b9a8] transition-colors hover:text-nexus-accent"
+    >
+      <Copy size={12} />
+    </button>
+  );
 }
 
 function cronHuman(expr: string): string {
@@ -327,7 +349,12 @@ export function SyncPage() {
         </div>
 
         <div className="mt-3.5 flex flex-col gap-3.5">
-          {groups.map((g) => {
+          {taskGroupsQuery.isLoading ? (
+            <div className="flex items-center gap-2 rounded-[18px] border border-nexus-border bg-nexus-card px-6 py-10 text-[12.5px] text-[#9a8f80] shadow-[0_1px_14px_rgba(50,40,25,.05)]">
+              <Spinner /> Loading task groups...
+            </div>
+          ) : null}
+          {!taskGroupsQuery.isLoading && groups.map((g) => {
             const gDragging = dragGroupId === g.id;
             return (
               <div
@@ -462,7 +489,7 @@ export function SyncPage() {
               </div>
             );
           })}
-          {groups.length === 0 ? (
+          {!taskGroupsQuery.isLoading && groups.length === 0 ? (
             <div className="rounded-[18px] border border-dashed border-nexus-border2 bg-nexus-card px-6 py-10 text-center">
               <div className="text-[14px] font-bold text-[#7a6f60]">No task groups yet</div>
               <div className="mt-1.5 text-[12.5px] text-[#b3a999]">
@@ -483,10 +510,11 @@ export function SyncPage() {
             variant="subtle"
             size="sm"
             className="ml-auto"
+            disabled={projectSymlinksQuery.isFetching}
             onClick={() => void projectSymlinksQuery.refetch()}
           >
-            <RefreshCw size={14} />
-            Refresh
+            <RefreshCw size={14} className={cn(projectSymlinksQuery.isFetching && "animate-spin")} />
+            {projectSymlinksQuery.isFetching ? "Refreshing..." : "Refresh"}
           </Button>
         </div>
 
@@ -502,7 +530,9 @@ export function SyncPage() {
             <div className="text-right">Actions</div>
           </div>
           {projectSymlinksQuery.isLoading ? (
-            <div className="px-5 py-6 text-[12.5px] text-[#9a8f80]">Scanning Project symlinks...</div>
+            <div className="flex items-center gap-2 px-5 py-6 text-[12.5px] text-[#9a8f80]">
+              <Spinner /> Scanning Project symlinks...
+            </div>
           ) : projectSymlinkError ? (
             <div className="px-5 py-6 text-[12.5px] font-semibold text-nexus-crit">
               {projectSymlinkError}
@@ -530,14 +560,20 @@ export function SyncPage() {
                       {link.linkKind}
                     </div>
                   </div>
-                  <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]" title={link.sourcePath}>
-                    {relPath(link.sourcePath, link.sourceProjectName)}
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]" title={link.sourcePath}>
+                      {relPath(link.sourcePath, link.sourceProjectName)}
+                    </span>
+                    <CopyPathButton path={link.sourcePath} />
                   </div>
                   <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">
                     {link.targetProjectName ?? "External"}
                   </div>
-                  <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]" title={link.targetPath}>
-                    {relPath(link.targetPath, link.targetProjectName)}
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]" title={link.targetPath}>
+                      {relPath(link.targetPath, link.targetProjectName)}
+                    </span>
+                    <CopyPathButton path={link.targetPath} />
                   </div>
                   <div className="justify-self-end">
                     <span
