@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
+    services::paths,
     services::symlink::{create_symlink_placement, remove_symlink_if_present},
 };
 
@@ -741,9 +742,7 @@ fn skill_dir_name(path: &Path) -> AppResult<String> {
 }
 
 fn path_to_string(path: &Path, label: &str) -> AppResult<String> {
-    path.to_str()
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| AppError::Validation(format!("{label} must be valid UTF-8")))
+    paths::path_to_string(path, label)
 }
 
 fn required_trimmed<'a>(value: &'a str, label: &str) -> AppResult<&'a str> {

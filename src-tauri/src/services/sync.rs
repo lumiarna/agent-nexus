@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
+    services::paths,
     services::symlink::{create_symlink_placement, remove_symlink, remove_symlink_if_present},
     services::webdav,
 };
@@ -844,24 +845,29 @@ fn project_symlink_from_path(
             .unwrap_or(raw_source)
     };
     let source_exists = resolved_source.exists();
-    let comparable_source = if source_exists {
-        resolved_source.canonicalize()?
+    let canonical_source = if source_exists {
+        Some(resolved_source.canonicalize()?)
     } else {
-        resolved_source.clone()
+        None
+    };
+    let source_for_display = match &canonical_source {
+        Some(path) => paths::path_buf_for_comparison(path.clone(), "project symlink source path")?,
+        None => resolved_source.clone(),
     };
     let source_project = projects
         .iter()
-        .find(|project| comparable_source.starts_with(&project.path));
+        .find(|project| source_for_display.starts_with(&project.path));
+    let source_for_metadata = canonical_source.as_deref().unwrap_or(&resolved_source);
 
     Ok(ProjectSymlink {
         id: target_path.clone(),
-        source_path: path_to_string(&comparable_source)?,
+        source_path: path_to_string(&source_for_display)?,
         source_project_id: source_project.map(|project| project.id.clone()),
         source_project_name: source_project.map(|project| project.name.clone()),
         target_path,
         target_project_id: Some(target_project.id.clone()),
         target_project_name: Some(target_project.name.clone()),
-        link_kind: link_kind(&comparable_source),
+        link_kind: link_kind(source_for_metadata),
         status: if source_exists { "ok" } else { "missing" }.to_string(),
     })
 }
@@ -876,9 +882,7 @@ fn link_kind(path: &Path) -> String {
 }
 
 fn path_to_string(path: &Path) -> AppResult<String> {
-    path.to_str()
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| AppError::Validation("path must be valid UTF-8".to_string()))
+    paths::path_to_string(path, "path")
 }
 
 fn project_root_from_row(row: &Row<'_>) -> rusqlite::Result<ProjectRoot> {

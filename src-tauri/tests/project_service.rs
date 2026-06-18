@@ -1,6 +1,9 @@
 use std::{fs, path::Path};
 
-use agent_nexus_lib::{database::Database, services::projects::ProjectService};
+use agent_nexus_lib::{
+    database::Database,
+    services::{paths, projects::ProjectService},
+};
 use tempfile::TempDir;
 
 fn git_repo(parent: &TempDir, name: &str) -> String {
@@ -10,22 +13,8 @@ fn git_repo(parent: &TempDir, name: &str) -> String {
 }
 
 fn canonical_display_path(path: impl AsRef<Path>) -> String {
-    let path = fs::canonicalize(path)
-        .expect("canonicalize path")
-        .to_string_lossy()
-        .into_owned();
-
-    #[cfg(windows)]
-    {
-        if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
-            return format!(r"\\{}", path);
-        }
-
-        return path.strip_prefix(r"\\?\").unwrap_or(&path).to_string();
-    }
-
-    #[cfg(not(windows))]
-    path
+    let path = fs::canonicalize(path).expect("canonicalize path");
+    paths::path_to_string(&path, "path").expect("display path")
 }
 
 #[test]

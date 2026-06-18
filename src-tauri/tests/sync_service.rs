@@ -10,7 +10,9 @@ use std::{
 use agent_nexus_lib::{
     database::Database,
     services::{
+        paths,
         projects::ProjectService,
+        symlink::create_symlink_placement,
         sync::{CreateTaskGroupInput, CreateTaskInput, SyncService},
     },
 };
@@ -36,20 +38,35 @@ fn git_repo(parent: &TempDir, name: &str) -> String {
     path.to_string_lossy().into_owned()
 }
 
-#[cfg(unix)]
-fn symlink_dir(source: &Path, target: &Path) {
-    std::os::unix::fs::symlink(source, target).expect("create directory symlink");
+fn create_directory_link(source: &Path, target: &Path) {
+    create_symlink_placement(source, target).expect("create directory link");
 }
 
-#[cfg(windows)]
-fn symlink_dir(source: &Path, target: &Path) {
-    std::os::windows::fs::symlink_dir(source, target).expect("create directory symlink");
+fn canonical_display_path(path: impl AsRef<Path>) -> String {
+    let path = fs::canonicalize(path).expect("canonicalize path");
+    paths::path_to_string(&path, "path").expect("display path")
 }
 
-fn assert_symlink_points_to(source: &Path, target: &Path) {
+fn display_path(path: &Path) -> String {
+    paths::path_to_string(path, "path").expect("display path")
+}
+
+fn assert_link_points_to(source: &Path, target: &Path) {
     let metadata = fs::symlink_metadata(target).expect("read target link metadata");
     assert!(metadata.file_type().is_symlink());
-    assert_eq!(fs::read_link(target).expect("read target link"), source);
+    let raw_link = fs::read_link(target).expect("read target link");
+    let resolved = if raw_link.is_absolute() {
+        raw_link
+    } else {
+        target
+            .parent()
+            .map(|parent| parent.join(&raw_link))
+            .unwrap_or(raw_link)
+    };
+    assert_eq!(
+        fs::canonicalize(resolved).expect("canonicalize resolved link"),
+        fs::canonicalize(source).expect("canonicalize source")
+    );
 }
 
 fn http_response(status: &str) -> String {
@@ -326,7 +343,7 @@ fn creates_symlink_placement_and_lists_custom_task_group() {
     assert_eq!(groups[0].tasks[0].schedule, "manual");
     assert_eq!(groups[0].tasks[0].last_run, "—");
     assert_eq!(groups[0].tasks[0].status, "never");
-    assert_symlink_points_to(&source_dir, &target_link);
+    assert_link_points_to(&source_dir, &target_link);
 }
 
 #[test]
@@ -414,7 +431,7 @@ fn deletes_scanned_project_symlink_without_task_record() {
     let source_dir = Path::new(&source_repo).join("shared");
     let target_link = Path::new(&target_repo).join("shared");
     fs::create_dir_all(&source_dir).expect("create source dir");
-    symlink_dir(&source_dir, &target_link);
+    create_directory_link(&source_dir, &target_link);
     projects
         .record_project(source_repo)
         .expect("record source project");
@@ -444,7 +461,7 @@ fn lists_project_symlinks_with_registered_source_and_target_projects() {
     let source_dir = Path::new(&source_repo).join("shared-skill");
     let target_link = Path::new(&target_repo).join("shared-skill");
     fs::create_dir_all(&source_dir).expect("create source dir");
-    symlink_dir(&source_dir, &target_link);
+    create_directory_link(&source_dir, &target_link);
 
     projects
         .record_project(source_repo)
@@ -464,16 +481,14 @@ fn lists_project_symlinks_with_registered_source_and_target_projects() {
         links[0].target_project_name.as_deref(),
         Some("target-project")
     );
-    assert_eq!(
-        links[0].source_path,
-        fs::canonicalize(source_dir).unwrap().to_string_lossy()
-    );
+    assert_eq!(links[0].source_path, canonical_display_path(source_dir));
     assert_eq!(
         links[0].target_path,
-        fs::canonicalize(Path::new(&target_repo).parent().unwrap())
-            .unwrap()
-            .join("target-project/shared-skill")
-            .to_string_lossy()
+        display_path(
+            &fs::canonicalize(Path::new(&target_repo).parent().unwrap())
+                .unwrap()
+                .join("target-project/shared-skill")
+        )
     );
     assert_eq!(links[0].status, "ok");
 }
@@ -492,7 +507,7 @@ fn does_not_expand_children_inside_directory_symlink() {
     fs::write(nested_dir.join("child.md"), "nested content").expect("write nested file");
 
     let target_link = Path::new(&target_repo).join("external-source");
-    symlink_dir(&external_source, &target_link);
+    create_directory_link(&external_source, &target_link);
 
     projects
         .record_project(target_repo.clone())
@@ -503,14 +518,15 @@ fn does_not_expand_children_inside_directory_symlink() {
     assert_eq!(links.len(), 1);
     assert_eq!(
         links[0].source_path,
-        fs::canonicalize(external_source).unwrap().to_string_lossy()
+        canonical_display_path(external_source)
     );
     assert_eq!(
         links[0].target_path,
-        fs::canonicalize(Path::new(&target_repo).parent().unwrap())
-            .unwrap()
-            .join("target-project/external-source")
-            .to_string_lossy()
+        display_path(
+            &fs::canonicalize(Path::new(&target_repo).parent().unwrap())
+                .unwrap()
+                .join("target-project/external-source")
+        )
     );
     assert_eq!(links[0].link_kind, "directory");
 }
@@ -530,13 +546,13 @@ fn skips_configured_directories_when_scanning_project_symlinks() {
     fs::create_dir_all(Path::new(&target_repo).join(".venv")).expect("create .venv");
     fs::create_dir_all(Path::new(&target_repo).join("vendor")).expect("create vendor");
     fs::create_dir_all(Path::new(&target_repo).join("src")).expect("create src");
-    symlink_dir(
+    create_directory_link(
         &source_dir,
         &Path::new(&target_repo).join("node_modules/shared"),
     );
-    symlink_dir(&source_dir, &Path::new(&target_repo).join(".venv/shared"));
-    symlink_dir(&source_dir, &Path::new(&target_repo).join("vendor/shared"));
-    symlink_dir(&source_dir, &Path::new(&target_repo).join("src/shared"));
+    create_directory_link(&source_dir, &Path::new(&target_repo).join(".venv/shared"));
+    create_directory_link(&source_dir, &Path::new(&target_repo).join("vendor/shared"));
+    create_directory_link(&source_dir, &Path::new(&target_repo).join("src/shared"));
 
     projects
         .record_project(source_repo)
@@ -550,9 +566,10 @@ fn skips_configured_directories_when_scanning_project_symlinks() {
     assert_eq!(links.len(), 1);
     assert_eq!(
         links[0].target_path,
-        fs::canonicalize(Path::new(&target_repo).parent().unwrap())
-            .unwrap()
-            .join("target-project/src/shared")
-            .to_string_lossy()
+        display_path(
+            &fs::canonicalize(Path::new(&target_repo).parent().unwrap())
+                .unwrap()
+                .join("target-project/src/shared")
+        )
     );
 }

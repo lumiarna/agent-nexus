@@ -21,6 +21,7 @@ url = "2.5"
 uuid = { version = "1.11", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
+junction = "2.0"
 rusqlite = "0.32"
 
 [target.'cfg(not(windows))'.dependencies]

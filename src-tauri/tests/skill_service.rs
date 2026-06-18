@@ -3,8 +3,10 @@ use std::{env, fs, path::Path, sync::Arc};
 use agent_nexus_lib::{
     database::Database,
     services::{
+        paths,
         projects::ProjectService,
         skills::{SetSkillTargetInput, SkillService},
+        symlink::create_symlink_placement,
     },
 };
 use tempfile::TempDir;
@@ -20,18 +22,34 @@ fn write_skill(dir: &Path, body: &str) {
     fs::write(dir.join("SKILL.md"), body).expect("write SKILL.md");
 }
 
-#[cfg(unix)]
-fn symlink_dir(source: &Path, target: &Path) {
-    std::os::unix::fs::symlink(source, target).expect("create directory symlink");
+fn create_directory_link(source: &Path, target: &Path) {
+    create_symlink_placement(source, target).expect("create directory link");
 }
 
-#[cfg(windows)]
-fn symlink_dir(source: &Path, target: &Path) {
-    std::os::windows::fs::symlink_dir(source, target).expect("create directory symlink");
+fn canonical_display_path(path: impl AsRef<Path>) -> String {
+    let path = fs::canonicalize(path).expect("canonicalize path");
+    paths::path_to_string(&path, "path").expect("display path")
+}
+
+fn assert_link_points_to(source: &Path, target: &Path) {
+    let raw_link = fs::read_link(target).expect("read target link");
+    let resolved = if raw_link.is_absolute() {
+        raw_link
+    } else {
+        target
+            .parent()
+            .map(|parent| parent.join(&raw_link))
+            .unwrap_or(raw_link)
+    };
+
+    assert_eq!(
+        fs::canonicalize(resolved).expect("canonicalize resolved link"),
+        fs::canonicalize(source).expect("canonicalize source")
+    );
 }
 
 #[test]
-fn scans_project_skills_and_derives_distribution_from_symlinks() {
+fn scans_project_skills_and_derives_distribution_from_links() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
     let skills = SkillService::new(db);
@@ -61,9 +79,9 @@ disable-model-invocation: true
 "#,
     );
     fs::create_dir_all(target_dir.parent().unwrap()).expect("create target parent");
-    symlink_dir(&source_dir, &target_dir);
+    create_directory_link(&source_dir, &target_dir);
     fs::create_dir_all(ignored_symlink_source.parent().unwrap()).expect("create linked parent");
-    symlink_dir(&source_dir, &ignored_symlink_source);
+    create_directory_link(&source_dir, &ignored_symlink_source);
 
     let rows = skills.scan_skills().expect("scan skills");
 
@@ -73,17 +91,14 @@ disable-model-invocation: true
     assert_eq!(rows[0].scope, "project");
     assert_eq!(rows[0].project_id.as_deref(), Some(project.id.as_str()));
     assert!(rows[0].disabled);
-    assert_eq!(
-        rows[0].path,
-        fs::canonicalize(source_dir).unwrap().to_string_lossy()
-    );
+    assert_eq!(rows[0].path, canonical_display_path(source_dir));
     assert_eq!(rows[0].cells["Copilot"], "source");
     assert_eq!(rows[0].cells["CodeX"], "target");
     assert_eq!(rows[0].cells["Claude Code"], "none");
 }
 
 #[test]
-fn toggles_project_distribution_target_symlink() {
+fn toggles_project_distribution_target_link() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
     let skills = SkillService::new(db);
@@ -121,10 +136,7 @@ description: Project-scoped TAP scaffolder
         .expect("enable CodeX target");
 
     assert_eq!(enabled.cells["CodeX"], "target");
-    assert_eq!(
-        fs::read_link(&target_dir).expect("read target symlink"),
-        fs::canonicalize(&source_dir).expect("canonicalize source")
-    );
+    assert_link_points_to(&source_dir, &target_dir);
 
     let disabled = skills
         .set_skill_target(SetSkillTargetInput {
