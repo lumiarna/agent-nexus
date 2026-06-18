@@ -1,7 +1,6 @@
-- 当前还保留了 `symlink` 命名；后续可以考虑把这组服务命名逐步改成 `link placement`，因为 junction 现在已经是正式实现之一
-- 页面上显示 Link 类型: Symlink / Junction
 - Project 接入 Tauri folder picker，把手输路径替换为原生选择目
 - Project 支持拖拽排序
+- Skill - Project 应显示 Skill 数量
 - Icon
 - Copy 应先移到回收站再复制
 - Delete Group 对话框
