@@ -159,6 +159,10 @@ const TEMPLATES: Template[] = [
     { action: "Copy", sourceType: "Local", source: "~/.config/warp/settings.toml", targetType: "Cloud", target: "config/warp/settings.toml", schedule: "0 5 * * *" },
     { action: "Copy", sourceType: "Local", source: "~/.config/warp/keybindings.yaml", targetType: "Cloud", target: "config/warp/keybindings.yaml", schedule: "0 5 * * *" },
   ] },
+  { id: "zed", name: "Zed Config", desc: "Push Zed keymap + settings to Cloud (macOS, two tasks).", tasks: [
+    { action: "Copy", sourceType: "Local", source: "~/.config/zed/keymap.json", targetType: "Cloud", target: "Zed/keymap.macos.json", schedule: "manual" },
+    { action: "Copy", sourceType: "Local", source: "~/.config/zed/settings.json", targetType: "Cloud", target: "Zed/settings.macos.json", schedule: "manual" },
+  ] },
   { id: "dotfiles", name: "Dotfiles", desc: "Distribute shared dotfiles locally, then push them to Cloud.", tasks: [
     { action: "Symlink", sourceType: "Local", source: "~/dotfiles/", targetType: "Local", target: "~/", schedule: "manual" },
     { action: "Copy", sourceType: "Local", source: "~/dotfiles/", targetType: "Cloud", target: "backups/dotfiles/", schedule: "0 4 * * *" },

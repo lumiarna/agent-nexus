@@ -7,7 +7,7 @@
 
 ## 基本要求
 
-- 跨平台：MacOS/Windows
+- 跨平台：macOS/Windows
 - Theme: Light/Dark
 	- 默认 Light
 - 无需支持多语言，页面元素默认英文（用户资产可能包含中文或其他语言）

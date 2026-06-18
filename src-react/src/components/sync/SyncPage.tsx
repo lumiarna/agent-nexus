@@ -40,6 +40,7 @@ import type {
   SystemSyncRow,
   Task,
   TaskAction,
+  TaskDirection,
   TaskGroup,
   TaskStatus,
   LocationType,
@@ -50,14 +51,21 @@ const SCHEDULE_PRESETS = [
   { label: "Daily 05:00", expr: "0 5 * * *" },
   { label: "Weekly Sun 03:00", expr: "0 3 * * 0" },
 ];
-const TASK_COLS = "24px 132px 1.3fr 1.4fr 150px";
-const LINK_COLS =
-  "88px minmax(70px,.6fr) minmax(0,1.6fr) minmax(70px,.6fr) minmax(0,1.6fr) 60px";
+// Both tables use a 16-col grid. Action starts at col 8 (0.5+1+5.5 = 1.5+5.5 = 7) so the
+// two Action columns land at the same x without sharing a grid template.
+const TASK_COLS = "0.2fr 0.8fr 6fr 0.8fr 6fr 2.2fr";
+const LINK_COLS = "1.4fr 5.6fr 1fr 1.4fr 5.6fr 1fr";
 
 function actionColors(a: TaskAction): { fg: string; bg: string } {
   if (a === "Junction") return { fg: "#6f5b92", bg: "#ebe5f2" };
   if (a === "Copy") return { fg: "#9a6f0a", bg: "#f7eccb" };
   return { fg: "#4a6a8a", bg: "#e2ebf2" };
+}
+
+function directionColor(d: TaskDirection): string {
+  if (d === "Push") return "#9a6f0a";
+  if (d === "Pull") return "#3f6f55";
+  return "#4a6a8a";
 }
 
 /** Link/copy actions for the picker. Junction is Windows-only; Symlink & Junction require a
@@ -136,6 +144,21 @@ function ActionBadge({ action }: { action: TaskAction }) {
       style={{ color: c.fg, background: c.bg }}
     >
       {action}
+    </span>
+  );
+}
+
+function LocationTag({ type }: { type: LocationType }) {
+  const isCloud = type === "Cloud";
+  return (
+    <span
+      className="inline-flex flex-none items-center rounded-[4px] px-[5px] py-[1px] text-[9px] font-bold uppercase tracking-[.04em]"
+      style={{
+        color: isCloud ? "#4a6a8a" : "#8a7d6c",
+        background: isCloud ? "#e2ebf2" : "#efe7da",
+      }}
+    >
+      {type}
     </span>
   );
 }
@@ -232,6 +255,7 @@ export function SyncPage() {
   const [addTarget, setAddTarget] = useState<TaskGroup | null>(null);
   const [addForm, setAddForm] = useState<FormTask | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TaskGroup | null>(null);
+  const [deleteTaskTarget, setDeleteTaskTarget] = useState<{ group: TaskGroup; task: Task } | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const [platform, setPlatform] = useState<HostPlatform>("unknown");
@@ -316,6 +340,13 @@ export function SyncPage() {
     } catch (error) {
       toast(getErrorMessage(error));
     }
+  }
+
+  async function confirmDeleteTask() {
+    if (!deleteTaskTarget) return;
+    const { group, task } = deleteTaskTarget;
+    setDeleteTaskTarget(null);
+    await deleteTask(group.id, task);
   }
 
   async function confirmDeleteTaskGroup() {
@@ -568,10 +599,11 @@ export function SyncPage() {
                           style={{ gridTemplateColumns: TASK_COLS }}
                         >
                           <div />
-                          <div>Type</div>
+                          <div>Direction</div>
                           <div>Source</div>
+                          <div>Action</div>
                           <div>Target</div>
-                          <div className="text-right">Actions</div>
+                          <div className="text-right">Manage</div>
                         </div>
 
                         <SortableContext
@@ -616,20 +648,30 @@ export function SyncPage() {
                                     >
                                       ⠿
                                     </span>
-                                    <div className="flex min-w-0 flex-col gap-[3px]">
-                                      <ActionBadge action={t.action} />
-                                      <span className="text-[10px] font-semibold uppercase tracking-[.04em] text-[#b3a999]">
-                                        {t.direction}
+                                    <span
+                                      className="text-[9.5px] font-bold uppercase tracking-[.03em]"
+                                      style={{ color: directionColor(t.direction) }}
+                                      title={t.direction}
+                                    >
+                                      {t.direction}
+                                    </span>
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                      <LocationTag type={t.sourceType} />
+                                      <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
+                                        {t.source}
                                       </span>
                                     </div>
-                                    <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
-                                      {t.source}
+                                    <div className="flex items-center" title={t.action}>
+                                      <ActionBadge action={t.action} />
                                     </div>
-                                    <div className={cn(
-                                      "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px]",
-                                      linkMissing ? "text-[#b55440] line-through" : "text-[#8a8073]",
-                                    )} title={linkMissing ? "Placement missing — symlink/junction was removed out-of-band" : undefined}>
-                                      {targetLabel}
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                      <LocationTag type={t.targetType} />
+                                      <span className={cn(
+                                        "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px]",
+                                        linkMissing ? "text-[#b55440] line-through" : "text-[#8a8073]",
+                                      )} title={linkMissing ? "Placement missing — symlink/junction was removed out-of-band" : undefined}>
+                                        {targetLabel}
+                                      </span>
                                     </div>
                                     <div className="flex items-center justify-end gap-[9px]">
                                       {st && (
@@ -667,7 +709,7 @@ export function SyncPage() {
                                         </>
                                       )}
                                       <span
-                                        onClick={() => void deleteTask(g.id, t)}
+                                        onClick={() => setDeleteTaskTarget({ group: g, task: t })}
                                         className="cursor-pointer text-[11px] font-bold text-nexus-crit hover:underline"
                                       >
                                         Delete
@@ -720,12 +762,12 @@ export function SyncPage() {
             className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
             style={{ gridTemplateColumns: LINK_COLS }}
           >
-            <div>Type</div>
             <div>Source Project</div>
             <div>Source Path</div>
+            <div>Action</div>
             <div>Target Project</div>
             <div>Target Path</div>
-            <div className="text-right">Actions</div>
+            <div className="text-right">Manage</div>
           </div>
           {projectSymlinksQuery.isLoading ? (
             <div className="flex items-center gap-2 px-5 py-6 text-[12.5px] text-[#9a8f80]">
@@ -750,9 +792,6 @@ export function SyncPage() {
                   className="grid items-center gap-3 border-t border-[#f3eee5] px-5 py-3"
                   style={{ gridTemplateColumns: LINK_COLS }}
                 >
-                  <div>
-                    <ActionBadge action={link.linkType} />
-                  </div>
                   <div className="min-w-0">
                     <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">
                       {link.sourceProjectName ?? "External"}
@@ -763,6 +802,9 @@ export function SyncPage() {
                       {formatProjectSymlinkDisplayPath(link.sourcePath, link.sourceProjectName)}
                     </span>
                     <CopyPathButton path={link.sourcePath} />
+                  </div>
+                  <div title={link.linkType}>
+                    <ActionBadge action={link.linkType} />
                   </div>
                   <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">
                     {link.targetProjectName ?? "External"}
@@ -1180,6 +1222,38 @@ export function SyncPage() {
               </Button>
               <Button variant="danger" onClick={() => void confirmDeleteTaskGroup()}>
                 Delete group
+              </Button>
+            </ModalFooter>
+          </>
+        ) : null}
+      </Modal>
+
+      {/* Delete task confirm */}
+      <Modal
+        open={!!deleteTaskTarget}
+        onClose={() => setDeleteTaskTarget(null)}
+        className="w-[440px]"
+        overlayClassName="z-[70]"
+      >
+        {deleteTaskTarget ? (
+          <>
+            <ModalHeader
+              title="Delete task"
+              titleClassName="text-[16px]"
+              subtitle="This removes the task and any local symlink / junction placement it created."
+            />
+            <div className="px-[22px] py-5 text-[13px] leading-[1.6] text-[#6a6055]">
+              Delete the <b className="font-bold text-nexus-ink">{deleteTaskTarget.task.action}</b> task
+              {" from "}
+              <b className="font-bold text-nexus-ink">{deleteTaskTarget.group.name}</b>?
+              {" Copy task sources are left untouched."}
+            </div>
+            <ModalFooter>
+              <Button variant="subtle" onClick={() => setDeleteTaskTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={() => void confirmDeleteTask()}>
+                Delete task
               </Button>
             </ModalFooter>
           </>
