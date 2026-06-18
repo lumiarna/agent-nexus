@@ -980,17 +980,19 @@ fn collect_symlinks_in_dir(ctx: &mut ScanContext<'_>, dir: &Path, depth: usize) 
             Err(_) => continue,
         };
 
-        if metadata.file_type().is_symlink() {
-            if let Ok(raw_source) = fs::read_link(&path) {
-                push_project_symlink(ctx, &path, "Symlink", raw_source);
-            }
-            continue;
-        }
-
+        // Check junction before symlink: on Windows a junction can also report
+        // is_symlink(), so the more specific reparse kind must win.
         #[cfg(windows)]
         if junction::exists(&path).unwrap_or(false) {
             if let Ok(raw_source) = junction::get_target(&path) {
                 push_project_symlink(ctx, &path, "Junction", raw_source);
+            }
+            continue;
+        }
+
+        if metadata.file_type().is_symlink() {
+            if let Ok(raw_source) = fs::read_link(&path) {
+                push_project_symlink(ctx, &path, "Symlink", raw_source);
             }
             continue;
         }

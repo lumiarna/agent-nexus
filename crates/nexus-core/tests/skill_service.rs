@@ -6,7 +6,7 @@ use nexus_core::{
         paths,
         projects::ProjectService,
         skills::{SetSkillTargetInput, SkillService},
-        symlink::create_symlink_placement,
+        symlink::create_managed_directory_link,
     },
 };
 use tempfile::TempDir;
@@ -23,7 +23,7 @@ fn write_skill(dir: &Path, body: &str) {
 }
 
 fn create_directory_link(source: &Path, target: &Path) {
-    create_symlink_placement(source, target).expect("create directory link");
+    create_managed_directory_link(source, target).expect("create directory link");
 }
 
 fn canonical_display_path(path: impl AsRef<Path>) -> String {

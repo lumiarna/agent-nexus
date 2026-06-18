@@ -15,7 +15,7 @@ use crate::{
     database::Database,
     error::{AppError, AppResult},
     services::paths,
-    services::symlink::{create_symlink_placement, remove_symlink_if_present},
+    services::symlink::{create_managed_directory_link, is_junction, remove_symlink_if_present},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -178,7 +178,7 @@ impl SkillService {
         .ok_or_else(|| AppError::Validation("skill target path cannot be computed".to_string()))?;
 
         let created_symlink = if input.enabled {
-            create_symlink_placement(&context.canonical_path, &target_path)?;
+            create_managed_directory_link(&context.canonical_path, &target_path)?;
             true
         } else {
             remove_symlink_if_present(&target_path)?;
@@ -647,24 +647,16 @@ fn symlink_points_to(target_path: &Path, source_path: &Path) -> AppResult<bool> 
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error.into()),
     };
-    if !metadata.file_type().is_symlink() {
+    // A managed placement is a symlink (Unix / elevated Windows) or a junction (Windows).
+    if !metadata.file_type().is_symlink() && !is_junction(target_path) {
         return Ok(false);
     }
 
-    let raw_link = fs::read_link(target_path)?;
-    let resolved = if raw_link.is_absolute() {
-        raw_link
-    } else {
-        target_path
-            .parent()
-            .map(|parent| parent.join(raw_link.clone()))
-            .unwrap_or(raw_link)
+    // Compare canonical paths so both symlink and junction placements resolve to the source.
+    let Ok(resolved_target) = target_path.canonicalize() else {
+        return Ok(false);
     };
-    if !resolved.exists() {
-        return Ok(false);
-    }
-
-    Ok(resolved.canonicalize()? == source_path)
+    Ok(resolved_target == source_path.canonicalize()?)
 }
 
 fn skill_from_row(row: &Row<'_>, conn: &rusqlite::Connection) -> rusqlite::Result<Skill> {

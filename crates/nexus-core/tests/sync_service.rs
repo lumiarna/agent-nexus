@@ -337,7 +337,7 @@ fn creates_symlink_placement_and_lists_custom_task_group() {
     sync.create_task_group(CreateTaskGroupInput {
         name: "TAP symlinks".to_string(),
         tasks: vec![CreateTaskInput {
-            action: "Symlink".to_string(),
+            action: LINK_ACTION.to_string(),
             source_type: "Local".to_string(),
             source: source_dir.to_string_lossy().into_owned(),
             target_type: "Local".to_string(),

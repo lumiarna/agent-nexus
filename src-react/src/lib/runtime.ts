@@ -47,3 +47,29 @@ export async function detectDesktopHealth(): Promise<DesktopHealthState> {
     return { status: "unavailable" };
   }
 }
+
+export type HostPlatform = "windows" | "macos" | "linux" | "unknown";
+
+/** Host OS, used to gate platform-only affordances (e.g. the Windows-only Junction action).
+ *  Uses the desktop `get_platform` command when available; falls back to UA sniffing in the
+ *  browser preview, which is reliable enough for hiding an action. */
+export async function detectPlatform(): Promise<HostPlatform> {
+  if (isTauriRuntime()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const os = await invoke<string>("get_platform");
+      if (os === "windows" || os === "macos" || os === "linux") {
+        return os;
+      }
+      return "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
+
+  const ua = navigator.userAgent;
+  if (ua.includes("Win")) return "windows";
+  if (ua.includes("Mac")) return "macos";
+  if (ua.includes("Linux")) return "linux";
+  return "unknown";
+}

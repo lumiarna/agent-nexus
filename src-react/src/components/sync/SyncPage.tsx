@@ -7,6 +7,7 @@ import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
 import { formatProjectSymlinkDisplayPath } from "@/components/sync/pathDisplay";
+import { detectPlatform, type HostPlatform } from "@/lib/runtime";
 import {
   useAddTaskMutation,
   useCreateTaskGroupMutation,
@@ -24,7 +25,6 @@ import type {
   SystemSyncRow,
   Task,
   TaskAction,
-  TaskDirection,
   TaskGroup,
   TaskStatus,
   LocationType,
@@ -37,12 +37,27 @@ const SCHEDULE_PRESETS = [
 ];
 const TASK_COLS = "24px 132px 1.3fr 1.4fr 150px";
 const LINK_COLS =
-  "minmax(70px,.6fr) minmax(0,1.6fr) minmax(70px,.6fr) minmax(0,1.6fr) 60px";
+  "88px minmax(70px,.6fr) minmax(0,1.6fr) minmax(70px,.6fr) minmax(0,1.6fr) 60px";
 
-function dirColors(d: TaskDirection): { fg: string; bg: string } {
-  if (d === "Push") return { fg: "#9a6f0a", bg: "#f7eccb" };
-  if (d === "Pull") return { fg: "#3f6f55", bg: "#dcebe0" };
+function actionColors(a: TaskAction): { fg: string; bg: string } {
+  if (a === "Junction") return { fg: "#6f5b92", bg: "#ebe5f2" };
+  if (a === "Copy") return { fg: "#9a6f0a", bg: "#f7eccb" };
   return { fg: "#4a6a8a", bg: "#e2ebf2" };
+}
+
+/** Link/copy actions for the picker. Junction is Windows-only; Symlink & Junction require a
+ *  Local→Local task, so both are disabled while either endpoint is Cloud. */
+function buildActionOptions(
+  hasCloud: boolean,
+  supportsJunction: boolean,
+): { value: TaskAction; label: string; disabled?: boolean }[] {
+  return [
+    { value: "Symlink", label: "Symlink", disabled: hasCloud },
+    ...(supportsJunction
+      ? [{ value: "Junction" as TaskAction, label: "Junction", disabled: hasCloud }]
+      : []),
+    { value: "Copy", label: "Copy" },
+  ];
 }
 
 function statusOf(st: TaskStatus): { label: string; fg: string; dot: string } {
@@ -98,15 +113,25 @@ function cronHuman(expr: string): string {
   return m[expr] ?? "Custom schedule expression.";
 }
 
-function DirBadge({ direction }: { direction: TaskDirection }) {
-  const c = dirColors(direction);
+function ActionBadge({ action }: { action: TaskAction }) {
+  const c = actionColors(action);
   return (
     <span
       className="inline-flex w-fit items-center justify-center rounded-[5px] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.03em]"
       style={{ color: c.fg, background: c.bg }}
     >
-      {direction}
+      {action}
     </span>
+  );
+}
+
+/** Selectable, monospaced block for a submit failure — keeps multi-line guidance (e.g. the
+ *  mklink command) readable and copyable instead of flashing past in a toast. */
+function SubmitError({ message }: { message: string }) {
+  return (
+    <div className="select-text whitespace-pre-wrap break-words rounded-[11px] border border-[#e3b8af] bg-[#fbecea] px-3.5 py-3 font-mono text-[11.5px] leading-[1.6] text-nexus-crit">
+      {message}
+    </div>
   );
 }
 
@@ -167,6 +192,11 @@ export function SyncPage() {
   const [dragTask, setDragTask] = useState<{ groupId: string; taskId: string } | null>(null);
   const [addTarget, setAddTarget] = useState<TaskGroup | null>(null);
   const [addForm, setAddForm] = useState<FormTask | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TaskGroup | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<HostPlatform>("unknown");
+  const supportsJunction = platform === "windows";
   const projectSymlinks = projectSymlinksQuery.data ?? [];
   const projectSymlinkError = projectSymlinksQuery.error
     ? getErrorMessage(projectSymlinksQuery.error)
@@ -177,6 +207,10 @@ export function SyncPage() {
       setGroups(taskGroupsQuery.data);
     }
   }, [taskGroupsQuery.data]);
+
+  useEffect(() => {
+    void detectPlatform().then(setPlatform);
+  }, []);
 
   // ── mutations ──
   function updateTask(groupId: string, taskId: string, patch: Partial<Task>) {
@@ -231,13 +265,13 @@ export function SyncPage() {
     }
   }
 
-  async function deleteTaskGroup(group: TaskGroup) {
-    if (!window.confirm(`Delete task group "${group.name}" and its ${group.tasks.length} ${group.tasks.length === 1 ? "task" : "tasks"}?`)) {
-      return;
-    }
+  async function confirmDeleteTaskGroup() {
+    if (!deleteTarget) return;
+    const group = deleteTarget;
     try {
       await deleteTaskGroupMutation.mutateAsync(group.id);
       setGroups((gs) => gs.filter((g) => g.id !== group.id));
+      setDeleteTarget(null);
       toast(`Deleted group · ${group.name}`);
     } catch (error) {
       toast(getErrorMessage(error));
@@ -247,14 +281,16 @@ export function SyncPage() {
   function openAddTask(group: TaskGroup) {
     setAddTarget(group);
     setAddForm(newTask());
+    setAddError(null);
   }
 
   async function submitAddTask() {
     if (!addTarget || !addForm) return;
     const tk = addForm;
     const validTargets = tk.targets.filter((t) => t.path.trim());
+    setAddError(null);
     if (!validTargets.length || !tk.source.trim()) {
-      toast("Source and at least one target are required");
+      setAddError("Source and at least one target are required");
       return;
     }
     try {
@@ -275,7 +311,7 @@ export function SyncPage() {
       setAddForm(null);
       toast(`Task added to · ${addTarget.name}`);
     } catch (error) {
-      toast(getErrorMessage(error));
+      setAddError(getErrorMessage(error));
     }
   }
 
@@ -317,6 +353,7 @@ export function SyncPage() {
   function openCreate() {
     setTpl("blank");
     setForm({ name: "", tasks: [newTask()] });
+    setCreateError(null);
     setCreateOpen(true);
   }
   function patchFormTask(i: number, p: Partial<FormTask>) {
@@ -329,7 +366,7 @@ export function SyncPage() {
       name: id === "blank" || !t ? "" : t.name,
       tasks:
         t && t.tasks.length
-          ? t.tasks.map((tk) => ({ ...newTask(), action: tk.action, sourceType: tk.sourceType, source: tk.source, targets: [{ type: tk.targetType, path: tk.target }], schedule: tk.action === "Symlink" ? "manual" : tk.schedule }))
+          ? t.tasks.map((tk) => ({ ...newTask(), action: tk.action, sourceType: tk.sourceType, source: tk.source, targets: [{ type: tk.targetType, path: tk.target }], schedule: tk.action === "Copy" ? tk.schedule : "manual" }))
           : [newTask()],
     });
   }
@@ -347,13 +384,14 @@ export function SyncPage() {
           schedule: (tk.schedule || "manual").trim() || "manual",
       }));
     });
+    setCreateError(null);
     try {
       const created = await createTaskGroupMutation.mutateAsync({ name, tasks });
       setGroups((gs) => [...gs.filter((g) => g.id !== created.id), created]);
       setCreateOpen(false);
       toast(`Task group "${name}" created · ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`);
     } catch (error) {
-      toast(getErrorMessage(error));
+      setCreateError(getErrorMessage(error));
     }
   }
 
@@ -445,7 +483,7 @@ export function SyncPage() {
                       Add task
                     </button>
                     <button
-                      onClick={() => void deleteTaskGroup(g)}
+                      onClick={() => setDeleteTarget(g)}
                       className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-nexus-crit hover:bg-[#f6e3e0]"
                     >
                       Delete group
@@ -489,8 +527,10 @@ export function SyncPage() {
                         ⠿
                       </span>
                       <div className="flex min-w-0 flex-col gap-[3px]">
-                        <DirBadge direction={t.direction} />
-                        <span className="font-mono text-[10px] text-[#b3a999]">{t.action}</span>
+                        <ActionBadge action={t.action} />
+                        <span className="text-[10px] font-semibold uppercase tracking-[.04em] text-[#b3a999]">
+                          {t.direction}
+                        </span>
                       </div>
                       <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
                         {t.source}
@@ -575,6 +615,7 @@ export function SyncPage() {
             className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
             style={{ gridTemplateColumns: LINK_COLS }}
           >
+            <div>Type</div>
             <div>Source Project</div>
             <div>Source Path</div>
             <div>Target Project</div>
@@ -604,12 +645,12 @@ export function SyncPage() {
                   className="grid items-center gap-3 border-t border-[#f3eee5] px-5 py-3"
                   style={{ gridTemplateColumns: LINK_COLS }}
                 >
+                  <div>
+                    <ActionBadge action={link.linkType} />
+                  </div>
                   <div className="min-w-0">
                     <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">
                       {link.sourceProjectName ?? "External"}
-                    </div>
-                    <div className="mt-[3px] text-[10px] font-bold uppercase tracking-[.04em] text-[#c3b9a8]">
-                      {link.linkKind}
                     </div>
                   </div>
                   <div className="flex min-w-0 items-center gap-1.5">
@@ -774,12 +815,12 @@ export function SyncPage() {
                         <Segmented<TaskAction>
                           className="bg-[#ece2d5]"
                           size="sm"
-                          options={[
-                            { value: "Symlink", label: "Symlink", disabled: tk.targets.some((t) => t.type === "Cloud") || tk.sourceType === "Cloud" },
-                            { value: "Copy", label: "Copy" },
-                          ]}
+                          options={buildActionOptions(
+                            tk.targets.some((t) => t.type === "Cloud") || tk.sourceType === "Cloud",
+                            supportsJunction,
+                          )}
                           value={tk.action}
-                          onChange={(a) => patchFormTask(i, { action: a, schedule: a === "Symlink" ? "manual" : tk.schedule })}
+                          onChange={(a) => patchFormTask(i, { action: a, schedule: a === "Copy" ? tk.schedule : "manual" })}
                         />
                       </div>
                     </div>
@@ -897,6 +938,7 @@ export function SyncPage() {
             the Cloud, add a <b className="text-[#6a6055]">Restore/Pull</b> task — Backup is never
             reversed in place.
           </div>
+          {createError ? <SubmitError message={createError} /> : null}
         </div>
         <ModalFooter>
           <Button variant="subtle" onClick={() => setCreateOpen(false)}>
@@ -989,10 +1031,12 @@ export function SyncPage() {
               <AddTaskForm
                 task={addForm}
                 onChange={setAddForm}
+                supportsJunction={supportsJunction}
               />
               <div className="rounded-[11px] border border-nexus-border bg-nexus-bg px-3.5 py-[11px] text-[11.5px] leading-[1.5] text-[#8a7a68]">
                 Every task is one-way · single source → one or more targets.
               </div>
+              {addError ? <SubmitError message={addError} /> : null}
             </div>
             <ModalFooter>
               <Button variant="subtle" onClick={() => { setAddTarget(null); setAddForm(null); }}>
@@ -1005,6 +1049,37 @@ export function SyncPage() {
           </>
         ) : null}
       </Modal>
+
+      {/* Delete task group confirm */}
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        className="w-[440px]"
+        overlayClassName="z-[70]"
+      >
+        {deleteTarget ? (
+          <>
+            <ModalHeader
+              title="Delete task group"
+              titleClassName="text-[16px]"
+              subtitle="This also removes any local symlink / junction placements this group created."
+            />
+            <div className="px-[22px] py-5 text-[13px] leading-[1.6] text-[#6a6055]">
+              Delete <b className="font-bold text-nexus-ink">{deleteTarget.name}</b> and its{" "}
+              {deleteTarget.tasks.length} {deleteTarget.tasks.length === 1 ? "task" : "tasks"}? Copy
+              task sources are left untouched.
+            </div>
+            <ModalFooter>
+              <Button variant="subtle" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={() => void confirmDeleteTaskGroup()}>
+                Delete group
+              </Button>
+            </ModalFooter>
+          </>
+        ) : null}
+      </Modal>
     </>
   );
 }
@@ -1012,9 +1087,10 @@ export function SyncPage() {
 interface AddTaskFormProps {
   task: FormTask;
   onChange: (task: FormTask) => void;
+  supportsJunction: boolean;
 }
 
-function AddTaskForm({ task, onChange }: AddTaskFormProps) {
+function AddTaskForm({ task, onChange, supportsJunction }: AddTaskFormProps) {
   const isCron = task.schedule !== "manual";
   return (
     <div className="rounded-[14px] border border-nexus-border bg-nexus-sand2 p-3.5">
@@ -1027,12 +1103,12 @@ function AddTaskForm({ task, onChange }: AddTaskFormProps) {
           <Segmented<TaskAction>
             className="bg-[#ece2d5]"
             size="sm"
-            options={[
-              { value: "Symlink", label: "Symlink", disabled: task.targets.some((t) => t.type === "Cloud") || task.sourceType === "Cloud" },
-              { value: "Copy", label: "Copy" },
-            ]}
+            options={buildActionOptions(
+              task.targets.some((t) => t.type === "Cloud") || task.sourceType === "Cloud",
+              supportsJunction,
+            )}
             value={task.action}
-            onChange={(a) => onChange({ ...task, action: a, schedule: a === "Symlink" ? "manual" : task.schedule })}
+            onChange={(a) => onChange({ ...task, action: a, schedule: a === "Copy" ? task.schedule : "manual" })}
           />
         </div>
       </div>

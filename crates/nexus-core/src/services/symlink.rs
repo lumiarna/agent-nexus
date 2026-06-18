@@ -91,6 +91,33 @@ pub fn create_junction_placement(_source: &Path, _target: &Path) -> AppResult<()
     ))
 }
 
+/// Place a directory link for managed asset distribution (skills/prompts), where the user has no
+/// explicit action choice. Prefers a symlink; on Windows lacking symlink privilege it falls back
+/// to a junction so distribution still works without elevation. Unix always uses a symlink.
+#[cfg(windows)]
+pub fn create_managed_directory_link(source: &Path, target: &Path) -> AppResult<()> {
+    ensure_placeable(source, target)?;
+    if !source.is_dir() {
+        return std::os::windows::fs::symlink_file(source, target)
+            .map_err(|error| map_create_symlink_error(error, source, target));
+    }
+    match std::os::windows::fs::symlink_dir(source, target) {
+        Ok(()) => Ok(()),
+        Err(error) if error.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD) => {
+            junction::create(source, target).map_err(|error| {
+                let _ = fs::remove_dir(target);
+                AppError::from(error)
+            })
+        }
+        Err(error) => Err(map_create_symlink_error(error, source, target)),
+    }
+}
+
+#[cfg(not(windows))]
+pub fn create_managed_directory_link(source: &Path, target: &Path) -> AppResult<()> {
+    create_symlink_placement(source, target)
+}
+
 pub fn remove_symlink(path: &Path) -> AppResult<()> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.file_type().is_symlink() && !is_junction(path) {
@@ -104,12 +131,12 @@ pub fn remove_symlink(path: &Path) -> AppResult<()> {
 }
 
 #[cfg(windows)]
-fn is_junction(path: &Path) -> bool {
+pub fn is_junction(path: &Path) -> bool {
     junction::exists(path).unwrap_or(false)
 }
 
 #[cfg(not(windows))]
-fn is_junction(_path: &Path) -> bool {
+pub fn is_junction(_path: &Path) -> bool {
     false
 }
 

@@ -105,7 +105,7 @@ export interface Session {
 // ─── Sync ───────────────────────────────────────────────────────────────────
 
 export type TaskDirection = "Distribution" | "Push" | "Pull";
-export type TaskAction = "Symlink" | "Copy";
+export type TaskAction = "Symlink" | "Junction" | "Copy";
 export type LocationType = "Local" | "Cloud";
 export type TaskStatus = "ok" | "pending" | "failed" | "never";
 
@@ -165,6 +165,8 @@ export interface ProjectSymlink {
   targetPath: string;
   targetProjectId?: string;
   targetProjectName?: string;
+  /** How the placement is realized on disk — Symlink (Unix/elevated Windows) or Junction (Windows). */
+  linkType: "Symlink" | "Junction";
   linkKind: ProjectSymlinkKind;
   status: ProjectSymlinkStatus;
 }
