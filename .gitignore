@@ -1,5 +1,6 @@
 __sessions/
 .agents/
+.npmrc
 
 .DS_Store
 
