@@ -505,6 +505,7 @@ export function SyncPage() {
                 {g.tasks.map((t) => {
                   const isCopy = t.action === "Copy";
                   const st = isCopy ? statusOf(t.status) : null;
+                  const linkMissing = !isCopy && t.linkState === "missing";
                   const tDragging = dragTask != null && dragTask.groupId === g.id && dragTask.taskId === t.id;
                   const targetLabel = t.target || "—";
                   return (
@@ -520,7 +521,7 @@ export function SyncPage() {
                       onDragOver={(e) => { if (dragTask?.groupId === g.id) { e.preventDefault(); e.stopPropagation(); } }}
                       onDrop={(e) => { if (dragTask && dragTask.groupId === g.id) { e.preventDefault(); e.stopPropagation(); reorderTask(g.id, dragTask.taskId, t.id); setDragTask(null); } }}
                       onDragEnd={() => setDragTask(null)}
-                      className={cn("grid items-center gap-3 border-t border-[#f3eee5] px-5 py-3", tDragging && "bg-[#fbf6ef] opacity-50")}
+                      className={cn("grid items-center gap-3 border-t border-[#f3eee5] px-5 py-3", tDragging && "bg-[#fbf6ef] opacity-50", linkMissing && "bg-[#fbf3f0]")}
                       style={{ gridTemplateColumns: TASK_COLS }}
                     >
                       <span title="Drag to reorder task" className="cursor-grab text-[12px] leading-none tracking-[-1px] text-[#d4c9b6]">
@@ -535,13 +536,21 @@ export function SyncPage() {
                       <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
                         {t.source}
                       </div>
-                      <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#8a8073]">
+                      <div className={cn(
+                        "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px]",
+                        linkMissing ? "text-[#b55440] line-through" : "text-[#8a8073]",
+                      )} title={linkMissing ? "Placement missing — symlink/junction was removed out-of-band" : undefined}>
                         {targetLabel}
                       </div>
                       <div className="flex items-center justify-end gap-[9px]">
                         {st && (
                           <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: st.fg }}>
                             <Dot color={st.dot} /> {st.label}
+                          </span>
+                        )}
+                        {linkMissing && (
+                          <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: palette.crit }}>
+                            <Dot color={palette.crit} /> Missing
                           </span>
                         )}
                         {isCopy && (
@@ -596,7 +605,7 @@ export function SyncPage() {
             Project Symlinks
           </h2>
           <span className="text-[11px] text-[#b3a999]">
-            Auto-scanned from registered Project paths · target path is the symlink placement
+            Auto-scanned from registered Project paths · symlinks already managed by a task above are hidden here
           </span>
           <Button
             variant="subtle"

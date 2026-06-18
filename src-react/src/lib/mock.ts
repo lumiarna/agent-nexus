@@ -134,16 +134,16 @@ const SESSIONS: Session[] = [
 
 const TASK_GROUPS: TaskGroup[] = [
   { id: "g1", name: "Warp Config", tasks: [
-    { id: "t1", direction: "Push", action: "Copy", sourceType: "Local", source: "~/.config/warp/settings.toml", targetType: "Cloud", target: "config/warp/settings.toml", schedule: "0 5 * * *", lastRun: "06-15 05:00", status: "ok" },
-    { id: "t2", direction: "Push", action: "Copy", sourceType: "Local", source: "~/.config/warp/keybindings.yaml", targetType: "Cloud", target: "config/warp/keybindings.yaml", schedule: "0 5 * * *", lastRun: "06-15 05:00", status: "ok" },
+    { id: "t1", direction: "Push", action: "Copy", sourceType: "Local", source: "~/.config/warp/settings.toml", targetType: "Cloud", target: "config/warp/settings.toml", schedule: "0 5 * * *", lastRun: "06-15 05:00", status: "ok", linkState: "present" },
+    { id: "t2", direction: "Push", action: "Copy", sourceType: "Local", source: "~/.config/warp/keybindings.yaml", targetType: "Cloud", target: "config/warp/keybindings.yaml", schedule: "0 5 * * *", lastRun: "06-15 05:00", status: "ok", linkState: "present" },
   ] },
   { id: "g2", name: "TAP symlinks", tasks: [
-    { id: "t3", direction: "Distribution", action: "Symlink", sourceType: "Local", source: "D:/Workspace/tap/src", targetType: "Local", target: "oll-context/backend/", schedule: "manual", lastRun: "06-14 18:02", status: "ok" },
-    { id: "t4", direction: "Distribution", action: "Symlink", sourceType: "Local", source: "D:/Workspace/tap/src", targetType: "Local", target: "oll-context/frontend/", schedule: "manual", lastRun: "06-14 18:02", status: "ok" },
+    { id: "t3", direction: "Distribution", action: "Symlink", sourceType: "Local", source: "D:/Workspace/tap/src", targetType: "Local", target: "oll-context/backend/", schedule: "manual", lastRun: "06-14 18:02", status: "ok", linkState: "present" },
+    { id: "t4", direction: "Distribution", action: "Symlink", sourceType: "Local", source: "D:/Workspace/tap/src", targetType: "Local", target: "oll-context/frontend/", schedule: "manual", lastRun: "06-14 18:02", status: "ok", linkState: "present" },
   ] },
   { id: "g3", name: "Machine Backup", tasks: [
-    { id: "t5", direction: "Push", action: "Copy", sourceType: "Local", source: "~/.ssh/", targetType: "Cloud", target: "backups/ssh/", schedule: "0 3 * * 0", lastRun: "—", status: "never" },
-    { id: "t6", direction: "Pull", action: "Copy", sourceType: "Cloud", source: "config/zed/", targetType: "Local", target: "%APPDATA%/Zed/", schedule: "manual", lastRun: "06-13 09:10", status: "ok" },
+    { id: "t5", direction: "Push", action: "Copy", sourceType: "Local", source: "~/.ssh/", targetType: "Cloud", target: "backups/ssh/", schedule: "0 3 * * 0", lastRun: "—", status: "never", linkState: "present" },
+    { id: "t6", direction: "Pull", action: "Copy", sourceType: "Cloud", source: "config/zed/", targetType: "Local", target: "%APPDATA%/Zed/", schedule: "manual", lastRun: "06-13 09:10", status: "ok", linkState: "present" },
   ] },
 ];
 

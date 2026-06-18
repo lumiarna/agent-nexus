@@ -364,6 +364,66 @@ fn creates_symlink_placement_and_lists_custom_task_group() {
 }
 
 #[test]
+fn lists_symlink_task_with_present_link_state_when_placement_exists() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("source");
+    let target_link = root.path().join("target-link");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+
+    sync.create_task_group(CreateTaskGroupInput {
+        name: "TAP symlinks".to_string(),
+        tasks: vec![CreateTaskInput {
+            action: LINK_ACTION.to_string(),
+            source_type: "Local".to_string(),
+            source: source_dir.to_string_lossy().into_owned(),
+            target_type: "Local".to_string(),
+            target: target_link.to_string_lossy().into_owned(),
+            schedule: "manual".to_string(),
+        }],
+    })
+    .expect("create task group");
+
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert_eq!(groups[0].tasks[0].link_state, "present");
+}
+
+#[test]
+fn marks_symlink_task_link_state_missing_when_placement_removed_manually() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("source");
+    let target_link = root.path().join("target-link");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+
+    sync.create_task_group(CreateTaskGroupInput {
+        name: "TAP symlinks".to_string(),
+        tasks: vec![CreateTaskInput {
+            action: LINK_ACTION.to_string(),
+            source_type: "Local".to_string(),
+            source: source_dir.to_string_lossy().into_owned(),
+            target_type: "Local".to_string(),
+            target: target_link.to_string_lossy().into_owned(),
+            schedule: "manual".to_string(),
+        }],
+    })
+    .expect("create task group");
+
+    // Simulate the user deleting the symlink out-of-band.
+    #[cfg(unix)]
+    fs::remove_file(&target_link).expect("remove symlink manually");
+    #[cfg(windows)]
+    fs::remove_dir(&target_link).expect("remove junction manually");
+
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert_eq!(groups[0].tasks[0].link_state, "missing");
+    // Task record itself is unchanged — only the derived placement state flips.
+    assert_eq!(groups[0].tasks[0].status, "never");
+}
+
+#[test]
 fn rejects_cloud_to_cloud_task() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db);
@@ -767,6 +827,68 @@ fn rejects_add_scheduled_task_without_creating_placement() {
     assert!(!new_target.exists());
     let groups = sync.list_task_groups().expect("list task groups");
     assert_eq!(groups[0].tasks.len(), 1);
+}
+
+#[test]
+fn project_symlink_inventory_skips_symlinks_managed_by_sync_task() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db.clone());
+    let inventory = ProjectSymlinkInventory::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_repo = git_repo(&root, "source-project");
+    let target_repo = git_repo(&root, "target-project");
+    let source_dir = Path::new(&source_repo).join("shared");
+    let managed_link = Path::new(&target_repo).join("shared");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+
+    projects
+        .record_project(source_repo)
+        .expect("record source project");
+    projects
+        .record_project(target_repo.clone())
+        .expect("record target project");
+
+    sync.create_task_group(CreateTaskGroupInput {
+        name: "Managed shared".to_string(),
+        tasks: vec![CreateTaskInput {
+            action: LINK_ACTION.to_string(),
+            source_type: "Local".to_string(),
+            source: source_dir.to_string_lossy().into_owned(),
+            target_type: "Local".to_string(),
+            target: managed_link.to_string_lossy().into_owned(),
+            schedule: "manual".to_string(),
+        }],
+    })
+    .expect("create task-managed symlink");
+
+    // An unrelated symlink in the same target project must still appear.
+    let orphan_source = root.path().join("orphan-source");
+    let orphan_link = Path::new(&target_repo).join("orphan-link");
+    fs::create_dir_all(&orphan_source).expect("create orphan source dir");
+    create_directory_link(&orphan_source, &orphan_link);
+
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
+
+    assert_eq!(
+        links.len(),
+        1,
+        "only the orphan link should appear, got {links:?}"
+    );
+    assert!(
+        links
+            .iter()
+            .any(|l| Path::new(&l.target_path).ends_with("orphan-link")),
+        "orphan link should still be listed, got {links:?}"
+    );
+    assert!(
+        !links
+            .iter()
+            .any(|l| Path::new(&l.target_path).ends_with("shared")),
+        "task-managed link should be hidden from inventory, got {links:?}"
+    );
 }
 
 #[test]

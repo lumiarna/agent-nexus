@@ -33,6 +33,7 @@ pub struct Task {
     pub schedule: String,
     pub last_run: String,
     pub status: String,
+    pub link_state: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

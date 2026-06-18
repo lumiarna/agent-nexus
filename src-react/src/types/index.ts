@@ -111,6 +111,7 @@ export type TaskDirection = "Distribution" | "Push" | "Pull";
 export type TaskAction = "Symlink" | "Junction" | "Copy";
 export type LocationType = "Local" | "Cloud";
 export type TaskStatus = "ok" | "pending" | "failed" | "never";
+export type TaskLinkState = "present" | "missing";
 
 export interface Task {
   id: string;
@@ -124,6 +125,11 @@ export interface Task {
   schedule: string;
   lastRun: string;
   status: TaskStatus;
+  /** Placement health for link actions (Symlink/Junction + Local target).
+   *  `missing` means the symlink/junction was removed out-of-band; the task row
+   *  stays so the user can see the relationship is broken. Copy and Cloud targets
+   *  always report `present` — they own no link placement. */
+  linkState: TaskLinkState;
 }
 
 export interface TaskGroup {

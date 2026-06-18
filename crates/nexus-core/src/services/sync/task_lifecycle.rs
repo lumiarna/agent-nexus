@@ -12,7 +12,10 @@ use crate::{
     database::Database,
     error::{AppError, AppResult},
     services::{
-        symlink::{create_junction_placement, create_symlink_placement, remove_symlink_if_present},
+        symlink::{
+            create_junction_placement, create_symlink_placement, is_junction,
+            remove_symlink_if_present,
+        },
         webdav,
     },
 };
@@ -348,6 +351,12 @@ impl TaskLifecycle {
         )
         .optional()
         .map_err(Into::into)
+        .map(|opt| {
+            opt.map(|mut task| {
+                task.link_state = derive_link_state(&task.action, &task.target_type, &task.target);
+                task
+            })
+        })
     }
 
     fn record_task_run(&self, id: &str, status: &str) -> AppResult<()> {
@@ -582,7 +591,11 @@ fn list_tasks_for_group(conn: &rusqlite::Connection, group_id: &str) -> AppResul
     )?;
 
     let rows = stmt.query_map([group_id], task_from_row)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    let mut tasks: Vec<Task> = rows.collect::<Result<Vec<_>, _>>()?;
+    for task in &mut tasks {
+        task.link_state = derive_link_state(&task.action, &task.target_type, &task.target);
+    }
+    Ok(tasks)
 }
 
 fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
@@ -597,7 +610,29 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         schedule: row.get(7)?,
         last_run: row.get(8)?,
         status: row.get(9)?,
+        link_state: String::new(),
     })
+}
+
+/// Placement health for a task's target. Link actions (Symlink / Junction) with a
+/// Local target own a placement on disk; when that placement is missing the state is
+/// `"missing"`. Copy tasks and Cloud targets have no link placement, so they report
+/// `"present"` — there is nothing to go missing.
+fn derive_link_state(action: &str, target_type: &str, target: &str) -> String {
+    if (action == "Symlink" || action == "Junction") && target_type == "Local" {
+        let path = Path::new(target);
+        let exists = fs::symlink_metadata(path)
+            .map(|metadata| metadata.file_type().is_symlink() || is_junction(path))
+            .unwrap_or(false);
+        if exists {
+            "present"
+        } else {
+            "missing"
+        }
+    } else {
+        "present"
+    }
+    .to_string()
 }
 
 fn derive_direction(source_type: &str, target_type: &str) -> &'static str {
