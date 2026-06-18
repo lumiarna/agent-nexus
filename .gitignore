@@ -5,6 +5,7 @@ __sessions/
 # build
 node_modules/
 dist/
+.test-output/
 src-tauri/gen/schemas/
 src-tauri/target/
 src-tauri/vendor/sqlite/windows-x64/

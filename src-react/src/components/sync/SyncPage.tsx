@@ -6,6 +6,7 @@ import { Dot, Input, Spinner } from "@/components/ui/primitives";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
+import { formatProjectSymlinkDisplayPath } from "@/components/sync/pathDisplay";
 import {
   useCreateTaskGroupMutation,
   useDeleteProjectSymlinkMutation,
@@ -35,15 +36,6 @@ const SCHEDULE_PRESETS = [
 const TASK_COLS = "24px 132px 1.3fr 1.4fr 150px";
 const LINK_COLS =
   "minmax(70px,.6fr) minmax(0,1.6fr) minmax(70px,.6fr) minmax(0,1.6fr) 60px";
-
-/** Strip path up to (and including) the project name directory segment, showing only the relative remainder. */
-function relPath(fullPath: string, projectName?: string | null): string {
-  if (!projectName) return fullPath;
-  const marker = `/${projectName}/`;
-  const idx = fullPath.indexOf(marker);
-  if (idx === -1) return fullPath;
-  return fullPath.slice(idx + marker.length) || "/";
-}
 
 function dirColors(d: TaskDirection): { fg: string; bg: string } {
   if (d === "Push") return { fg: "#9a6f0a", bg: "#f7eccb" };
@@ -562,7 +554,7 @@ export function SyncPage() {
                   </div>
                   <div className="flex min-w-0 items-center gap-1.5">
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]" title={link.sourcePath}>
-                      {relPath(link.sourcePath, link.sourceProjectName)}
+                      {formatProjectSymlinkDisplayPath(link.sourcePath, link.sourceProjectName)}
                     </span>
                     <CopyPathButton path={link.sourcePath} />
                   </div>
@@ -571,7 +563,7 @@ export function SyncPage() {
                   </div>
                   <div className="flex min-w-0 items-center gap-1.5">
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]" title={link.targetPath}>
-                      {relPath(link.targetPath, link.targetProjectName)}
+                      {formatProjectSymlinkDisplayPath(link.targetPath, link.targetProjectName)}
                     </span>
                     <CopyPathButton path={link.targetPath} />
                   </div>

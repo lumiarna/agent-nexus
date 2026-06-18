@@ -1,4 +1,3 @@
-- Windows Rust 测试权限问题导致 TDD 工作流无法闭环
 - Windows 支持 Symlink 权限不足时降级为 Junction
 - Project 接入 Tauri folder picker，把手输路径替换为原生选择目
 - Project 支持拖拽排序
