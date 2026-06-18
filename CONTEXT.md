@@ -121,7 +121,7 @@ _Avoid_: Owner, primary target
 _Avoid_: Secondary source, duplicate source
 
 **Agent Capability Surface**:
-某个 `Agent` 在当前产品中实际参与的资产与页面范围。`Agent` 的领域身份可以完整存在，但其可操作 surface 可以分阶段开放；当前已确认 `Copilot` 在 MVP 中同时参与 `Skill` 与 `Prompt`。
+某个 `Agent` 在当前产品中实际参与的资产与页面范围。它集中描述 canonical order、配置根、`Skill` surface（global/project skill 目录）、`Prompt` surface（global prompt 文件）以及可选的 `Provider` 展示事实。`Agent` 的领域身份可以完整存在，但其可操作 surface 可以分阶段开放；当前已确认 `Copilot` 在 MVP 中同时参与 `Skill` 与 `Prompt`。
 _Avoid_: Partial agent identity, ad hoc special case
 
 ## Sync

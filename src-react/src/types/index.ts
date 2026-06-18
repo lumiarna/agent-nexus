@@ -6,7 +6,9 @@
 
 // ─── Agents / distribution ──────────────────────────────────────────────────
 
-export type AgentName = "Generic Agent" | "Claude Code" | "CodeX" | "Copilot" | "OpenCode";
+import type { AgentName as CapabilityAgentName } from "@/config/agents";
+
+export type AgentName = CapabilityAgentName;
 
 /** Role of an agent in a Skill/Prompt Agent Matrix row. One source per row. */
 export type CellRole = "source" | "target" | "none";

@@ -1,3 +1,4 @@
+pub mod agent_capabilities;
 pub mod paths;
 pub mod project_symlinks;
 pub mod projects;

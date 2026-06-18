@@ -4,6 +4,9 @@
 - Icon
 - Copy 应先移到回收站再复制
 - Delete Group 对话框
+- 删除 Copy Task 时，应把目标位置的文件也删掉
+- Provider 卡片高度不一致
+- 项目里有三份 Cargo.toml, 两份 package.json/pnpm-workspace.yaml
 
 ---
 

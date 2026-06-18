@@ -14,6 +14,9 @@ use uuid::Uuid;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
+    services::agent_capabilities::{
+        agent_by_name as capability_by_name, agent_capability_surfaces, AgentCapabilitySurface,
+    },
     services::paths,
     services::symlink::{create_managed_directory_link, is_junction, remove_symlink_if_present},
 };
@@ -46,13 +49,6 @@ pub struct SkillService {
 }
 
 #[derive(Debug, Clone)]
-struct AgentDef {
-    name: &'static str,
-    global_skills_dir: &'static str,
-    project_skills_dir: &'static str,
-}
-
-#[derive(Debug, Clone)]
 struct ProjectRoot {
     id: String,
     path: PathBuf,
@@ -77,34 +73,6 @@ struct SkillMetadata {
     disabled: bool,
 }
 
-const AGENTS: &[AgentDef] = &[
-    AgentDef {
-        name: "Generic Agent",
-        global_skills_dir: "~/.agents/skills",
-        project_skills_dir: ".agents/skills",
-    },
-    AgentDef {
-        name: "Claude Code",
-        global_skills_dir: "~/.claude/skills",
-        project_skills_dir: ".claude/skills",
-    },
-    AgentDef {
-        name: "CodeX",
-        global_skills_dir: "~/.codex/skills",
-        project_skills_dir: ".codex/skills",
-    },
-    AgentDef {
-        name: "Copilot",
-        global_skills_dir: "~/.github/skills",
-        project_skills_dir: ".github/skills",
-    },
-    AgentDef {
-        name: "OpenCode",
-        global_skills_dir: "~/.config/opencode/skills",
-        project_skills_dir: ".opencode/skills",
-    },
-];
-
 impl SkillService {
     pub fn new(db: Arc<Database>) -> Self {
         Self { db }
@@ -127,15 +95,21 @@ impl SkillService {
         let projects = self.list_project_roots()?;
         let mut sources = Vec::new();
 
-        for agent in AGENTS {
-            if let Some(dir) = expand_home(agent.global_skills_dir) {
+        for agent in agent_capability_surfaces() {
+            let Some(skill) = agent.skill else {
+                continue;
+            };
+            if let Some(dir) = expand_home(skill.global_dir) {
                 sources.extend(discover_skill_sources(agent, "global", None, None, &dir)?);
             }
         }
 
         for project in &projects {
-            for agent in AGENTS {
-                let dir = project.path.join(agent.project_skills_dir);
+            for agent in agent_capability_surfaces() {
+                let Some(skill) = agent.skill else {
+                    continue;
+                };
+                let dir = project.path.join(skill.project_dir);
                 sources.extend(discover_skill_sources(
                     agent,
                     "project",
@@ -450,7 +424,7 @@ struct SkillTargetContext {
 }
 
 fn discover_skill_sources(
-    agent: &'static AgentDef,
+    agent: &AgentCapabilitySurface,
     scope: &str,
     project_id: Option<String>,
     project_path: Option<PathBuf>,
@@ -579,7 +553,7 @@ fn distribution_rows(
     source: &SkillSource,
 ) -> AppResult<Vec<(&'static str, String, Option<String>)>> {
     let mut rows = Vec::new();
-    for agent in AGENTS {
+    for agent in agent_capability_surfaces() {
         if agent.name == source.source_agent {
             rows.push((agent.name, "source".to_string(), None));
             continue;
@@ -613,7 +587,10 @@ fn distribution_rows(
     Ok(rows)
 }
 
-fn target_path_for(source: &SkillSource, agent: &AgentDef) -> AppResult<Option<PathBuf>> {
+fn target_path_for(
+    source: &SkillSource,
+    agent: &AgentCapabilitySurface,
+) -> AppResult<Option<PathBuf>> {
     target_path_for_parts(
         &source.scope,
         source.project_path.as_deref(),
@@ -626,19 +603,20 @@ fn target_path_for_parts(
     scope: &str,
     project_path: Option<&Path>,
     canonical_path: &Path,
-    agent: &AgentDef,
+    agent: &AgentCapabilitySurface,
 ) -> AppResult<Option<PathBuf>> {
+    let Some(skill) = agent.skill else {
+        return Ok(None);
+    };
     let dir_name = skill_dir_name(canonical_path)?;
     if scope == "global" {
-        return Ok(expand_home(agent.global_skills_dir).map(|dir| dir.join(dir_name)));
+        return Ok(expand_home(skill.global_dir).map(|dir| dir.join(dir_name)));
     }
 
     let Some(project_path) = project_path else {
         return Ok(None);
     };
-    Ok(Some(
-        project_path.join(agent.project_skills_dir).join(dir_name),
-    ))
+    Ok(Some(project_path.join(skill.project_dir).join(dir_name)))
 }
 
 fn symlink_points_to(target_path: &Path, source_path: &Path) -> AppResult<bool> {
@@ -698,7 +676,7 @@ fn skill_cells(
 }
 
 fn empty_cells() -> BTreeMap<String, String> {
-    AGENTS
+    agent_capability_surfaces()
         .iter()
         .map(|agent| (agent.name.to_string(), "none".to_string()))
         .collect()
@@ -718,11 +696,8 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn agent_by_name(name: &str) -> AppResult<&'static AgentDef> {
-    AGENTS
-        .iter()
-        .find(|agent| agent.name == name)
-        .ok_or_else(|| AppError::Validation("invalid agent".to_string()))
+fn agent_by_name(name: &str) -> AppResult<&'static AgentCapabilitySurface> {
+    capability_by_name(name).ok_or_else(|| AppError::Validation("invalid agent".to_string()))
 }
 
 fn skill_dir_name(path: &Path) -> AppResult<String> {
