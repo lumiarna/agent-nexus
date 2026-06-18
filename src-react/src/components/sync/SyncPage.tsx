@@ -1,4 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -171,6 +186,32 @@ interface SchedState {
   cronExpr: string;
 }
 
+type SortableRender = ReturnType<typeof useSortable>;
+
+function taskKey(groupId: string, taskId: string): string {
+  return `${groupId}::${taskId}`;
+}
+
+function SortableTaskGroup({ id, children }: {
+  id: string;
+  children: (s: SortableRender) => ReactNode;
+}) {
+  const sortable = useSortable({ id, data: { type: "group" } });
+  return <>{children(sortable)}</>;
+}
+
+function SortableTask({ groupId, taskId, children }: {
+  groupId: string;
+  taskId: string;
+  children: (s: SortableRender) => ReactNode;
+}) {
+  const sortable = useSortable({
+    id: taskKey(groupId, taskId),
+    data: { type: "task", groupId, taskId },
+  });
+  return <>{children(sortable)}</>;
+}
+
 export function SyncPage() {
   const taskGroupsQuery = useTaskGroupsQuery();
   const createTaskGroupMutation = useCreateTaskGroupMutation();
@@ -188,8 +229,6 @@ export function SyncPage() {
   const [tpl, setTpl] = useState("blank");
   const [form, setForm] = useState<FormState>({ name: "", tasks: [newTask()] });
   const [sched, setSched] = useState<SchedState | null>(null);
-  const [dragGroupId, setDragGroupId] = useState<string | null>(null);
-  const [dragTask, setDragTask] = useState<{ groupId: string; taskId: string } | null>(null);
   const [addTarget, setAddTarget] = useState<TaskGroup | null>(null);
   const [addForm, setAddForm] = useState<FormTask | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TaskGroup | null>(null);
@@ -226,13 +265,10 @@ export function SyncPage() {
   function reorderGroups(fromId: string, toId: string) {
     if (!fromId || fromId === toId) return;
     setGroups((gs) => {
-      const a = [...gs];
-      const fi = a.findIndex((g) => g.id === fromId);
-      const ti = a.findIndex((g) => g.id === toId);
+      const fi = gs.findIndex((g) => g.id === fromId);
+      const ti = gs.findIndex((g) => g.id === toId);
       if (fi < 0 || ti < 0) return gs;
-      const [m] = a.splice(fi, 1);
-      a.splice(ti, 0, m);
-      return a;
+      return arrayMove(gs, fi, ti);
     });
   }
   function reorderTask(groupId: string, fromId: string, toId: string) {
@@ -240,15 +276,32 @@ export function SyncPage() {
     setGroups((gs) =>
       gs.map((g) => {
         if (g.id !== groupId) return g;
-        const a = [...g.tasks];
-        const fi = a.findIndex((t) => t.id === fromId);
-        const ti = a.findIndex((t) => t.id === toId);
+        const fi = g.tasks.findIndex((t) => t.id === fromId);
+        const ti = g.tasks.findIndex((t) => t.id === toId);
         if (fi < 0 || ti < 0) return g;
-        const [m] = a.splice(fi, 1);
-        a.splice(ti, 0, m);
-        return { ...g, tasks: a };
+        return { ...g, tasks: arrayMove(g.tasks, fi, ti) };
       }),
     );
+  }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const a = active.data.current;
+    const o = over.data.current;
+    if (a?.type === "group" && o?.type === "group") {
+      reorderGroups(String(active.id), String(over.id));
+    } else if (
+      a?.type === "task" &&
+      o?.type === "task" &&
+      a.groupId === o.groupId
+    ) {
+      reorderTask(a.groupId, a.taskId, o.taskId);
+    }
   }
 
   async function deleteTask(groupId: string, task: Task) {
@@ -438,158 +491,201 @@ export function SyncPage() {
               <Spinner /> Loading task groups...
             </div>
           ) : null}
-          {!taskGroupsQuery.isLoading && groups.map((g) => {
-            const gDragging = dragGroupId === g.id;
-            return (
-              <div
-                key={g.id}
-                draggable
-                onDragStart={(e) => {
-                  setDragGroupId(g.id);
-                  e.dataTransfer.effectAllowed = "move";
-                  try { e.dataTransfer.setData("text/plain", g.id); } catch { /* noop */ }
-                }}
-                onDragOver={(e) => { if (dragGroupId) e.preventDefault(); }}
-                onDrop={(e) => { if (dragGroupId) { e.preventDefault(); reorderGroups(dragGroupId, g.id); setDragGroupId(null); } }}
-                onDragEnd={() => setDragGroupId(null)}
-                className={cn(
-                  "overflow-hidden rounded-[18px] border bg-nexus-card transition-[box-shadow,opacity]",
-                  gDragging
-                    ? "border-nexus-accent opacity-60 shadow-[0_8px_28px_rgba(50,40,25,.16)]"
-                    : "border-nexus-border shadow-[0_1px_14px_rgba(50,40,25,.05)]",
-                )}
+          {!taskGroupsQuery.isLoading && groups.length > 0 ? (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={groups.map((g) => g.id)}
+                strategy={verticalListSortingStrategy}
               >
-                <div className="flex flex-wrap items-center gap-[11px] border-b border-[#f3eee5] px-5 py-[15px]">
-                  <span title="Drag to reorder group" className="cursor-grab text-[13px] leading-none tracking-[-1px] text-[#cabfae]">
-                    ⠿
-                  </span>
-                  <div className="text-[14.5px] font-extrabold text-nexus-ink">{g.name}</div>
-                  <span className="text-[11px] text-[#b3a999]">
-                    {g.tasks.length} {g.tasks.length === 1 ? "task" : "tasks"}
-                  </span>
-                  <div className="ml-auto flex gap-[7px]">
-                    {g.tasks.some((t) => t.action === "Copy") && (
-                      <button
-                        onClick={() => void runGroup(g)}
-                        className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
+                {groups.map((g) => (
+                  <SortableTaskGroup key={g.id} id={g.id}>
+                    {({
+                      setNodeRef,
+                      setActivatorNodeRef,
+                      listeners,
+                      attributes,
+                      transform,
+                      transition,
+                      isDragging,
+                    }) => (
+                      <div
+                        ref={setNodeRef}
+                        className={cn(
+                          "overflow-hidden rounded-[18px] border bg-nexus-card transition-[box-shadow,opacity]",
+                          isDragging
+                            ? "border-nexus-accent opacity-60 shadow-[0_8px_28px_rgba(50,40,25,.16)]"
+                            : "border-nexus-border shadow-[0_1px_14px_rgba(50,40,25,.05)]",
+                        )}
+                        style={{
+                          transform: CSS.Transform.toString(transform),
+                          transition,
+                        }}
+                        {...attributes}
                       >
-                        Run group
-                      </button>
-                    )}
-                    <button
-                      onClick={() => openAddTask(g)}
-                      className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-[#7a6f60] hover:bg-[#ece2d5]"
-                    >
-                      Add task
-                    </button>
-                    <button
-                      onClick={() => setDeleteTarget(g)}
-                      className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-nexus-crit hover:bg-[#f6e3e0]"
-                    >
-                      Delete group
-                    </button>
-                  </div>
-                </div>
-
-                <div
-                  className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
-                  style={{ gridTemplateColumns: TASK_COLS }}
-                >
-                  <div />
-                  <div>Type</div>
-                  <div>Source</div>
-                  <div>Target</div>
-                  <div className="text-right">Actions</div>
-                </div>
-
-                {g.tasks.map((t) => {
-                  const isCopy = t.action === "Copy";
-                  const st = isCopy ? statusOf(t.status) : null;
-                  const linkMissing = !isCopy && t.linkState === "missing";
-                  const tDragging = dragTask != null && dragTask.groupId === g.id && dragTask.taskId === t.id;
-                  const targetLabel = t.target || "—";
-                  return (
-                    <div
-                      key={t.id}
-                      draggable
-                      onDragStart={(e) => {
-                        setDragTask({ groupId: g.id, taskId: t.id });
-                        e.dataTransfer.effectAllowed = "move";
-                        try { e.dataTransfer.setData("text/plain", t.id); } catch { /* noop */ }
-                        e.stopPropagation();
-                      }}
-                      onDragOver={(e) => { if (dragTask?.groupId === g.id) { e.preventDefault(); e.stopPropagation(); } }}
-                      onDrop={(e) => { if (dragTask && dragTask.groupId === g.id) { e.preventDefault(); e.stopPropagation(); reorderTask(g.id, dragTask.taskId, t.id); setDragTask(null); } }}
-                      onDragEnd={() => setDragTask(null)}
-                      className={cn("grid items-center gap-3 border-t border-[#f3eee5] px-5 py-3", tDragging && "bg-[#fbf6ef] opacity-50", linkMissing && "bg-[#fbf3f0]")}
-                      style={{ gridTemplateColumns: TASK_COLS }}
-                    >
-                      <span title="Drag to reorder task" className="cursor-grab text-[12px] leading-none tracking-[-1px] text-[#d4c9b6]">
-                        ⠿
-                      </span>
-                      <div className="flex min-w-0 flex-col gap-[3px]">
-                        <ActionBadge action={t.action} />
-                        <span className="text-[10px] font-semibold uppercase tracking-[.04em] text-[#b3a999]">
-                          {t.direction}
-                        </span>
-                      </div>
-                      <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
-                        {t.source}
-                      </div>
-                      <div className={cn(
-                        "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px]",
-                        linkMissing ? "text-[#b55440] line-through" : "text-[#8a8073]",
-                      )} title={linkMissing ? "Placement missing — symlink/junction was removed out-of-band" : undefined}>
-                        {targetLabel}
-                      </div>
-                      <div className="flex items-center justify-end gap-[9px]">
-                        {st && (
-                          <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: st.fg }}>
-                            <Dot color={st.dot} /> {st.label}
+                        <div className="flex flex-wrap items-center gap-[11px] border-b border-[#f3eee5] px-5 py-[15px]">
+                          <span
+                            ref={setActivatorNodeRef}
+                            {...listeners}
+                            title="Drag to reorder group"
+                            className="cursor-grab text-[13px] leading-none tracking-[-1px] text-[#cabfae]"
+                          >
+                            ⠿
                           </span>
-                        )}
-                        {linkMissing && (
-                          <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: palette.crit }}>
-                            <Dot color={palette.crit} /> Missing
+                          <div className="text-[14.5px] font-extrabold text-nexus-ink">{g.name}</div>
+                          <span className="text-[11px] text-[#b3a999]">
+                            {g.tasks.length} {g.tasks.length === 1 ? "task" : "tasks"}
                           </span>
-                        )}
-                        {isCopy && (
-                          <>
-                            <span
-                              onClick={() =>
-                                setSched({
-                                  groupId: g.id,
-                                  taskId: t.id,
-                                  taskName: `${t.direction} · ${t.source || "task"}`,
-                                  mode: t.schedule !== "manual" ? "cron" : "manual",
-                                  cronExpr: t.schedule !== "manual" ? t.schedule : "0 5 * * *",
-                                })
-                              }
-                              className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
+                          <div className="ml-auto flex gap-[7px]">
+                            {g.tasks.some((t) => t.action === "Copy") && (
+                              <button
+                                onClick={() => void runGroup(g)}
+                                className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
+                              >
+                                Run group
+                              </button>
+                            )}
+                            <button
+                              onClick={() => openAddTask(g)}
+                              className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-[#7a6f60] hover:bg-[#ece2d5]"
                             >
-                              Schedule
-                            </span>
-                            <span
-                              onClick={() => void runTask(g.id, t)}
-                              className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
+                              Add task
+                            </button>
+                            <button
+                              onClick={() => setDeleteTarget(g)}
+                              className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-nexus-crit hover:bg-[#f6e3e0]"
                             >
-                              Run
-                            </span>
-                          </>
-                        )}
-                        <span
-                          onClick={() => void deleteTask(g.id, t)}
-                          className="cursor-pointer text-[11px] font-bold text-nexus-crit hover:underline"
+                              Delete group
+                            </button>
+                          </div>
+                        </div>
+
+                        <div
+                          className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
+                          style={{ gridTemplateColumns: TASK_COLS }}
                         >
-                          Delete
-                        </span>
+                          <div />
+                          <div>Type</div>
+                          <div>Source</div>
+                          <div>Target</div>
+                          <div className="text-right">Actions</div>
+                        </div>
+
+                        <SortableContext
+                          items={g.tasks.map((t) => taskKey(g.id, t.id))}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          {g.tasks.map((t) => {
+                            const isCopy = t.action === "Copy";
+                            const st = isCopy ? statusOf(t.status) : null;
+                            const linkMissing = !isCopy && t.linkState === "missing";
+                            const targetLabel = t.target || "—";
+                            return (
+                              <SortableTask key={t.id} groupId={g.id} taskId={t.id}>
+                                {({
+                                  setNodeRef,
+                                  setActivatorNodeRef,
+                                  listeners,
+                                  attributes,
+                                  transform,
+                                  transition,
+                                  isDragging,
+                                }) => (
+                                  <div
+                                    ref={setNodeRef}
+                                    className={cn(
+                                      "grid items-center gap-3 border-t border-[#f3eee5] px-5 py-3",
+                                      isDragging && "bg-[#fbf6ef] opacity-50",
+                                      linkMissing && "bg-[#fbf3f0]",
+                                    )}
+                                    style={{
+                                      gridTemplateColumns: TASK_COLS,
+                                      transform: CSS.Transform.toString(transform),
+                                      transition,
+                                    }}
+                                    {...attributes}
+                                  >
+                                    <span
+                                      ref={setActivatorNodeRef}
+                                      {...listeners}
+                                      title="Drag to reorder task"
+                                      className="cursor-grab text-[12px] leading-none tracking-[-1px] text-[#d4c9b6]"
+                                    >
+                                      ⠿
+                                    </span>
+                                    <div className="flex min-w-0 flex-col gap-[3px]">
+                                      <ActionBadge action={t.action} />
+                                      <span className="text-[10px] font-semibold uppercase tracking-[.04em] text-[#b3a999]">
+                                        {t.direction}
+                                      </span>
+                                    </div>
+                                    <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
+                                      {t.source}
+                                    </div>
+                                    <div className={cn(
+                                      "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px]",
+                                      linkMissing ? "text-[#b55440] line-through" : "text-[#8a8073]",
+                                    )} title={linkMissing ? "Placement missing — symlink/junction was removed out-of-band" : undefined}>
+                                      {targetLabel}
+                                    </div>
+                                    <div className="flex items-center justify-end gap-[9px]">
+                                      {st && (
+                                        <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: st.fg }}>
+                                          <Dot color={st.dot} /> {st.label}
+                                        </span>
+                                      )}
+                                      {linkMissing && (
+                                        <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: palette.crit }}>
+                                          <Dot color={palette.crit} /> Missing
+                                        </span>
+                                      )}
+                                      {isCopy && (
+                                        <>
+                                          <span
+                                            onClick={() =>
+                                              setSched({
+                                                groupId: g.id,
+                                                taskId: t.id,
+                                                taskName: `${t.direction} · ${t.source || "task"}`,
+                                                mode: t.schedule !== "manual" ? "cron" : "manual",
+                                                cronExpr: t.schedule !== "manual" ? t.schedule : "0 5 * * *",
+                                              })
+                                            }
+                                            className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
+                                          >
+                                            Schedule
+                                          </span>
+                                          <span
+                                            onClick={() => void runTask(g.id, t)}
+                                            className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
+                                          >
+                                            Run
+                                          </span>
+                                        </>
+                                      )}
+                                      <span
+                                        onClick={() => void deleteTask(g.id, t)}
+                                        className="cursor-pointer text-[11px] font-bold text-nexus-crit hover:underline"
+                                      >
+                                        Delete
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+                              </SortableTask>
+                            );
+                          })}
+                        </SortableContext>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
+                    )}
+                  </SortableTaskGroup>
+                ))}
+              </SortableContext>
+            </DndContext>
+          ) : null}
           {!taskGroupsQuery.isLoading && groups.length === 0 ? (
             <div className="rounded-[18px] border border-dashed border-nexus-border2 bg-nexus-card px-6 py-10 text-center">
               <div className="text-[14px] font-bold text-[#7a6f60]">No task groups yet</div>

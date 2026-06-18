@@ -1,4 +1,19 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useEffect, useState, type ReactNode } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, Dot } from "@/components/ui/primitives";
@@ -53,6 +68,56 @@ function deriveProjectKey(path: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
+interface SortableProjectRowProps {
+  id: string;
+  onClick?: () => void;
+  stale?: boolean;
+  children: ReactNode;
+}
+
+function SortableProjectRow({ id, onClick, stale, children }: SortableProjectRowProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      onClick={onClick}
+      className={cn(
+        "grid items-center gap-4 border-b border-[#f3eee5] px-5 py-[13px]",
+        !stale && "cursor-pointer hover:bg-[#fbf6ef]",
+        stale && "bg-[#faf3e8]",
+        isDragging && "opacity-50",
+      )}
+      style={{
+        gridTemplateColumns: LIST_COLS,
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      {...attributes}
+    >
+      <div
+        ref={setActivatorNodeRef}
+        {...listeners}
+        className={cn(
+          "flex cursor-grab items-center justify-center text-[11px] tracking-[1px]",
+          stale ? "text-[#d9ccb8]" : "text-[#d0c4b4]",
+        )}
+        title="Drag to reorder"
+      >
+        ⋮⋮
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export function ProjectPage({ initialProjectId }: { initialProjectId?: string }) {
   const { go } = useNav();
   const projectsQuery = useProjectsQuery();
@@ -69,7 +134,6 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
     ? getErrorMessage(baseFoldersQuery.error)
     : null;
   const [order, setOrder] = useState<string[]>([]);
-  const [dragId, setDragId] = useState<string | null>(null);
   const [skills, setSkills] = useState(() => nexus.skills());
   const [screen, setScreen] = useState<"list" | "detail">(
     initialProjectId ? "detail" : "list",
@@ -113,35 +177,24 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
     setMenu({ id, y: r.bottom + 4, right: Math.max(16, window.innerWidth - r.right) });
   }
 
-  function reorder(fromId: string | null, toId: string) {
+  function reorder(fromId: string, toId: string) {
     if (!fromId || fromId === toId) return;
     setOrder((o) => {
-      const a = [...o];
-      const fi = a.indexOf(fromId);
-      const ti = a.indexOf(toId);
+      const fi = o.indexOf(fromId);
+      const ti = o.indexOf(toId);
       if (fi < 0 || ti < 0) return o;
-      a.splice(fi, 1);
-      a.splice(ti, 0, fromId);
-      return a;
+      return arrayMove(o, fi, ti);
     });
   }
-  // Native HTML5 drag-reorder, shared by active & stale rows (Display Order).
-  function dragProps(id: string) {
-    return {
-      draggable: true,
-      onDragStart: (e: React.DragEvent<HTMLDivElement>) => {
-        setDragId(id);
-        e.dataTransfer.effectAllowed = "move";
-        try { e.dataTransfer.setData("text/plain", id); } catch { /* noop */ }
-      },
-      onDragOver: (e: React.DragEvent<HTMLDivElement>) => {
-        if (dragId) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
-      },
-      onDrop: (e: React.DragEvent<HTMLDivElement>) => {
-        if (dragId) { e.preventDefault(); reorder(dragId, id); setDragId(null); }
-      },
-      onDragEnd: () => setDragId(null),
-    };
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    reorder(String(active.id), String(over.id));
   }
 
   // Scan modal derived state
@@ -313,93 +366,85 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               </div>
             ) : null}
 
-            {active.map((p) => (
-              <div
-                key={p.id}
-                {...dragProps(p.id)}
-                onClick={() => { setDetailId(p.id); setScreen("detail"); }}
-                className={cn(
-                  "grid cursor-pointer items-center gap-4 border-b border-[#f3eee5] px-5 py-[13px] hover:bg-[#fbf6ef]",
-                  dragId === p.id && "opacity-50",
-                )}
-                style={{ gridTemplateColumns: LIST_COLS }}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={ordered.map((p) => p.id)}
+                strategy={verticalListSortingStrategy}
               >
-                <div className="flex cursor-grab items-center justify-center text-[11px] tracking-[1px] text-[#d0c4b4]" title="Drag to reorder">
-                  ⋮⋮
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[14px] font-bold text-nexus-ink">{p.name}</span>
-                    <span className="rounded-[5px] bg-[#e9eed8] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#5f7a3e]">
-                      Active
-                    </span>
-                  </div>
-                  <div className="mt-[3px] font-mono text-[11px] text-[#b3a999]">
-                    {p.sessionsDir}
-                    {p.sessionsNote ?? ""}
-                  </div>
-                </div>
-                <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-[#8a8073]">
-                  {p.path}
-                </div>
-                <div className="flex justify-end gap-[6px]">
-                  {[
-                    { label: "SKILL", n: p.skills },
-                    { label: "SESSION", n: p.sessions },
-                    { label: "SYNC", n: p.sync },
-                  ].map((c) => (
-                    <div
-                      key={c.label}
-                      className="flex items-center gap-[5px] rounded-[7px] bg-nexus-bg px-[9px] py-[5px]"
-                    >
-                      <span className="text-[12px] font-extrabold text-nexus-body">{c.n}</span>
-                      <span className="text-[9px] tracking-[.03em] text-[#b3a999]">{c.label}</span>
+                {active.map((p) => (
+                  <SortableProjectRow
+                    key={p.id}
+                    id={p.id}
+                    onClick={() => { setDetailId(p.id); setScreen("detail"); }}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[14px] font-bold text-nexus-ink">{p.name}</span>
+                        <span className="rounded-[5px] bg-[#e9eed8] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#5f7a3e]">
+                          Active
+                        </span>
+                      </div>
+                      <div className="mt-[3px] font-mono text-[11px] text-[#b3a999]">
+                        {p.sessionsDir}
+                        {p.sessionsNote ?? ""}
+                      </div>
                     </div>
-                  ))}
-                </div>
-                <div
-                  onClick={(e) => openMenu(e, p.id)}
-                  className="flex h-[30px] w-[30px] cursor-pointer items-center justify-center rounded-[8px] text-[16px] tracking-[2px] text-[#a99a89] hover:bg-nexus-panel hover:text-[#7a6f60]"
-                >
-                  ⋯
-                </div>
-              </div>
-            ))}
+                    <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-[#8a8073]">
+                      {p.path}
+                    </div>
+                    <div className="flex justify-end gap-[6px]">
+                      {[
+                        { label: "SKILL", n: p.skills },
+                        { label: "SESSION", n: p.sessions },
+                        { label: "SYNC", n: p.sync },
+                      ].map((c) => (
+                        <div
+                          key={c.label}
+                          className="flex items-center gap-[5px] rounded-[7px] bg-nexus-bg px-[9px] py-[5px]"
+                        >
+                          <span className="text-[12px] font-extrabold text-nexus-body">{c.n}</span>
+                          <span className="text-[9px] tracking-[.03em] text-[#b3a999]">{c.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div
+                      onClick={(e) => openMenu(e, p.id)}
+                      className="flex h-[30px] w-[30px] cursor-pointer items-center justify-center rounded-[8px] text-[16px] tracking-[2px] text-[#a99a89] hover:bg-nexus-panel hover:text-[#7a6f60]"
+                    >
+                      ⋯
+                    </div>
+                  </SortableProjectRow>
+                ))}
 
-            {stale.map((p) => (
-              <div
-                key={p.id}
-                {...dragProps(p.id)}
-                className={cn(
-                  "grid items-center gap-4 border-b border-[#f3eee5] bg-[#faf3e8] px-5 py-[13px]",
-                  dragId === p.id && "opacity-50",
-                )}
-                style={{ gridTemplateColumns: LIST_COLS }}
-              >
-                <div className="flex cursor-grab items-center justify-center text-[11px] tracking-[1px] text-[#d9ccb8]" title="Drag to reorder">
-                  ⋮⋮
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[14px] font-bold text-[#6a6055]">{p.name}</span>
-                    <span className="rounded-[5px] bg-[#f7eccb] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#9a6f0a]">
-                      Stale
-                    </span>
-                  </div>
-                  <div className="mt-[3px] text-[11px] text-[#bca37a]">Repo path no longer resolves</div>
-                </div>
-                <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-[#bca37a] line-through">
-                  {p.path}
-                </div>
-                <div />
-                <div
-                  onClick={(e) => openMenu(e, p.id)}
-                  className="flex h-[30px] w-[30px] cursor-pointer items-center justify-center rounded-[8px] text-[16px] tracking-[2px] text-[#a99a89] hover:bg-nexus-panel hover:text-[#7a6f60]"
-                >
-                  ⋯
-                </div>
-              </div>
-            ))}
+                {stale.map((p) => (
+                  <SortableProjectRow key={p.id} id={p.id} stale>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[14px] font-bold text-[#6a6055]">{p.name}</span>
+                        <span className="rounded-[5px] bg-[#f7eccb] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#9a6f0a]">
+                          Stale
+                        </span>
+                      </div>
+                      <div className="mt-[3px] text-[11px] text-[#bca37a]">Repo path no longer resolves</div>
+                    </div>
+                    <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-[#bca37a] line-through">
+                      {p.path}
+                    </div>
+                    <div />
+                    <div
+                      onClick={(e) => openMenu(e, p.id)}
+                      className="flex h-[30px] w-[30px] cursor-pointer items-center justify-center rounded-[8px] text-[16px] tracking-[2px] text-[#a99a89] hover:bg-nexus-panel hover:text-[#7a6f60]"
+                    >
+                      ⋯
+                    </div>
+                  </SortableProjectRow>
+                ))}
+              </SortableContext>
+            </DndContext>
           </Card>
 
           {hiddenP.length > 0 ? (

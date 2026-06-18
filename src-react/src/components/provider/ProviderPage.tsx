@@ -1,4 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Settings } from "lucide-react";
 import { toast } from "sonner";
 import { Button, IconButton } from "@/components/ui/button";
@@ -31,6 +46,50 @@ function actionLabel(st: ProviderUiStatus, loading: boolean): string {
   return loading ? "Checking…" : "Refresh";
 }
 
+interface SortableProviderCardProps {
+  id: string;
+  minHeight: number | null;
+  children: (activator: {
+    setActivatorNodeRef: (node: HTMLElement | null) => void;
+    listeners: ReturnType<typeof useSortable>["listeners"];
+  }) => ReactNode;
+}
+
+function SortableProviderCard({
+  id,
+  minHeight,
+  children,
+}: SortableProviderCardProps) {
+  const {
+    setNodeRef,
+    setActivatorNodeRef,
+    listeners,
+    attributes,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "flex flex-col rounded-[18px] border bg-nexus-card p-[18px] transition-[box-shadow,opacity]",
+        isDragging
+          ? "border-nexus-accent opacity-60 shadow-[0_8px_28px_rgba(50,40,25,.16)] z-10"
+          : "border-nexus-border shadow-[0_1px_14px_rgba(50,40,25,.05)]",
+      )}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        minHeight: minHeight ?? undefined,
+      }}
+      {...attributes}
+    >
+      {children({ setActivatorNodeRef, listeners })}
+    </div>
+  );
+}
+
 export function ProviderPage() {
   const [providers] = useState<Provider[]>(() => nexus.providers());
   const [order, setOrder] = useState<string[]>(() => providers.map((p) => p.id));
@@ -42,8 +101,9 @@ export function ProviderPage() {
   );
   const [configId, setConfigId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
-  const [dragId, setDragId] = useState<string | null>(null);
   const [trayMetric, setTrayMetric] = useState<TrayMetric>(() => nexus.settings().trayMetric);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [cardMinHeight, setCardMinHeight] = useState<number | null>(null);
 
   const timers = useRef<Record<string, number>>({});
   useEffect(
@@ -65,17 +125,24 @@ export function ProviderPage() {
     );
   }
 
-  function reorder(fromId: string | null, toId: string) {
+  function reorder(fromId: string, toId: string) {
     if (!fromId || fromId === toId) return;
     setOrder((o) => {
-      const a = [...o];
-      const fi = a.indexOf(fromId);
-      const ti = a.indexOf(toId);
+      const fi = o.indexOf(fromId);
+      const ti = o.indexOf(toId);
       if (fi < 0 || ti < 0) return o;
-      a.splice(fi, 1);
-      a.splice(ti, 0, fromId);
-      return a;
+      return arrayMove(o, fi, ti);
     });
+  }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    reorder(String(active.id), String(over.id));
   }
 
   const byId = Object.fromEntries(providers.map((p) => [p.id, p]));
@@ -83,6 +150,24 @@ export function ProviderPage() {
   const visible = ordered.filter((p) => cardVisible[p.id] !== false);
   const hidden = ordered.filter((p) => cardVisible[p.id] === false);
   const cfg = configId ? providers.find((p) => p.id === configId) ?? null : null;
+
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const update = () => {
+      let max = 0;
+      for (const child of Array.from(grid.children)) {
+        const h = (child as HTMLElement).getBoundingClientRect().height;
+        if (h > max) max = h;
+      }
+      setCardMinHeight(max || null);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(grid);
+    for (const child of Array.from(grid.children)) ro.observe(child as HTMLElement);
+    return () => ro.disconnect();
+  }, [visible.map((p) => p.id).join(","), visible.length]);
 
   return (
     <ScreenScroll>
@@ -107,163 +192,153 @@ export function ProviderPage() {
         </Button>
       </div>
 
-      <div
-        className="mt-[22px] grid gap-4"
-        style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
       >
-        {visible.map((p) => {
-          const loading = !!refreshing[p.id];
-          const st: ProviderUiStatus = loading ? "loading" : p.status;
-          const si = statusInfo(st);
-          const showQuota = st === "available" && !!p.windows;
-          const hasMessage =
-            !loading &&
-            (p.status === "expired" || p.status === "nocreds" || p.status === "failed");
-          const mm = MSG[p.status] ?? { title: "", body: "" };
-          const body = p.status === "failed" ? p.error ?? mm.body : mm.body;
-          const dragging = dragId === p.id;
-          return (
-            <div
-              key={p.id}
-              draggable
-              onDragStart={(e) => {
-                setDragId(p.id);
-                e.dataTransfer.effectAllowed = "move";
-                try {
-                  e.dataTransfer.setData("text/plain", p.id);
-                } catch {
-                  /* some browsers disallow setData here */
-                }
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                reorder(dragId, p.id);
-                setDragId(null);
-              }}
-              onDragEnd={() => setDragId(null)}
-              className={cn(
-                "flex flex-col rounded-[18px] border bg-nexus-card p-[18px] transition-[box-shadow,opacity]",
-                dragging
-                  ? "border-nexus-accent opacity-60 shadow-[0_8px_28px_rgba(50,40,25,.16)]"
-                  : "border-nexus-border shadow-[0_1px_14px_rgba(50,40,25,.05)]",
-              )}
-            >
-              <div className="flex items-start justify-between gap-2.5">
-                <div className="flex min-w-0 items-start gap-[9px]">
-                  <span
-                    title="Drag to reorder"
-                    className="mt-[3px] flex-none cursor-grab text-[13px] leading-none tracking-[-1px] text-[#cabfae]"
-                  >
-                    ⠿
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-[7px]">
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[15.5px] font-bold tracking-[-.01em] text-nexus-ink">
-                        {p.name}
-                      </span>
-                      {p.isAgent ? (
-                        <span
-                          title="Also a full Agent"
-                          className="flex-none rounded-[5px] border border-nexus-border2 bg-nexus-panel px-[5px] py-[1px] text-[9px] font-bold uppercase tracking-[.06em] text-[#7a6f60]"
-                        >
-                          Agent
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="mt-[3px] text-[12px] text-[#a99a89]">{p.plan}</div>
-                  </div>
-                </div>
-                <div
-                  className="inline-flex flex-none items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold"
-                  style={{ color: si.color, background: si.color + "22" }}
+        <SortableContext items={visible.map((p) => p.id)} strategy={rectSortingStrategy}>
+          <div
+            ref={gridRef}
+            className="mt-[22px] grid gap-4"
+            style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}
+          >
+            {visible.map((p) => {
+              const loading = !!refreshing[p.id];
+              const st: ProviderUiStatus = loading ? "loading" : p.status;
+              const si = statusInfo(st);
+              const showQuota = st === "available" && !!p.windows;
+              const hasMessage =
+                !loading &&
+                (p.status === "expired" || p.status === "nocreds" || p.status === "failed");
+              const mm = MSG[p.status] ?? { title: "", body: "" };
+              const body = p.status === "failed" ? p.error ?? mm.body : mm.body;
+              return (
+                <SortableProviderCard
+                  key={p.id}
+                  id={p.id}
+                  minHeight={cardMinHeight}
                 >
-                  <Dot color={si.color} dim={7} pulse={loading} />
-                  {si.label}
-                </div>
-              </div>
-
-              {showQuota ? (
-                <>
-                  <div className="mt-[18px] flex items-baseline gap-[7px]">
-                    <span
-                      className="text-[30px] font-extrabold leading-none tracking-[-.03em]"
-                      style={{ color: quotaColor(p.primary ?? 0) }}
-                    >
-                      {p.primary != null ? `${p.primary}%` : ""}
-                    </span>
-                    <span className="text-[12px] text-[#b3a999]">peak window used</span>
-                  </div>
-                  <div className="mt-[15px] flex flex-col gap-[13px]">
-                    {(p.windows ?? []).map((w) => (
-                      <div key={w.label}>
-                        <div className="mb-1.5 flex justify-between text-[12px]">
-                          <span className="text-[#6a6055]">{w.label}</span>
-                          <span className="font-bold" style={{ color: quotaColor(w.used) }}>
-                            {w.used}%
+                  {({ setActivatorNodeRef, listeners }) => (
+                    <>
+                      <div className="flex items-start justify-between gap-2.5">
+                        <div className="flex min-w-0 items-start gap-[9px]">
+                          <span
+                            ref={setActivatorNodeRef}
+                            {...listeners}
+                            title="Drag to reorder"
+                            className="mt-[3px] flex-none cursor-grab text-[13px] leading-none tracking-[-1px] text-[#cabfae]"
+                          >
+                            ⠿
                           </span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-[7px]">
+                              <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[15.5px] font-bold tracking-[-.01em] text-nexus-ink">
+                                {p.name}
+                              </span>
+                              {p.isAgent ? (
+                                <span
+                                  title="Also a full Agent"
+                                  className="flex-none rounded-[5px] border border-nexus-border2 bg-nexus-panel px-[5px] py-[1px] text-[9px] font-bold uppercase tracking-[.06em] text-[#7a6f60]"
+                                >
+                                  Agent
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="mt-[3px] text-[12px] text-[#a99a89]">{p.plan}</div>
+                          </div>
                         </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-[#ece2d6]">
-                          <div
-                            className="h-full rounded-full"
-                            style={{ width: `${w.used}%`, background: quotaColor(w.used) }}
-                          />
+                        <div
+                          className="inline-flex flex-none items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold"
+                          style={{ color: si.color, background: si.color + "22" }}
+                        >
+                          <Dot color={si.color} dim={7} pulse={loading} />
+                          {si.label}
                         </div>
-                        <div className="mt-1.5 text-[11px] text-[#b3a999]">{w.reset}</div>
                       </div>
-                    ))}
-                  </div>
-                </>
-              ) : null}
 
-              {hasMessage ? (
-                <div
-                  className="mt-4 rounded-[13px] px-[14px] py-[13px]"
-                  style={{ background: si.color + "22", border: `1px solid ${si.color}44` }}
-                >
-                  <div className="text-[12.5px] font-bold" style={{ color: si.color }}>
-                    {mm.title}
-                  </div>
-                  <div className="mt-1 text-[12px] leading-[1.5] text-[#7a6f60]">{body}</div>
-                </div>
-              ) : null}
+                      {showQuota ? (
+                        <>
+                          <div className="mt-[18px] flex items-baseline gap-[7px]">
+                            <span
+                              className="text-[30px] font-extrabold leading-none tracking-[-.03em]"
+                              style={{ color: quotaColor(p.primary ?? 0) }}
+                            >
+                              {p.primary != null ? `${p.primary}%` : ""}
+                            </span>
+                            <span className="text-[12px] text-[#b3a999]">peak window used</span>
+                          </div>
+                          <div className="mt-[15px] flex flex-col gap-[13px]">
+                            {(p.windows ?? []).map((w) => (
+                              <div key={w.label}>
+                                <div className="mb-1.5 flex justify-between text-[12px]">
+                                  <span className="text-[#6a6055]">{w.label}</span>
+                                  <span className="font-bold" style={{ color: quotaColor(w.used) }}>
+                                    {w.used}%
+                                  </span>
+                                </div>
+                                <div className="h-2 overflow-hidden rounded-full bg-[#ece2d6]">
+                                  <div
+                                    className="h-full rounded-full"
+                                    style={{ width: `${w.used}%`, background: quotaColor(w.used) }}
+                                  />
+                                </div>
+                                <div className="mt-1.5 text-[11px] text-[#b3a999]">{w.reset}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      ) : null}
 
-              <div className="mt-4 flex items-center justify-between gap-2.5 border-t border-nexus-panel pt-[14px]">
-                <div className="min-w-0">
-                  <div className="text-[9.5px] font-bold uppercase tracking-[.08em] text-[#c3b9a8]">
-                    Credential
-                  </div>
-                  <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]">
-                    {p.credential}
-                  </div>
-                </div>
-                <div className="flex flex-none gap-1.5">
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    className="px-3"
-                    title={actionLabel(st, loading)}
-                    onClick={() => refreshProvider(p.id)}
-                  >
-                    {actionLabel(st, loading)}
-                  </Button>
-                  <IconButton
-                    dim={32}
-                    variant="subtle"
-                    title="Configure"
-                    onClick={() => setConfigId(p.id)}
-                  >
-                    <Settings size={14} />
-                  </IconButton>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                      {hasMessage ? (
+                        <div
+                          className="mt-4 rounded-[13px] px-[14px] py-[13px]"
+                          style={{ background: si.color + "22", border: `1px solid ${si.color}44` }}
+                        >
+                          <div className="text-[12.5px] font-bold" style={{ color: si.color }}>
+                            {mm.title}
+                          </div>
+                          <div className="mt-1 text-[12px] leading-[1.5] text-[#7a6f60]">{body}</div>
+                        </div>
+                      ) : null}
+
+                      <div className="mt-4 flex items-center justify-between gap-2.5 border-t border-nexus-panel pt-[14px]">
+                        <div className="min-w-0">
+                          <div className="text-[9.5px] font-bold uppercase tracking-[.08em] text-[#c3b9a8]">
+                            Credential
+                          </div>
+                          <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]">
+                            {p.credential}
+                          </div>
+                        </div>
+                        <div className="flex flex-none gap-1.5">
+                          <Button
+                            variant="subtle"
+                            size="sm"
+                            className="px-3"
+                            title={actionLabel(st, loading)}
+                            onClick={() => refreshProvider(p.id)}
+                          >
+                            {actionLabel(st, loading)}
+                          </Button>
+                          <IconButton
+                            dim={32}
+                            variant="subtle"
+                            title="Configure"
+                            onClick={() => setConfigId(p.id)}
+                          >
+                            <Settings size={14} />
+                          </IconButton>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </SortableProviderCard>
+              );
+            })}
+          </div>
+        </SortableContext>
+      </DndContext>
 
       {hidden.length > 0 ? (
         <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[14px] border border-dashed border-[#ddccb6] bg-nexus-panel px-[18px] py-[14px]">

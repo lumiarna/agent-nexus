@@ -125,7 +125,7 @@ export function SettingsPage() {
           </span>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3.5">
-          <label className="col-span-2 block">
+          <label className="block">
             <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">Endpoint URL</div>
             <Input
               className="font-mono"
@@ -133,6 +133,20 @@ export function SettingsPage() {
               value={url}
               onChange={(e) => {
                 setUrl(e.target.value);
+                setWebdavStatus("untested");
+              }}
+            />
+          </label>
+          <label className="block">
+            <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">
+              Remote root directory
+            </div>
+            <Input
+              className="font-mono"
+              placeholder="agent-nexus-sync"
+              value={remoteRoot}
+              onChange={(e) => {
+                setRemoteRoot(e.target.value);
                 setWebdavStatus("untested");
               }}
             />
@@ -160,20 +174,6 @@ export function SettingsPage() {
               value={pass}
               onChange={(e) => {
                 setPass(e.target.value);
-                setWebdavStatus("untested");
-              }}
-            />
-          </label>
-          <label className="col-span-2 block">
-            <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">
-              Remote root directory
-            </div>
-            <Input
-              className="font-mono"
-              placeholder="agent-nexus-sync"
-              value={remoteRoot}
-              onChange={(e) => {
-                setRemoteRoot(e.target.value);
                 setWebdavStatus("untested");
               }}
             />
