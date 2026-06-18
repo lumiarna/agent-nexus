@@ -35,6 +35,8 @@ pub fn run() {
             commands::sync::create_task_group,
             commands::sync::delete_project_symlink,
             commands::sync::delete_task,
+            commands::sync::delete_task_group,
+            commands::sync::add_task,
             commands::sync::get_webdav_settings,
             commands::sync::list_project_symlinks,
             commands::sync::list_task_groups,

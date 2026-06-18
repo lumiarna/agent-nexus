@@ -8,8 +8,10 @@ import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
 import { formatProjectSymlinkDisplayPath } from "@/components/sync/pathDisplay";
 import {
+  useAddTaskMutation,
   useCreateTaskGroupMutation,
   useDeleteProjectSymlinkMutation,
+  useDeleteTaskGroupMutation,
   useDeleteTaskMutation,
   useProjectSymlinksQuery,
   useRunTaskMutation,
@@ -148,6 +150,8 @@ export function SyncPage() {
   const taskGroupsQuery = useTaskGroupsQuery();
   const createTaskGroupMutation = useCreateTaskGroupMutation();
   const deleteTaskMutation = useDeleteTaskMutation();
+  const deleteTaskGroupMutation = useDeleteTaskGroupMutation();
+  const addTaskMutation = useAddTaskMutation();
   const runTaskMutation = useRunTaskMutation();
   const projectSymlinksQuery = useProjectSymlinksQuery();
   const deleteProjectSymlinkMutation = useDeleteProjectSymlinkMutation();
@@ -161,6 +165,8 @@ export function SyncPage() {
   const [sched, setSched] = useState<SchedState | null>(null);
   const [dragGroupId, setDragGroupId] = useState<string | null>(null);
   const [dragTask, setDragTask] = useState<{ groupId: string; taskId: string } | null>(null);
+  const [addTarget, setAddTarget] = useState<TaskGroup | null>(null);
+  const [addForm, setAddForm] = useState<FormTask | null>(null);
   const projectSymlinks = projectSymlinksQuery.data ?? [];
   const projectSymlinkError = projectSymlinksQuery.error
     ? getErrorMessage(projectSymlinksQuery.error)
@@ -220,6 +226,54 @@ export function SyncPage() {
         ),
       );
       toast(`Deleted · ${task.direction} · ${task.source || "task"}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function deleteTaskGroup(group: TaskGroup) {
+    if (!window.confirm(`Delete task group "${group.name}" and its ${group.tasks.length} ${group.tasks.length === 1 ? "task" : "tasks"}?`)) {
+      return;
+    }
+    try {
+      await deleteTaskGroupMutation.mutateAsync(group.id);
+      setGroups((gs) => gs.filter((g) => g.id !== group.id));
+      toast(`Deleted group · ${group.name}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  function openAddTask(group: TaskGroup) {
+    setAddTarget(group);
+    setAddForm(newTask());
+  }
+
+  async function submitAddTask() {
+    if (!addTarget || !addForm) return;
+    const tk = addForm;
+    const validTargets = tk.targets.filter((t) => t.path.trim());
+    if (!validTargets.length || !tk.source.trim()) {
+      toast("Source and at least one target are required");
+      return;
+    }
+    try {
+      for (const tgt of validTargets) {
+        await addTaskMutation.mutateAsync({
+          groupId: addTarget.id,
+          task: {
+            action: tk.action,
+            sourceType: tk.sourceType,
+            source: tk.source,
+            targetType: tgt.type,
+            target: tgt.path.trim(),
+            schedule: (tk.schedule || "manual").trim() || "manual",
+          },
+        });
+      }
+      setAddTarget(null);
+      setAddForm(null);
+      toast(`Task added to · ${addTarget.name}`);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -385,10 +439,16 @@ export function SyncPage() {
                       </button>
                     )}
                     <button
-                      onClick={() => toast(`Add task to ${g.name}`)}
+                      onClick={() => openAddTask(g)}
                       className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-[#7a6f60] hover:bg-[#ece2d5]"
                     >
                       Add task
+                    </button>
+                    <button
+                      onClick={() => void deleteTaskGroup(g)}
+                      className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-nexus-crit hover:bg-[#f6e3e0]"
+                    >
+                      Delete group
                     </button>
                   </div>
                 </div>
@@ -911,6 +971,174 @@ export function SyncPage() {
           </>
         ) : null}
       </Modal>
+
+      {/* Add task modal */}
+      <Modal
+        open={!!addTarget}
+        onClose={() => { setAddTarget(null); setAddForm(null); }}
+        className="max-h-[90vh] w-[640px]"
+        overlayClassName="z-[70]"
+      >
+        {addTarget && addForm ? (
+          <>
+            <ModalHeader
+              title={`Add task to · ${addTarget.name}`}
+              subtitle="A new task is appended to the end of this group."
+            />
+            <div className="flex flex-col gap-5 px-[22px] py-5">
+              <AddTaskForm
+                task={addForm}
+                onChange={setAddForm}
+              />
+              <div className="rounded-[11px] border border-nexus-border bg-nexus-bg px-3.5 py-[11px] text-[11.5px] leading-[1.5] text-[#8a7a68]">
+                Every task is one-way · single source → one or more targets.
+              </div>
+            </div>
+            <ModalFooter>
+              <Button variant="subtle" onClick={() => { setAddTarget(null); setAddForm(null); }}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={() => void submitAddTask()}>
+                Add task
+              </Button>
+            </ModalFooter>
+          </>
+        ) : null}
+      </Modal>
     </>
+  );
+}
+
+interface AddTaskFormProps {
+  task: FormTask;
+  onChange: (task: FormTask) => void;
+}
+
+function AddTaskForm({ task, onChange }: AddTaskFormProps) {
+  const isCron = task.schedule !== "manual";
+  return (
+    <div className="rounded-[14px] border border-nexus-border bg-nexus-sand2 p-3.5">
+      <div className="mb-[11px] flex items-center justify-between gap-2.5">
+        <span className="text-[11px] font-bold text-nexus-accent">New task</span>
+      </div>
+      <div className="mb-[11px] flex flex-wrap gap-4">
+        <div>
+          <div className="mb-[5px] text-[11px] font-semibold text-[#8a7d6c]">Action</div>
+          <Segmented<TaskAction>
+            className="bg-[#ece2d5]"
+            size="sm"
+            options={[
+              { value: "Symlink", label: "Symlink", disabled: task.targets.some((t) => t.type === "Cloud") || task.sourceType === "Cloud" },
+              { value: "Copy", label: "Copy" },
+            ]}
+            value={task.action}
+            onChange={(a) => onChange({ ...task, action: a, schedule: a === "Symlink" ? "manual" : task.schedule })}
+          />
+        </div>
+      </div>
+      <div className="mb-2.5">
+        <div className="mb-[5px] text-[11px] font-semibold text-[#8a7d6c]">
+          Source <span className="font-medium text-[#b3a999]">(single)</span>
+        </div>
+        <div className="flex items-center gap-[7px]">
+          <Segmented<LocationType>
+            className="bg-[#ece2d5]"
+            size="sm"
+            options={[{ value: "Local", label: "Local" }, { value: "Cloud", label: "Cloud" }]}
+            value={task.sourceType}
+            onChange={(v) => onChange({ ...task, sourceType: v })}
+          />
+          <Input
+            className="flex-1 rounded-[9px] px-[11px] py-2 font-mono text-[12px]"
+            placeholder={task.sourceType === "Cloud" ? "config/warp/" : "~/.config/warp/"}
+            value={task.source}
+            onChange={(e) => onChange({ ...task, source: e.target.value })}
+          />
+        </div>
+      </div>
+      <div className="mb-2.5">
+        <div className="mb-[5px] flex items-center justify-between">
+          <div className="text-[11px] font-semibold text-[#8a7d6c]">
+            Targets <span className="font-medium text-[#b3a999]">(one or more)</span>
+          </div>
+          <div
+            onClick={() => onChange({ ...task, targets: [...task.targets, { type: "Local", path: "" }] })}
+            className="cursor-pointer text-[11.5px] font-bold text-nexus-accent hover:underline"
+          >
+            + Add
+          </div>
+        </div>
+        <div className="flex flex-col gap-[7px]">
+          {task.targets.map((val, j) => (
+            <div key={j} className="flex items-center gap-[7px]">
+              <Segmented<LocationType>
+                className="bg-[#ece2d5]"
+                size="sm"
+                options={[{ value: "Local", label: "Local" }, { value: "Cloud", label: "Cloud" }]}
+                value={val.type}
+                onChange={(v) => {
+                  const tg = [...task.targets];
+                  tg[j] = { ...tg[j], type: v };
+                  onChange({ ...task, targets: tg });
+                }}
+              />
+              <Input
+                className="flex-1 rounded-[9px] px-[11px] py-2 font-mono text-[12px]"
+                placeholder={val.type === "Cloud" ? "backups/ssh/" : "/target/path/"}
+                value={val.path}
+                onChange={(e) => {
+                  const tg = [...task.targets];
+                  tg[j] = { ...tg[j], path: e.target.value };
+                  onChange({ ...task, targets: tg });
+                }}
+              />
+              <div
+                onClick={() => {
+                  const tg = task.targets.filter((_, k) => k !== j);
+                  onChange({ ...task, targets: tg.length ? tg : [{ type: "Local", path: "" }] });
+                }}
+                className="inline-flex h-[30px] w-[30px] flex-none cursor-pointer items-center justify-center rounded-[8px] border border-nexus-border2 bg-white text-[15px] text-[#b3a999] hover:bg-nexus-bg hover:text-nexus-crit"
+              >
+                −
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {task.action === "Copy" ? (
+        <div>
+          <div className="mb-[5px] text-[11px] font-semibold text-[#8a7d6c]">Schedule</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Segmented<"manual" | "cron">
+              className="bg-[#ece2d5]"
+              size="sm"
+              options={[
+                { value: "manual", label: "Manual" },
+                { value: "cron", label: "Schedule" },
+              ]}
+              value={isCron ? "cron" : "manual"}
+              onChange={(v) => onChange({ ...task, schedule: v === "manual" ? "manual" : isCron ? task.schedule : "0 5 * * *" })}
+            />
+            {isCron ? (
+              <Input
+                className="min-w-[120px] flex-1 rounded-[9px] px-[11px] py-2 font-mono text-[12px]"
+                placeholder="0 5 * * *"
+                value={task.schedule}
+                onChange={(e) => onChange({ ...task, schedule: e.target.value || " " })}
+              />
+            ) : null}
+          </div>
+          {isCron ? (
+            <div className="mt-[7px] flex flex-wrap gap-1.5">
+              {SCHEDULE_PRESETS.map((cp) => (
+                <Chip key={cp.expr} mono active={task.schedule === cp.expr} onClick={() => onChange({ ...task, schedule: cp.expr })}>
+                  {cp.expr}
+                </Chip>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }

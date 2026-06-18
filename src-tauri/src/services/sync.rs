@@ -373,6 +373,115 @@ impl SyncService {
         Ok(())
     }
 
+    pub fn delete_task_group(&self, id: String) -> AppResult<()> {
+        let id = required_trimmed(&id, "task group id")?;
+        let conn = self.db.connection()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT target
+            FROM tasks
+            WHERE group_id = ?1 AND action = 'Symlink' AND target_type = 'Local'
+            "#,
+        )?;
+        let targets: Vec<String> = stmt
+            .query_map([id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+
+        for target in &targets {
+            remove_symlink_if_present(Path::new(target))?;
+        }
+
+        conn.execute("DELETE FROM task_groups WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn add_task(&self, group_id: String, task: CreateTaskInput) -> AppResult<TaskGroup> {
+        let group_id = required_trimmed(&group_id, "task group id")?.to_string();
+        let prepared = prepare_task(&task)?;
+
+        let (group_exists, next_sort_index) = {
+            let conn = self.db.connection()?;
+            let exists = conn
+                .query_row(
+                    "SELECT 1 FROM task_groups WHERE id = ?1",
+                    [&group_id],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .is_some();
+            if !exists {
+                return Err(AppError::Validation("task group not found".to_string()));
+            }
+            let next: i64 = conn
+                .query_row(
+                    "SELECT COALESCE(MAX(sort_index), -1) + 1 FROM tasks WHERE group_id = ?1",
+                    [&group_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            (true, next)
+        };
+
+        let created_symlink = if prepared.action == "Symlink"
+            && prepared.source_type == "Local"
+            && prepared.target_type == "Local"
+        {
+            let source = Path::new(&prepared.source);
+            let target = Path::new(&prepared.target);
+            create_symlink_placement(source, target)
+                .inspect_err(|_| {
+                    let _ = remove_symlink_if_present(target);
+                })?;
+            Some(target.to_path_buf())
+        } else {
+            None
+        };
+
+        let result = (|| -> AppResult<TaskGroup> {
+            let now = now_epoch_seconds()?;
+            let mut conn = self.db.connection()?;
+            let tx = conn.transaction()?;
+            tx.execute(
+                r#"
+                INSERT INTO tasks (
+                    id, group_id, direction, action, source_type, source, target_type, target,
+                    schedule, sort_index, last_status, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'never', ?11, ?11)
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    group_id,
+                    prepared.direction,
+                    prepared.action,
+                    prepared.source_type,
+                    prepared.source,
+                    prepared.target_type,
+                    prepared.target,
+                    prepared.schedule,
+                    next_sort_index,
+                    now,
+                ],
+            )?;
+            tx.commit()?;
+            drop(conn);
+
+            self.list_task_groups()?
+                .into_iter()
+                .find(|group| group.id == group_id)
+                .ok_or_else(|| AppError::Internal("updated task group was not found".to_string()))
+        })();
+
+        if result.is_err() {
+            if let Some(target) = created_symlink {
+                let _ = remove_symlink_if_present(&target);
+            }
+        }
+
+        result
+    }
+
     pub fn delete_project_symlink(&self, target_path: String) -> AppResult<()> {
         let target_path = required_trimmed(&target_path, "project symlink target path")?;
         remove_symlink(Path::new(target_path))

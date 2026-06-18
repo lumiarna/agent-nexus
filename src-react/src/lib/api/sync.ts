@@ -15,6 +15,15 @@ export interface CreateTaskGroupInput {
   tasks: CreateTaskInput[];
 }
 
+export interface AddTaskInput {
+  action: TaskAction;
+  sourceType: LocationType;
+  source: string;
+  targetType: LocationType;
+  target: string;
+  schedule: string;
+}
+
 export interface SaveWebdavSettingsInput {
   url: string;
   user: string;
@@ -40,6 +49,12 @@ export const syncApi = {
   },
   deleteTask(id: string): Promise<void> {
     return invokeCommand<void>("delete_task", { id });
+  },
+  deleteTaskGroup(id: string): Promise<void> {
+    return invokeCommand<void>("delete_task_group", { id });
+  },
+  addTask(groupId: string, task: AddTaskInput): Promise<TaskGroup> {
+    return invokeCommand<TaskGroup>("add_task", { groupId, task });
   },
   runTask(id: string): Promise<TaskGroup["tasks"][number]> {
     return invokeCommand<TaskGroup["tasks"][number]>("run_task", { id });

@@ -3,7 +3,8 @@ use tauri::State;
 use crate::{
     error::AppResult,
     services::sync::{
-        CreateTaskGroupInput, ProjectSymlink, Task, TaskGroup, WebdavSettings, WebdavSettingsInput,
+        CreateTaskGroupInput, CreateTaskInput, ProjectSymlink, Task, TaskGroup, WebdavSettings,
+        WebdavSettingsInput,
     },
     store::AppState,
 };
@@ -45,6 +46,20 @@ pub fn create_task_group(
 #[tauri::command]
 pub fn delete_task(state: State<'_, AppState>, id: String) -> AppResult<()> {
     state.sync.delete_task(id)
+}
+
+#[tauri::command]
+pub fn delete_task_group(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    state.sync.delete_task_group(id)
+}
+
+#[tauri::command]
+pub fn add_task(
+    state: State<'_, AppState>,
+    group_id: String,
+    task: CreateTaskInput,
+) -> AppResult<TaskGroup> {
+    state.sync.add_task(group_id, task)
 }
 
 #[tauri::command]

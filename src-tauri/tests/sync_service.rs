@@ -435,6 +435,326 @@ fn deletes_symlink_task_and_its_local_symlink_placement() {
 }
 
 #[test]
+fn deletes_task_group_and_its_symlink_placements() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("source");
+    let target_link = root.path().join("target-link");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Symlinks".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Symlink".to_string(),
+                source_type: "Local".to_string(),
+                source: source_dir.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: target_link.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    sync.delete_task_group(created.id.clone())
+        .expect("delete task group");
+
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert!(groups.is_empty());
+    assert!(!target_link.exists());
+}
+
+#[test]
+fn deletes_task_group_with_copy_task_without_touching_source() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_file = root.path().join("source.txt");
+    fs::write(&source_file, "payload").expect("write source file");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Copy group".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: source_file.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: root.path().join("copied.txt").to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    sync.delete_task_group(created.id.clone())
+        .expect("delete task group");
+
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert!(groups.is_empty());
+    assert!(source_file.exists());
+    assert_eq!(
+        fs::read_to_string(&source_file).expect("read source file"),
+        "payload"
+    );
+}
+
+#[test]
+fn deletes_mixed_task_group_cleans_symlink_but_preserves_copy_source() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let link_source = root.path().join("link-source");
+    let target_link = root.path().join("target-link");
+    let copy_source = root.path().join("copy-source.txt");
+    fs::create_dir_all(&link_source).expect("create link source dir");
+    fs::write(&copy_source, "copy-payload").expect("write copy source file");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Mixed".to_string(),
+            tasks: vec![
+                CreateTaskInput {
+                    action: "Symlink".to_string(),
+                    source_type: "Local".to_string(),
+                    source: link_source.to_string_lossy().into_owned(),
+                    target_type: "Local".to_string(),
+                    target: target_link.to_string_lossy().into_owned(),
+                    schedule: "manual".to_string(),
+                },
+                CreateTaskInput {
+                    action: "Copy".to_string(),
+                    source_type: "Local".to_string(),
+                    source: copy_source.to_string_lossy().into_owned(),
+                    target_type: "Local".to_string(),
+                    target: root.path().join("copied.txt").to_string_lossy().into_owned(),
+                    schedule: "manual".to_string(),
+                },
+            ],
+        })
+        .expect("create task group");
+
+    sync.delete_task_group(created.id.clone())
+        .expect("delete task group");
+
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert!(groups.is_empty());
+    assert!(!target_link.exists());
+    assert!(copy_source.exists());
+    assert_eq!(
+        fs::read_to_string(&copy_source).expect("read copy source"),
+        "copy-payload"
+    );
+}
+
+#[test]
+fn deletes_unknown_task_group_id_is_idempotent() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+
+    sync.delete_task_group("nonexistent-id".to_string())
+        .expect("deleting unknown group is idempotent");
+
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert!(groups.is_empty());
+}
+
+#[test]
+fn adds_symlink_task_to_existing_group_and_creates_placement() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let first_source = root.path().join("first-source");
+    let first_link = root.path().join("first-link");
+    let second_source = root.path().join("second-source");
+    let second_link = root.path().join("second-link");
+    fs::create_dir_all(&first_source).expect("create first source dir");
+    fs::create_dir_all(&second_source).expect("create second source dir");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Links".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Symlink".to_string(),
+                source_type: "Local".to_string(),
+                source: first_source.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: first_link.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    let updated = sync
+        .add_task(
+            created.id.clone(),
+            CreateTaskInput {
+                action: "Symlink".to_string(),
+                source_type: "Local".to_string(),
+                source: second_source.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: second_link.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            },
+        )
+        .expect("add symlink task to group");
+
+    assert_eq!(updated.id, created.id);
+    assert_eq!(updated.tasks.len(), 2);
+    assert_eq!(updated.tasks[1].source, second_source.to_string_lossy());
+    assert_eq!(updated.tasks[1].target, second_link.to_string_lossy());
+    assert_eq!(updated.tasks[1].action, "Symlink");
+    assert_link_points_to(&second_source, &second_link);
+}
+
+#[test]
+fn adds_copy_task_appended_after_existing_tasks() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let first_source = root.path().join("first-source");
+    let first_link = root.path().join("first-link");
+    let copy_source = root.path().join("copy-source.txt");
+    fs::create_dir_all(&first_source).expect("create first source dir");
+    fs::write(&copy_source, "payload").expect("write copy source");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Mixed".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Symlink".to_string(),
+                source_type: "Local".to_string(),
+                source: first_source.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: first_link.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    let updated = sync
+        .add_task(
+            created.id.clone(),
+            CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: copy_source.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: root.path().join("copied.txt").to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            },
+        )
+        .expect("add copy task to group");
+
+    assert_eq!(updated.tasks.len(), 2);
+    assert_eq!(updated.tasks[0].action, "Symlink");
+    assert_eq!(updated.tasks[1].action, "Copy");
+    assert_eq!(updated.tasks[1].source, copy_source.to_string_lossy());
+}
+
+#[test]
+fn rejects_add_task_to_unknown_group() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+
+    let error = sync
+        .add_task(
+            "nonexistent-group".to_string(),
+            CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: "/tmp/source".to_string(),
+                target_type: "Local".to_string(),
+                target: "/tmp/target".to_string(),
+                schedule: "manual".to_string(),
+            },
+        )
+        .expect_err("adding task to unknown group should fail");
+
+    assert!(error.to_string().contains("task group not found"));
+}
+
+#[test]
+fn rejects_add_cloud_to_cloud_task_without_creating_placement() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("source");
+    let target_link = root.path().join("target-link");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Group".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Symlink".to_string(),
+                source_type: "Local".to_string(),
+                source: source_dir.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: target_link.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    let error = sync
+        .add_task(
+            created.id.clone(),
+            CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Cloud".to_string(),
+                source: "config".to_string(),
+                target_type: "Cloud".to_string(),
+                target: "backup/config".to_string(),
+                schedule: "manual".to_string(),
+            },
+        )
+        .expect_err("cloud to cloud add task should fail");
+
+    assert!(error.to_string().contains("Cloud to Cloud"));
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].tasks.len(), 1);
+}
+
+#[test]
+fn rejects_add_scheduled_task_without_creating_placement() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("source");
+    let target_link = root.path().join("target-link");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Group".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Symlink".to_string(),
+                source_type: "Local".to_string(),
+                source: source_dir.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: target_link.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+    let new_target = root.path().join("new-link");
+
+    let error = sync
+        .add_task(
+            created.id.clone(),
+            CreateTaskInput {
+                action: "Symlink".to_string(),
+                source_type: "Local".to_string(),
+                source: source_dir.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: new_target.to_string_lossy().into_owned(),
+                schedule: "0 5 * * *".to_string(),
+            },
+        )
+        .expect_err("scheduled add task should fail");
+
+    assert!(error.to_string().contains("scheduled sync tasks"));
+    assert!(!new_target.exists());
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert_eq!(groups[0].tasks.len(), 1);
+}
+
+#[test]
 fn deletes_scanned_project_symlink_without_task_record() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
