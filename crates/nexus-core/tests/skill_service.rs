@@ -1,6 +1,6 @@
 use std::{env, fs, path::Path, sync::Arc};
 
-use agent_nexus_lib::{
+use nexus_core::{
     database::Database,
     services::{
         paths,

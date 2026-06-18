@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 5;
+const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
 const NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
@@ -31,6 +31,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         }
         if current < 5 {
             migrate_to_v5(conn)?;
+        }
+        if current < 6 {
+            migrate_to_v6(conn)?;
         }
     }
 
@@ -63,7 +66,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (5);
+        INSERT INTO schema_version (version) VALUES (6);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -188,7 +191,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             group_id TEXT NOT NULL,
             direction TEXT NOT NULL
                 CHECK (direction IN ('Distribution', 'Push', 'Pull')),
-            action TEXT NOT NULL CHECK (action IN ('Symlink', 'Copy')),
+            action TEXT NOT NULL CHECK (action IN ('Symlink', 'Junction', 'Copy')),
             source_type TEXT NOT NULL CHECK (source_type IN ('Local', 'Cloud')),
             source TEXT NOT NULL,
             target_type TEXT NOT NULL CHECK (target_type IN ('Local', 'Cloud')),
@@ -281,7 +284,7 @@ fn migrate_to_v3(conn: &Connection) -> AppResult<()> {
             group_id TEXT NOT NULL,
             direction TEXT NOT NULL
                 CHECK (direction IN ('Distribution', 'Push', 'Pull')),
-            action TEXT NOT NULL CHECK (action IN ('Symlink', 'Copy')),
+            action TEXT NOT NULL CHECK (action IN ('Symlink', 'Junction', 'Copy')),
             source_type TEXT NOT NULL CHECK (source_type IN ('Local', 'Cloud')),
             source TEXT NOT NULL,
             target_type TEXT NOT NULL CHECK (target_type IN ('Local', 'Cloud')),
@@ -376,6 +379,47 @@ fn migrate_to_v5(conn: &Connection) -> AppResult<()> {
     }
 }
 
+fn migrate_to_v6(conn: &Connection) -> AppResult<()> {
+    // Promote Junction to a first-class task action. SQLite cannot alter a CHECK
+    // constraint in place, so rebuild `tasks` with the widened constraint while
+    // preserving existing rows.
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        CREATE TABLE tasks_v6 (
+            id TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL,
+            direction TEXT NOT NULL
+                CHECK (direction IN ('Distribution', 'Push', 'Pull')),
+            action TEXT NOT NULL CHECK (action IN ('Symlink', 'Junction', 'Copy')),
+            source_type TEXT NOT NULL CHECK (source_type IN ('Local', 'Cloud')),
+            source TEXT NOT NULL,
+            target_type TEXT NOT NULL CHECK (target_type IN ('Local', 'Cloud')),
+            target TEXT NOT NULL,
+            schedule TEXT NOT NULL DEFAULT 'manual',
+            sort_index INTEGER,
+            last_run_at INTEGER,
+            last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
+        );
+        INSERT INTO tasks_v6 SELECT * FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_v6 RENAME TO tasks;
+        CREATE INDEX idx_tasks_group ON tasks(group_id);
+        UPDATE schema_version SET version = 6;
+        COMMIT;
+        "#,
+    )
+    .or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    Ok(())
+}
+
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
     if task_column_exists(conn, column)? {
         return Ok(());
@@ -411,11 +455,8 @@ mod tests {
             [],
         )
         .expect("create settings table");
-        conn.execute(
-            "CREATE TABLE schema_version (version INTEGER NOT NULL)",
-            [],
-        )
-        .expect("create schema_version table");
+        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", [])
+            .expect("create schema_version table");
         conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])
             .expect("seed schema_version 4");
         conn.execute(
@@ -470,5 +511,66 @@ mod tests {
             )
             .expect("read ignored dirs");
         assert_eq!(value, custom);
+    }
+
+    #[test]
+    fn migrate_to_v6_allows_junction_action_and_preserves_rows() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (5);
+            CREATE TABLE task_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                sort_index INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY,
+                group_id TEXT NOT NULL,
+                direction TEXT NOT NULL
+                    CHECK (direction IN ('Distribution', 'Push', 'Pull')),
+                action TEXT NOT NULL CHECK (action IN ('Symlink', 'Copy')),
+                source_type TEXT NOT NULL CHECK (source_type IN ('Local', 'Cloud')),
+                source TEXT NOT NULL,
+                target_type TEXT NOT NULL CHECK (target_type IN ('Local', 'Cloud')),
+                target TEXT NOT NULL,
+                schedule TEXT NOT NULL DEFAULT 'manual',
+                sort_index INTEGER,
+                last_run_at INTEGER,
+                last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
+            );
+            INSERT INTO task_groups (id, name, created_at, updated_at) VALUES ('g1', 'G', 0, 0);
+            INSERT INTO tasks (id, group_id, direction, action, source_type, source, target_type, target, schedule, created_at, updated_at)
+            VALUES ('t1', 'g1', 'Distribution', 'Symlink', 'Local', '/s', 'Local', '/t', 'manual', 0, 0);
+            "#,
+        )
+        .expect("seed v5 tasks");
+
+        migrate_to_v6(&conn).expect("migrate to v6");
+
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, 6);
+
+        let kept: String = conn
+            .query_row("SELECT action FROM tasks WHERE id = 't1'", [], |row| {
+                row.get(0)
+            })
+            .expect("existing row preserved");
+        assert_eq!(kept, "Symlink");
+
+        conn.execute(
+            "INSERT INTO tasks (id, group_id, direction, action, source_type, source, target_type, target, schedule, created_at, updated_at) \
+             VALUES ('t2', 'g1', 'Distribution', 'Junction', 'Local', '/s', 'Local', '/t2', 'manual', 0, 0)",
+            [],
+        )
+        .expect("rebuilt tasks table accepts Junction action");
     }
 }

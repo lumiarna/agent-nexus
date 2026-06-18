@@ -1,10 +1,7 @@
 pub mod commands;
-pub mod database;
-pub mod error;
-pub mod services;
 pub mod store;
 
-use database::Database;
+use nexus_core::database::Database;
 use store::AppState;
 use tauri::Manager;
 
@@ -19,6 +16,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app::get_desktop_health,
+            commands::app::get_platform,
             commands::projects::list_git_base_folders,
             commands::projects::list_projects,
             commands::projects::record_git_base_folder,

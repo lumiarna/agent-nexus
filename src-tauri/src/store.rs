@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{
+use nexus_core::{
     database::Database,
     services::{projects::ProjectService, skills::SkillService, sync::SyncService},
 };

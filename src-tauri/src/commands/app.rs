@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::error::AppResult;
+use nexus_core::error::AppResult;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,4 +17,11 @@ pub fn get_desktop_health() -> AppResult<DesktopHealth> {
         app_name: "Agent Nexus",
         app_version: env!("CARGO_PKG_VERSION"),
     })
+}
+
+/// Host OS identifier (`windows` / `macos` / `linux` / ...). Drives platform-only
+/// UI affordances such as hiding the Junction action where it is unsupported.
+#[tauri::command]
+pub fn get_platform() -> &'static str {
+    std::env::consts::OS
 }

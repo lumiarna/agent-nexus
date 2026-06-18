@@ -1,8 +1,3 @@
-__sessions/
-.agents/
-
-.DS_Store
-
 # build
 node_modules/
 dist/

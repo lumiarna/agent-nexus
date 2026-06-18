@@ -1,10 +1,11 @@
 use tauri::State;
 
-use crate::{
+use nexus_core::{
     error::AppResult,
     services::skills::{SetSkillTargetInput, Skill},
-    store::AppState,
 };
+
+use crate::store::AppState;
 
 #[tauri::command]
 pub fn list_skills(state: State<'_, AppState>) -> AppResult<Vec<Skill>> {

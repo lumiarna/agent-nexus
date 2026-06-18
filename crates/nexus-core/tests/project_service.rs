@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use agent_nexus_lib::{
+use nexus_core::{
     database::Database,
     services::{paths, projects::ProjectService},
 };

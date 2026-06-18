@@ -15,7 +15,10 @@ use crate::{
     database::Database,
     error::{AppError, AppResult},
     services::paths,
-    services::symlink::{create_symlink_placement, remove_symlink, remove_symlink_if_present},
+    services::symlink::{
+        create_junction_placement, create_symlink_placement, remove_symlink,
+        remove_symlink_if_present,
+    },
     services::webdav,
 };
 
@@ -60,6 +63,7 @@ pub struct ProjectSymlink {
     pub target_path: String,
     pub target_project_id: Option<String>,
     pub target_project_name: Option<String>,
+    pub link_type: String,
     pub link_kind: String,
     pub status: String,
 }
@@ -232,9 +236,9 @@ impl SyncService {
         }
 
         links.sort_by(|left, right| {
-            left.target_path
-                .cmp(&right.target_path)
-                .then_with(|| left.source_path.cmp(&right.source_path))
+            left.source_path
+                .cmp(&right.source_path)
+                .then_with(|| left.target_path.cmp(&right.target_path))
         });
         Ok(links)
     }
@@ -283,7 +287,7 @@ impl SyncService {
             .iter()
             .map(prepare_task)
             .collect::<AppResult<Vec<_>>>()?;
-        let created_symlinks = create_symlink_placements(&tasks)?;
+        let created_symlinks = create_link_placements(&tasks)?;
 
         let result = (|| -> AppResult<TaskGroup> {
             let now = now_epoch_seconds()?;
@@ -365,7 +369,7 @@ impl SyncService {
             return Ok(());
         };
 
-        if action == "Symlink" && target_type == "Local" {
+        if (action == "Symlink" || action == "Junction") && target_type == "Local" {
             remove_symlink_if_present(Path::new(&target))?;
         }
 
@@ -380,7 +384,7 @@ impl SyncService {
             r#"
             SELECT target
             FROM tasks
-            WHERE group_id = ?1 AND action = 'Symlink' AND target_type = 'Local'
+            WHERE group_id = ?1 AND action IN ('Symlink', 'Junction') AND target_type = 'Local'
             "#,
         )?;
         let targets: Vec<String> = stmt
@@ -400,7 +404,7 @@ impl SyncService {
         let group_id = required_trimmed(&group_id, "task group id")?.to_string();
         let prepared = prepare_task(&task)?;
 
-        let (group_exists, next_sort_index) = {
+        let next_sort_index = {
             let conn = self.db.connection()?;
             let exists = conn
                 .query_row(
@@ -420,22 +424,26 @@ impl SyncService {
                     |row| row.get(0),
                 )
                 .unwrap_or(0);
-            (true, next)
+            next
         };
 
-        let created_symlink = if prepared.action == "Symlink"
-            && prepared.source_type == "Local"
-            && prepared.target_type == "Local"
-        {
-            let source = Path::new(&prepared.source);
-            let target = Path::new(&prepared.target);
-            create_symlink_placement(source, target)
-                .inspect_err(|_| {
+        let created_link = match prepared.action.as_str() {
+            "Symlink" | "Junction"
+                if prepared.source_type == "Local" && prepared.target_type == "Local" =>
+            {
+                let source = Path::new(&prepared.source);
+                let target = Path::new(&prepared.target);
+                let result = if prepared.action == "Symlink" {
+                    create_symlink_placement(source, target)
+                } else {
+                    create_junction_placement(source, target)
+                };
+                result.inspect_err(|_| {
                     let _ = remove_symlink_if_present(target);
                 })?;
-            Some(target.to_path_buf())
-        } else {
-            None
+                Some(target.to_path_buf())
+            }
+            _ => None,
         };
 
         let result = (|| -> AppResult<TaskGroup> {
@@ -474,7 +482,7 @@ impl SyncService {
         })();
 
         if result.is_err() {
-            if let Some(target) = created_symlink {
+            if let Some(target) = created_link {
                 let _ = remove_symlink_if_present(&target);
             }
         }
@@ -623,7 +631,7 @@ impl SyncService {
 }
 
 fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
-    let action = validate_one_of(&task.action, &["Symlink", "Copy"], "task action")?;
+    let action = validate_one_of(&task.action, &["Symlink", "Junction", "Copy"], "task action")?;
     let source_type = validate_one_of(&task.source_type, &["Local", "Cloud"], "source type")?;
     let target_type = validate_one_of(&task.target_type, &["Local", "Cloud"], "target type")?;
     if source_type == "Cloud" && target_type == "Cloud" {
@@ -633,9 +641,16 @@ fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
     }
     let source = required_trimmed(&task.source, "task source")?;
     let target = required_trimmed(&task.target, "task target")?;
-    if action == "Symlink" && (source_type != "Local" || target_type != "Local") {
+    if (action == "Symlink" || action == "Junction")
+        && (source_type != "Local" || target_type != "Local")
+    {
         return Err(AppError::Validation(
-            "symlink tasks require local source and target".to_string(),
+            "symlink and junction tasks require local source and target".to_string(),
+        ));
+    }
+    if action == "Junction" && !cfg!(target_os = "windows") {
+        return Err(AppError::Validation(
+            "Junction links are only supported on Windows".to_string(),
         ));
     }
     let schedule = task.schedule.trim();
@@ -820,19 +835,18 @@ fn upsert_setting(conn: &rusqlite::Connection, key: &str, value: &str) -> AppRes
     Ok(())
 }
 
-fn create_symlink_placements(tasks: &[PreparedTask]) -> AppResult<Vec<PathBuf>> {
+fn create_link_placements(tasks: &[PreparedTask]) -> AppResult<Vec<PathBuf>> {
     let mut created = Vec::new();
 
     for task in tasks {
-        if task.action != "Symlink" {
-            continue;
-        }
-
         let source = Path::new(&task.source);
         let target = Path::new(&task.target);
-        create_symlink_placement(source, target).inspect_err(|_| {
-            remove_created_symlinks(&created);
-        })?;
+        let result = match task.action.as_str() {
+            "Symlink" => create_symlink_placement(source, target),
+            "Junction" => create_junction_placement(source, target),
+            _ => continue,
+        };
+        result.inspect_err(|_| remove_created_symlinks(&created))?;
         created.push(target.to_path_buf());
     }
 
@@ -938,11 +952,7 @@ fn collect_project_symlinks(
     collect_symlinks_in_dir(&mut ctx, &project.path, 0)
 }
 
-fn collect_symlinks_in_dir(
-    ctx: &mut ScanContext<'_>,
-    dir: &Path,
-    depth: usize,
-) -> AppResult<()> {
+fn collect_symlinks_in_dir(ctx: &mut ScanContext<'_>, dir: &Path, depth: usize) -> AppResult<()> {
     if depth >= ctx.max_depth {
         return Ok(());
     }
@@ -971,10 +981,16 @@ fn collect_symlinks_in_dir(
         };
 
         if metadata.file_type().is_symlink() {
-            if let Some(link) = project_symlink_for_entry(&path, ctx.target_project, ctx.projects) {
-                if ctx.seen_targets.insert(link.target_path.clone()) {
-                    ctx.links.push(link);
-                }
+            if let Ok(raw_source) = fs::read_link(&path) {
+                push_project_symlink(ctx, &path, "Symlink", raw_source);
+            }
+            continue;
+        }
+
+        #[cfg(windows)]
+        if junction::exists(&path).unwrap_or(false) {
+            if let Ok(raw_source) = junction::get_target(&path) {
+                push_project_symlink(ctx, &path, "Junction", raw_source);
             }
             continue;
         }
@@ -987,13 +1003,31 @@ fn collect_symlinks_in_dir(
     Ok(())
 }
 
+fn push_project_symlink(
+    ctx: &mut ScanContext<'_>,
+    path: &Path,
+    link_type: &str,
+    raw_source: PathBuf,
+) {
+    if let Some(link) =
+        project_symlink_for_entry(path, link_type, raw_source, ctx.target_project, ctx.projects)
+    {
+        if ctx.seen_targets.insert(link.target_path.clone()) {
+            ctx.links.push(link);
+        }
+    }
+}
+
 fn project_symlink_for_entry(
     path: &Path,
+    link_type: &str,
+    raw_source: PathBuf,
     target_project: &ProjectRoot,
     projects: &[ProjectRoot],
 ) -> Option<ProjectSymlink> {
     let target_path = path_to_string(path).ok()?;
-    project_symlink_from_path(path, target_project, projects, target_path).ok()
+    project_symlink_from_path(path, link_type, raw_source, target_project, projects, target_path)
+        .ok()
 }
 
 fn parse_ignored_dirs(value: &str) -> HashSet<String> {
@@ -1007,11 +1041,12 @@ fn parse_ignored_dirs(value: &str) -> HashSet<String> {
 
 fn project_symlink_from_path(
     path: &Path,
+    link_type: &str,
+    raw_source: PathBuf,
     target_project: &ProjectRoot,
     projects: &[ProjectRoot],
     target_path: String,
 ) -> AppResult<ProjectSymlink> {
-    let raw_source = fs::read_link(path)?;
     let resolved_source = if raw_source.is_absolute() {
         raw_source
     } else {
@@ -1042,6 +1077,7 @@ fn project_symlink_from_path(
         target_path,
         target_project_id: Some(target_project.id.clone()),
         target_project_name: Some(target_project.name.clone()),
+        link_type: link_type.to_string(),
         link_kind: link_kind(source_for_metadata),
         status: if source_exists { "ok" } else { "missing" }.to_string(),
     })

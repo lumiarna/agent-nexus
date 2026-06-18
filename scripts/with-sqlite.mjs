@@ -10,6 +10,7 @@ if (args.length === 0) {
 }
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const commandArgsBase64 = args.map((arg) => Buffer.from(arg, "utf8").toString("base64")).join(",");
 
 if (process.platform !== "win32" && args[0] === "--setup-only") {
   process.exit(0);
@@ -25,7 +26,7 @@ const result =
           "Bypass",
           "-File",
           resolve(repoRoot, "scripts", "with-sqlite-windows.ps1"),
-          ...(args[0] === "--setup-only" ? ["-SetupOnly"] : args),
+          ...(args[0] === "--setup-only" ? ["-SetupOnly"] : ["-CommandArgsBase64", commandArgsBase64]),
         ],
         { cwd: repoRoot, stdio: "inherit" },
       )

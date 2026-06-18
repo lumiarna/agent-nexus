@@ -7,12 +7,11 @@ use std::{
     thread::JoinHandle,
 };
 
-use agent_nexus_lib::{
+use nexus_core::{
     database::Database,
     services::{
         paths,
         projects::ProjectService,
-        symlink::create_symlink_placement,
         sync::{CreateTaskGroupInput, CreateTaskInput, SyncService},
     },
 };
@@ -52,8 +51,21 @@ fn git_repo(parent: &TempDir, name: &str) -> String {
     path.to_string_lossy().into_owned()
 }
 
+// Windows symbolic links require elevation, so tests exercise the privilege-free
+// Junction action there; Unix uses Symlink. Both produce a directory link that the
+// scan and task lifecycle treat uniformly.
+#[cfg(windows)]
+const LINK_ACTION: &str = "Junction";
+#[cfg(not(windows))]
+const LINK_ACTION: &str = "Symlink";
+
 fn create_directory_link(source: &Path, target: &Path) {
-    create_symlink_placement(source, target).expect("create directory link");
+    #[cfg(windows)]
+    nexus_core::services::symlink::create_junction_placement(source, target)
+        .expect("create junction link");
+    #[cfg(not(windows))]
+    nexus_core::services::symlink::create_symlink_placement(source, target)
+        .expect("create symlink link");
 }
 
 fn canonical_display_path(path: impl AsRef<Path>) -> String {
@@ -66,19 +78,9 @@ fn display_path(path: &Path) -> String {
 }
 
 fn assert_link_points_to(source: &Path, target: &Path) {
-    let metadata = fs::symlink_metadata(target).expect("read target link metadata");
-    assert!(metadata.file_type().is_symlink());
-    let raw_link = fs::read_link(target).expect("read target link");
-    let resolved = if raw_link.is_absolute() {
-        raw_link
-    } else {
-        target
-            .parent()
-            .map(|parent| parent.join(&raw_link))
-            .unwrap_or(raw_link)
-    };
+    // Works for both symlinks and junctions: canonicalize resolves either to the source.
     assert_eq!(
-        fs::canonicalize(resolved).expect("canonicalize resolved link"),
+        fs::canonicalize(target).expect("canonicalize target link"),
         fs::canonicalize(source).expect("canonicalize source")
     );
 }
@@ -163,7 +165,7 @@ fn saves_and_reads_webdav_settings() {
     let sync = SyncService::new(db);
 
     let saved = sync
-        .save_webdav_settings(agent_nexus_lib::services::sync::WebdavSettingsInput {
+        .save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
             url: " https://dav.example.com/root/ ".to_string(),
             user: " alice ".to_string(),
             pass: "secret".to_string(),
@@ -187,7 +189,7 @@ fn defaults_blank_webdav_remote_root() {
     let sync = SyncService::new(db);
 
     let saved = sync
-        .save_webdav_settings(agent_nexus_lib::services::sync::WebdavSettingsInput {
+        .save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
             url: "https://dav.example.com/root/".to_string(),
             user: "alice".to_string(),
             pass: "secret".to_string(),
@@ -207,7 +209,7 @@ async fn tests_webdav_connection_and_creates_remote_root() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db);
 
-    sync.test_webdav_connection(agent_nexus_lib::services::sync::WebdavSettingsInput {
+    sync.test_webdav_connection(nexus_core::services::sync::WebdavSettingsInput {
         url,
         user: "alice".to_string(),
         pass: "secret".to_string(),
@@ -236,7 +238,7 @@ async fn runs_local_file_copy_task_to_webdav() {
     fs::write(&source_file, "theme = 'dark'\n").expect("write source file");
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db);
-    sync.save_webdav_settings(agent_nexus_lib::services::sync::WebdavSettingsInput {
+    sync.save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
         url,
         user: "alice".to_string(),
         pass: "secret".to_string(),
@@ -289,7 +291,7 @@ async fn runs_local_directory_copy_task_to_webdav() {
     fs::write(source_dir.join("config"), "Host *\n").expect("write source file");
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db);
-    sync.save_webdav_settings(agent_nexus_lib::services::sync::WebdavSettingsInput {
+    sync.save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
         url,
         user: "alice".to_string(),
         pass: "secret".to_string(),
@@ -351,7 +353,7 @@ fn creates_symlink_placement_and_lists_custom_task_group() {
     assert_eq!(groups[0].name, "TAP symlinks");
     assert_eq!(groups[0].tasks.len(), 1);
     assert_eq!(groups[0].tasks[0].direction, "Distribution");
-    assert_eq!(groups[0].tasks[0].action, "Symlink");
+    assert_eq!(groups[0].tasks[0].action, LINK_ACTION);
     assert_eq!(groups[0].tasks[0].source, source_dir.to_string_lossy());
     assert_eq!(groups[0].tasks[0].target, target_link.to_string_lossy());
     assert_eq!(groups[0].tasks[0].schedule, "manual");
@@ -416,7 +418,7 @@ fn deletes_symlink_task_and_its_local_symlink_placement() {
         .create_task_group(CreateTaskGroupInput {
             name: "Local symlink".to_string(),
             tasks: vec![CreateTaskInput {
-                action: "Symlink".to_string(),
+                action: LINK_ACTION.to_string(),
                 source_type: "Local".to_string(),
                 source: source_dir.to_string_lossy().into_owned(),
                 target_type: "Local".to_string(),
@@ -446,7 +448,7 @@ fn deletes_task_group_and_its_symlink_placements() {
         .create_task_group(CreateTaskGroupInput {
             name: "Symlinks".to_string(),
             tasks: vec![CreateTaskInput {
-                action: "Symlink".to_string(),
+                action: LINK_ACTION.to_string(),
                 source_type: "Local".to_string(),
                 source: source_dir.to_string_lossy().into_owned(),
                 target_type: "Local".to_string(),
@@ -479,7 +481,11 @@ fn deletes_task_group_with_copy_task_without_touching_source() {
                 source_type: "Local".to_string(),
                 source: source_file.to_string_lossy().into_owned(),
                 target_type: "Local".to_string(),
-                target: root.path().join("copied.txt").to_string_lossy().into_owned(),
+                target: root
+                    .path()
+                    .join("copied.txt")
+                    .to_string_lossy()
+                    .into_owned(),
                 schedule: "manual".to_string(),
             }],
         })
@@ -512,7 +518,7 @@ fn deletes_mixed_task_group_cleans_symlink_but_preserves_copy_source() {
             name: "Mixed".to_string(),
             tasks: vec![
                 CreateTaskInput {
-                    action: "Symlink".to_string(),
+                    action: LINK_ACTION.to_string(),
                     source_type: "Local".to_string(),
                     source: link_source.to_string_lossy().into_owned(),
                     target_type: "Local".to_string(),
@@ -524,7 +530,11 @@ fn deletes_mixed_task_group_cleans_symlink_but_preserves_copy_source() {
                     source_type: "Local".to_string(),
                     source: copy_source.to_string_lossy().into_owned(),
                     target_type: "Local".to_string(),
-                    target: root.path().join("copied.txt").to_string_lossy().into_owned(),
+                    target: root
+                        .path()
+                        .join("copied.txt")
+                        .to_string_lossy()
+                        .into_owned(),
                     schedule: "manual".to_string(),
                 },
             ],
@@ -571,7 +581,7 @@ fn adds_symlink_task_to_existing_group_and_creates_placement() {
         .create_task_group(CreateTaskGroupInput {
             name: "Links".to_string(),
             tasks: vec![CreateTaskInput {
-                action: "Symlink".to_string(),
+                action: LINK_ACTION.to_string(),
                 source_type: "Local".to_string(),
                 source: first_source.to_string_lossy().into_owned(),
                 target_type: "Local".to_string(),
@@ -585,7 +595,7 @@ fn adds_symlink_task_to_existing_group_and_creates_placement() {
         .add_task(
             created.id.clone(),
             CreateTaskInput {
-                action: "Symlink".to_string(),
+                action: LINK_ACTION.to_string(),
                 source_type: "Local".to_string(),
                 source: second_source.to_string_lossy().into_owned(),
                 target_type: "Local".to_string(),
@@ -599,7 +609,7 @@ fn adds_symlink_task_to_existing_group_and_creates_placement() {
     assert_eq!(updated.tasks.len(), 2);
     assert_eq!(updated.tasks[1].source, second_source.to_string_lossy());
     assert_eq!(updated.tasks[1].target, second_link.to_string_lossy());
-    assert_eq!(updated.tasks[1].action, "Symlink");
+    assert_eq!(updated.tasks[1].action, LINK_ACTION);
     assert_link_points_to(&second_source, &second_link);
 }
 
@@ -617,7 +627,7 @@ fn adds_copy_task_appended_after_existing_tasks() {
         .create_task_group(CreateTaskGroupInput {
             name: "Mixed".to_string(),
             tasks: vec![CreateTaskInput {
-                action: "Symlink".to_string(),
+                action: LINK_ACTION.to_string(),
                 source_type: "Local".to_string(),
                 source: first_source.to_string_lossy().into_owned(),
                 target_type: "Local".to_string(),
@@ -635,14 +645,18 @@ fn adds_copy_task_appended_after_existing_tasks() {
                 source_type: "Local".to_string(),
                 source: copy_source.to_string_lossy().into_owned(),
                 target_type: "Local".to_string(),
-                target: root.path().join("copied.txt").to_string_lossy().into_owned(),
+                target: root
+                    .path()
+                    .join("copied.txt")
+                    .to_string_lossy()
+                    .into_owned(),
                 schedule: "manual".to_string(),
             },
         )
         .expect("add copy task to group");
 
     assert_eq!(updated.tasks.len(), 2);
-    assert_eq!(updated.tasks[0].action, "Symlink");
+    assert_eq!(updated.tasks[0].action, LINK_ACTION);
     assert_eq!(updated.tasks[1].action, "Copy");
     assert_eq!(updated.tasks[1].source, copy_source.to_string_lossy());
 }
@@ -681,7 +695,7 @@ fn rejects_add_cloud_to_cloud_task_without_creating_placement() {
         .create_task_group(CreateTaskGroupInput {
             name: "Group".to_string(),
             tasks: vec![CreateTaskInput {
-                action: "Symlink".to_string(),
+                action: LINK_ACTION.to_string(),
                 source_type: "Local".to_string(),
                 source: source_dir.to_string_lossy().into_owned(),
                 target_type: "Local".to_string(),
@@ -723,7 +737,7 @@ fn rejects_add_scheduled_task_without_creating_placement() {
         .create_task_group(CreateTaskGroupInput {
             name: "Group".to_string(),
             tasks: vec![CreateTaskInput {
-                action: "Symlink".to_string(),
+                action: LINK_ACTION.to_string(),
                 source_type: "Local".to_string(),
                 source: source_dir.to_string_lossy().into_owned(),
                 target_type: "Local".to_string(),
@@ -738,7 +752,7 @@ fn rejects_add_scheduled_task_without_creating_placement() {
         .add_task(
             created.id.clone(),
             CreateTaskInput {
-                action: "Symlink".to_string(),
+                action: LINK_ACTION.to_string(),
                 source_type: "Local".to_string(),
                 source: source_dir.to_string_lossy().into_owned(),
                 target_type: "Local".to_string(),
@@ -825,6 +839,10 @@ fn lists_project_symlinks_with_registered_source_and_target_projects() {
         )
     );
     assert_eq!(links[0].status, "ok");
+    #[cfg(windows)]
+    assert_eq!(links[0].link_type, "Junction");
+    #[cfg(not(windows))]
+    assert_eq!(links[0].link_type, "Symlink");
 }
 
 #[test]
@@ -958,7 +976,10 @@ fn respects_max_depth_setting() {
     fs::create_dir_all(repo_root.join("d1").join("d2").join("d3")).expect("create d3");
     create_directory_link(&source_dir, &repo_root.join("l1-link"));
     create_directory_link(&source_dir, &repo_root.join("d1").join("l2-link"));
-    create_directory_link(&source_dir, &repo_root.join("d1").join("d2").join("l3-link"));
+    create_directory_link(
+        &source_dir,
+        &repo_root.join("d1").join("d2").join("l3-link"),
+    );
     create_directory_link(
         &source_dir,
         &repo_root.join("d1").join("d2").join("d3").join("l4-link"),
@@ -967,12 +988,28 @@ fn respects_max_depth_setting() {
     projects.record_project(repo).expect("record project");
 
     let links = sync.list_project_symlinks().expect("list project symlinks");
-    let has = |suffix: &str| links.iter().any(|l| Path::new(&l.target_path).ends_with(suffix));
+    let has = |suffix: &str| {
+        links
+            .iter()
+            .any(|l| Path::new(&l.target_path).ends_with(suffix))
+    };
 
-    assert!(has("l1-link"), "depth 1 link should be listed at max_depth 3, got {links:?}");
-    assert!(has("l2-link"), "depth 2 link should be listed at max_depth 3, got {links:?}");
-    assert!(has("l3-link"), "depth 3 link should be listed at max_depth 3, got {links:?}");
-    assert!(!has("l4-link"), "depth 4 link should be skipped at max_depth 3, got {links:?}");
+    assert!(
+        has("l1-link"),
+        "depth 1 link should be listed at max_depth 3, got {links:?}"
+    );
+    assert!(
+        has("l2-link"),
+        "depth 2 link should be listed at max_depth 3, got {links:?}"
+    );
+    assert!(
+        has("l3-link"),
+        "depth 3 link should be listed at max_depth 3, got {links:?}"
+    );
+    assert!(
+        !has("l4-link"),
+        "depth 4 link should be skipped at max_depth 3, got {links:?}"
+    );
 }
 
 #[test]
@@ -997,7 +1034,9 @@ fn skips_links_beyond_default_max_depth_without_setting_override() {
 
     let links = sync.list_project_symlinks().expect("list project symlinks");
     assert!(
-        links.iter().any(|l| Path::new(&l.target_path).ends_with("l1-link")),
+        links
+            .iter()
+            .any(|l| Path::new(&l.target_path).ends_with("l1-link")),
         "shallow link should be listed under default max_depth, got {links:?}"
     );
     assert!(

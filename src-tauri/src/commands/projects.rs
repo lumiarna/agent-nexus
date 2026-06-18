@@ -1,10 +1,11 @@
 use tauri::State;
 
-use crate::{
+use nexus_core::{
     error::AppResult,
     services::projects::{DiscoveredRepo, GitBaseFolder, Project},
-    store::AppState,
 };
+
+use crate::store::AppState;
 
 #[tauri::command]
 pub fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<Project>> {

@@ -2,6 +2,8 @@
 param(
     [switch] $SetupOnly,
 
+    [string] $CommandArgsBase64,
+
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]] $Command
 )
@@ -134,7 +136,7 @@ function Ensure-SqliteFiles {
 }
 
 function Copy-RuntimeDll {
-    $targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $TauriRoot "target" }
+    $targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $RepoRoot "target" }
     foreach ($profile in @("debug", "release")) {
         $dir = Join-Path $targetRoot $profile
         if (Test-Path -LiteralPath $dir) {
@@ -151,6 +153,14 @@ $env:AGENT_NEXUS_SQLITE3_VERSION = $SQLiteVersion
 $env:AGENT_NEXUS_SQLITE3_DLL = $DllPath
 
 Copy-RuntimeDll
+
+if ($CommandArgsBase64) {
+    $Command = @(
+        $CommandArgsBase64 -split "," |
+            Where-Object { $_ } |
+            ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_)) }
+    )
+}
 
 if ($SetupOnly -or $Command.Count -eq 0) {
     Write-Output "SQLITE3_LIB_DIR=$LibDir"

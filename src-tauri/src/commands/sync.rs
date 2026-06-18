@@ -1,13 +1,14 @@
 use tauri::State;
 
-use crate::{
+use nexus_core::{
     error::AppResult,
     services::sync::{
         CreateTaskGroupInput, CreateTaskInput, ProjectSymlink, Task, TaskGroup, WebdavSettings,
         WebdavSettingsInput,
     },
-    store::AppState,
 };
+
+use crate::store::AppState;
 
 #[tauri::command]
 pub fn get_webdav_settings(state: State<'_, AppState>) -> AppResult<WebdavSettings> {
