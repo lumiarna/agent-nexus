@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+
 import { isTauriRuntime } from "@/lib/runtime";
 
 export async function invokeCommand<T>(
@@ -8,6 +10,5 @@ export async function invokeCommand<T>(
     throw new Error("Agent Nexus desktop runtime is required for this action.");
   }
 
-  const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(command, args);
 }

@@ -25,7 +25,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           unstyled: true,
           classNames: {
             toast:
-              "mx-auto flex items-center justify-center rounded-full bg-nexus-ink px-[18px] py-[11px] text-[12.5px] font-semibold text-nexus-bg shadow-[0_10px_30px_rgba(50,40,25,.32)]",
+              "mx-auto flex items-center justify-center rounded-full bg-nexus-ink px-[18px] py-[11px] text-[12.5px] font-semibold text-nexus-bg shadow-[0_10px 30px_rgba(50,40,25,.32)]",
           },
         }}
       />

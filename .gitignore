@@ -12,3 +12,4 @@ target/
 src-tauri/gen/schemas/
 src-tauri/vendor/sqlite/windows-x64/
 *.tsbuildinfo
+.pycache/

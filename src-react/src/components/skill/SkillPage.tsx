@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,13 +11,13 @@ import { skillsApi } from "@/lib/api/skills";
 import { nexus } from "@/lib/mock";
 import { useProjectsQuery } from "@/lib/query/projects";
 import {
-  useScanSkillsMutation,
   useSetSkillDisabledMutation,
   useSetSkillTargetMutation,
   useSkillsQuery,
 } from "@/lib/query/skills";
 import { isTauriRuntime } from "@/lib/runtime";
 import { toggleCellRole } from "@/lib/tokens";
+import { cn } from "@/lib/utils";
 import type { AgentName, Skill } from "@/types";
 
 type Scope = "global" | "project";
@@ -40,10 +40,8 @@ export function SkillPage() {
   const desktop = isTauriRuntime();
   const skillsQuery = useSkillsQuery();
   const projectsQuery = useProjectsQuery();
-  const scanSkills = useScanSkillsMutation();
   const setSkillTarget = useSetSkillTargetMutation();
   const setSkillDisabled = useSetSkillDisabledMutation();
-  const autoScanStarted = useRef(false);
   const [mockSkills, setMockSkills] = useState(() => nexus.skills());
   const [scope, setScope] = useState<Scope>("global");
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -55,16 +53,9 @@ export function SkillPage() {
     : mockProjects.current;
   const queryError =
     desktop && skillsQuery.error ? getErrorMessage(skillsQuery.error) : null;
-  const scanError =
-    desktop && scanSkills.error ? getErrorMessage(scanSkills.error) : null;
-  const pageError = queryError ?? scanError;
-  const isLoading = desktop && (skillsQuery.isLoading || scanSkills.isPending);
-
-  useEffect(() => {
-    if (!desktop || autoScanStarted.current) return;
-    autoScanStarted.current = true;
-    void scanSkills.mutateAsync().catch((error) => toast(getErrorMessage(error)));
-  }, [desktop, scanSkills]);
+  const pageError = queryError;
+  const isLoading = desktop && skillsQuery.isLoading;
+  const isRefreshing = desktop && skillsQuery.isFetching;
 
   async function scan() {
     if (!desktop) {
@@ -73,8 +64,10 @@ export function SkillPage() {
     }
 
     try {
-      const rows = await scanSkills.mutateAsync();
-      toast(`Scanned ${rows.length} ${rows.length === 1 ? "skill" : "skills"}`);
+      const result = await skillsQuery.refetch();
+      if (result.data) {
+        toast(`Refreshed ${result.data.length} ${result.data.length === 1 ? "skill" : "skills"}`);
+      }
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -183,10 +176,10 @@ export function SkillPage() {
             variant="subtle"
             size="sm"
             onClick={() => void scan()}
-            disabled={desktop && scanSkills.isPending}
+            disabled={isRefreshing}
           >
-            <RefreshCw size={14} />
-            Scan
+            <RefreshCw size={14} className={cn(isRefreshing && "animate-spin")} />
+            {isRefreshing ? "Refreshing..." : "Refresh"}
           </Button>
           <Segmented<Scope>
             options={[

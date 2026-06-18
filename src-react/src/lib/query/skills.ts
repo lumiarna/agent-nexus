@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { skillsApi, type SetSkillTargetInput } from "@/lib/api/skills";
-import { projectKeys } from "@/lib/query/projects";
 import { isTauriRuntime } from "@/lib/runtime";
 import type { Skill } from "@/types";
 
@@ -17,20 +16,9 @@ function replaceSkill(current: Skill[] | undefined, next: Skill): Skill[] {
 export function useSkillsQuery() {
   return useQuery({
     queryKey: skillKeys.all,
-    queryFn: skillsApi.list,
+    queryFn: skillsApi.scan,
     enabled: isTauriRuntime(),
-  });
-}
-
-export function useScanSkillsMutation() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: skillsApi.scan,
-    onSuccess: (skills) => {
-      queryClient.setQueryData(skillKeys.all, skills);
-      void queryClient.invalidateQueries({ queryKey: projectKeys.all });
-    },
+    staleTime: 30 * 1000,
   });
 }
 

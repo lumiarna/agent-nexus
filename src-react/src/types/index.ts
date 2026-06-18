@@ -95,6 +95,7 @@ export type SessionSource = "local" | "cloud" | "both";
 export interface Session {
   id: string;
   title: string;
+  projectName?: string;
   project: string;
   file: string;
   size: string;

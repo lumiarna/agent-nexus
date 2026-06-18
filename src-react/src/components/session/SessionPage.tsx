@@ -1,11 +1,16 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dot, Input } from "@/components/ui/primitives";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { useNav } from "@/lib/nav";
 import { nexus } from "@/lib/mock";
-import type { SessionSource } from "@/types";
+import { useProjectsQuery } from "@/lib/query/projects";
+import { useLocalSessionQuery, useLocalSessionsQuery } from "@/lib/query/sessions";
+import { isTauriRuntime } from "@/lib/runtime";
+import { cn } from "@/lib/utils";
+import type { Session, SessionSource } from "@/types";
 
 type Source = Extract<SessionSource, "local" | "cloud">;
 
@@ -18,15 +23,64 @@ const PROJ_COLORS: Record<string, string> = {
 };
 const ACCENT = "#9d7a64";
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return "Unexpected error";
+}
+
 export function SessionPage() {
   const { go } = useNav();
-  const [sessions] = useState(() => nexus.sessions());
-  const [projects] = useState(() => nexus.projects().filter((p) => p.status === "active"));
-  const [source, setSource] = useState<Source>("cloud");
+  const desktop = isTauriRuntime();
+  const projectsQuery = useProjectsQuery();
+  const localSessionsQuery = useLocalSessionsQuery();
+  const [mockSessions] = useState(() => nexus.sessions());
+  const mockProjects = useRef(nexus.projects().filter((p) => p.status === "active"));
+  const [source, setSource] = useState<Source>("local");
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>("s1");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [cloudAvailable, setCloudAvailable] = useState(true);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const isRealLocal = desktop && source === "local";
+  const sessions = isRealLocal ? localSessionsQuery.data ?? [] : mockSessions;
+  const projects = isRealLocal
+    ? (projectsQuery.data ?? []).filter((p) => p.status === "active")
+    : mockProjects.current;
+  const queryError =
+    isRealLocal && localSessionsQuery.error ? getErrorMessage(localSessionsQuery.error) : null;
+  const pageError = queryError;
+  const isLoading = isRealLocal && localSessionsQuery.isLoading;
+  const isRefreshing = isRealLocal && localSessionsQuery.isFetching;
+
+  async function refreshSessions() {
+    if (source === "cloud") {
+      setCloudAvailable(true);
+      toast("Cloud refresh is not wired yet");
+      return;
+    }
+
+    if (!desktop) {
+      toast("Desktop runtime required for local refresh");
+      return;
+    }
+
+    try {
+      const rows = await localSessionsQuery.refetch();
+      if (rows.data) {
+        toast(`Refreshed ${rows.data.length} ${rows.data.length === 1 ? "session" : "sessions"}`);
+      }
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
 
   const cloudDown = source === "cloud" && !cloudAvailable;
   const q = search.trim().toLowerCase();
@@ -37,21 +91,40 @@ export function SessionPage() {
       (se) =>
         se.title.toLowerCase().includes(q) ||
         se.excerpt.toLowerCase().includes(q) ||
-        se.body.toLowerCase().includes(q) ||
+        (!isRealLocal && se.body.toLowerCase().includes(q)) ||
+        (se.projectName ?? "").toLowerCase().includes(q) ||
         se.project.toLowerCase().includes(q),
     );
 
   let selId = selectedId;
   if (!sess.find((se) => se.id === selId)) selId = sess.length ? sess[0].id : null;
   const sel = sess.find((se) => se.id === selId) ?? null;
+  const localSessionDetail = useLocalSessionQuery(
+    sel?.id ?? null,
+    isRealLocal && sel != null && !pageError,
+  );
+  const projectNameById = new Map(projects.map((project) => [project.id, project.name]));
+  const sessionProjectLabel = (session: Session) =>
+    session.projectName ?? projectNameById.get(session.project) ?? session.project;
+  const previewBody = isRealLocal ? localSessionDetail.data?.body ?? "" : sel?.body ?? "";
+  const previewError =
+    isRealLocal && localSessionDetail.error ? getErrorMessage(localSessionDetail.error) : null;
+  const isPreviewLoading =
+    isRealLocal && sel != null && localSessionDetail.isLoading && !previewError;
 
-  const listShown = !cloudDown && sess.length > 0;
+  const listShown = !cloudDown && !pageError && !isLoading && sess.length > 0;
 
   let emptyTitle = "";
   let emptyBody = "";
   if (cloudDown) {
     emptyTitle = "Cloud unavailable";
     emptyBody = "Could not reach the Cloud archive.";
+  } else if (isLoading && sess.length === 0) {
+    emptyTitle = "Refreshing sessions";
+    emptyBody = "Reading local session directories across recorded projects.";
+  } else if (pageError) {
+    emptyTitle = "Session refresh failed";
+    emptyBody = pageError;
   } else if (q && sess.length === 0) {
     emptyTitle = "No results";
     emptyBody = `No ${source} session matches “${search}”.`;
@@ -75,17 +148,29 @@ export function SessionPage() {
               Searchable content domain · choose a source, then search within it
             </p>
           </div>
-          <Segmented<Source>
-            options={[
-              { value: "local", label: "Local" },
-              { value: "cloud", label: "Cloud" },
-            ]}
-            value={source}
-            onChange={(v) => {
-              setSource(v);
-              setSelectedId(null);
-            }}
-          />
+          <div className="flex items-center gap-2.5">
+            <Button
+              variant="subtle"
+              size="sm"
+              disabled={isRefreshing}
+              onClick={() => void refreshSessions()}
+            >
+              <RefreshCw size={14} className={cn(isRefreshing && "animate-spin")} />
+              {isRefreshing ? "Refreshing..." : "Refresh"}
+            </Button>
+            <Segmented<Source>
+              options={[
+                { value: "local", label: "Local" },
+                { value: "cloud", label: "Cloud" },
+              ]}
+              value={source}
+              onChange={(v) => {
+                setSource(v);
+                setProjectId(null);
+                setSelectedId(null);
+              }}
+            />
+          </div>
         </div>
         <div className="mt-3.5 flex items-center gap-3">
           <Input
@@ -131,7 +216,8 @@ export function SessionPage() {
         <div className="overflow-auto border-r border-nexus-border2 bg-nexus-sand">
           {listShown ? (
             sess.map((se) => {
-              const pc = PROJ_COLORS[se.project] ?? "#a99a89";
+              const projectLabel = sessionProjectLabel(se);
+              const pc = PROJ_COLORS[projectLabel] ?? PROJ_COLORS[se.project] ?? "#a99a89";
               const selected = se.id === selId;
               return (
                 <div
@@ -151,7 +237,7 @@ export function SessionPage() {
                       className="flex-none rounded-[5px] px-1.5 py-px text-[10px] font-bold"
                       style={{ color: pc, background: pc + "22" }}
                     >
-                      {se.project}
+                      {projectLabel}
                     </span>
                   </div>
                   <div className="mt-[5px] line-clamp-2 text-[11.5px] leading-[1.45] text-[#9a8f80]">
@@ -183,7 +269,7 @@ export function SessionPage() {
         </div>
 
         <div className="overflow-auto bg-nexus-card">
-          {sel && !cloudDown ? (
+          {sel && !cloudDown && !pageError && !isLoading ? (
             <div className="px-7 py-6">
               <div className="font-mono text-[18px] font-extrabold tracking-[-.01em] text-nexus-ink">
                 {sel.title}
@@ -191,7 +277,7 @@ export function SessionPage() {
               <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5 text-[11.5px]">
                 <span>
                   <span className="text-[#b3a999]">Project </span>
-                  <span className="font-bold text-[#6a6055]">{sel.project}</span>
+                  <span className="font-bold text-[#6a6055]">{sessionProjectLabel(sel)}</span>
                 </span>
                 <span>
                   <span className="text-[#b3a999]">Updated </span>
@@ -233,7 +319,9 @@ export function SessionPage() {
                   variant="subtle"
                   size="sm"
                   className="px-3.5"
-                  onClick={() => toast(`Archive now → ${sel.project} (Project-level, one-way)`)}
+                  onClick={() =>
+                    toast(`Archive now → ${sessionProjectLabel(sel)} (Project-level, one-way)`)
+                  }
                 >
                   Archive now
                 </Button>
@@ -241,7 +329,9 @@ export function SessionPage() {
                   variant="subtle"
                   size="sm"
                   className="px-3.5"
-                  onClick={() => toast(`Pull now → ${sel.project} (Project-level, one-way)`)}
+                  onClick={() =>
+                    toast(`Pull now → ${sessionProjectLabel(sel)} (Project-level, one-way)`)
+                  }
                 >
                   Pull now
                 </Button>
@@ -252,7 +342,11 @@ export function SessionPage() {
               </div>
 
               <div className="mt-[18px] whitespace-pre-wrap rounded-[14px] border border-nexus-panel bg-[#f8f3ea] px-[22px] py-5 font-mono text-[12px] leading-[1.7] text-[#4a4138]">
-                {sel.body}
+                {previewError
+                  ? `Session preview failed: ${previewError}`
+                  : isPreviewLoading
+                    ? "Loading session preview..."
+                    : previewBody}
               </div>
             </div>
           ) : (
