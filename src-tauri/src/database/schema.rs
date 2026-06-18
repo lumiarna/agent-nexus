@@ -2,7 +2,11 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 4;
+const CURRENT_SCHEMA_VERSION: i64 = 5;
+
+const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
+const NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
+const DEFAULT_PROJECT_SYMLINK_MAX_DEPTH: &str = "3";
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     let current = current_version(conn)?;
@@ -24,6 +28,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         }
         if current < 4 {
             migrate_to_v4(conn)?;
+        }
+        if current < 5 {
+            migrate_to_v5(conn)?;
         }
     }
 
@@ -49,14 +56,14 @@ fn current_version(conn: &Connection) -> AppResult<i64> {
 }
 
 fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch(
+    conn.execute_batch(&format!(
         r#"
         BEGIN;
 
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (4);
+        INSERT INTO schema_version (version) VALUES (5);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -219,13 +226,15 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         INSERT INTO settings (key, value) VALUES ('webdav_pass', '');
         INSERT INTO settings (key, value) VALUES ('webdav_remote_root', 'agent-nexus-sync');
         INSERT INTO settings (key, value)
-        VALUES ('sync_project_symlink_ignored_dirs', '.git
-.venv
-node_modules');
+        VALUES ('sync_project_symlink_ignored_dirs', '{new_default_ignored_dirs}');
+        INSERT INTO settings (key, value)
+        VALUES ('sync_project_symlink_max_depth', '{default_max_depth}');
 
         COMMIT;
         "#,
-    )
+        new_default_ignored_dirs = NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
+        default_max_depth = DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
+    ))
     .or_else(|error| {
         let _ = conn.execute("ROLLBACK", params![]);
         Err(error)
@@ -330,6 +339,43 @@ fn migrate_to_v4(conn: &Connection) -> AppResult<()> {
     }
 }
 
+fn migrate_to_v5(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch("BEGIN;").or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    let result = (|| -> AppResult<()> {
+        conn.execute(
+            "UPDATE settings SET value = ?1 \
+             WHERE key = 'sync_project_symlink_ignored_dirs' AND value = ?2",
+            params![
+                NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
+                LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS
+            ],
+        )?;
+        conn.execute(
+            "INSERT INTO settings (key, value) \
+             VALUES ('sync_project_symlink_max_depth', ?1) \
+             ON CONFLICT(key) DO NOTHING",
+            params![DEFAULT_PROJECT_SYMLINK_MAX_DEPTH],
+        )?;
+        conn.execute("UPDATE schema_version SET version = 5", [])?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = conn.execute("ROLLBACK", params![]);
+            Err(error)
+        }
+    }
+}
+
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
     if task_column_exists(conn, column)? {
         return Ok(());
@@ -352,4 +398,77 @@ fn task_column_exists(conn: &Connection, column: &str) -> AppResult<bool> {
     }
 
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn seed_minimal_v4_settings(conn: &Connection, ignored_dirs_value: &str) {
+        conn.execute(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            [],
+        )
+        .expect("create settings table");
+        conn.execute(
+            "CREATE TABLE schema_version (version INTEGER NOT NULL)",
+            [],
+        )
+        .expect("create schema_version table");
+        conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])
+            .expect("seed schema_version 4");
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('sync_project_symlink_ignored_dirs', ?1)",
+            [ignored_dirs_value],
+        )
+        .expect("seed ignored dirs");
+    }
+
+    #[test]
+    fn upgrades_legacy_default_ignored_dirs_to_new_default() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+        seed_minimal_v4_settings(&conn, LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS);
+        migrate_to_v5(&conn).expect("migrate to v5");
+
+        let value: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'sync_project_symlink_ignored_dirs'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read ignored dirs");
+        assert_eq!(value, NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS);
+
+        let depth: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'sync_project_symlink_max_depth'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read max depth");
+        assert_eq!(depth, DEFAULT_PROJECT_SYMLINK_MAX_DEPTH);
+
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, 5);
+    }
+
+    #[test]
+    fn preserves_user_customized_ignored_dirs_during_v5_migration() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+        let custom = ".git\nnode_modules\nmy-custom-dir";
+        seed_minimal_v4_settings(&conn, custom);
+        migrate_to_v5(&conn).expect("migrate to v5");
+
+        let value: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'sync_project_symlink_ignored_dirs'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read ignored dirs");
+        assert_eq!(value, custom);
+    }
 }

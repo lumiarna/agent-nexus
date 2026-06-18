@@ -32,6 +32,20 @@ fn set_project_symlink_ignored_dirs(db: &Database, value: &str) {
         .expect("set ignored dirs");
 }
 
+fn set_project_symlink_max_depth(db: &Database, value: &str) {
+    db.connection()
+        .expect("open db connection")
+        .execute(
+            r#"
+            INSERT INTO settings (key, value)
+            VALUES ('sync_project_symlink_max_depth', ?1)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            "#,
+            [value],
+        )
+        .expect("set max depth");
+}
+
 fn git_repo(parent: &TempDir, name: &str) -> String {
     let path = parent.path().join(name);
     fs::create_dir_all(path.join(".git")).expect("create test git repo");
@@ -571,5 +585,143 @@ fn skips_configured_directories_when_scanning_project_symlinks() {
                 .unwrap()
                 .join("target-project/src/shared")
         )
+    );
+}
+
+#[test]
+fn skips_common_build_output_dirs_by_default() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "build-output-project");
+    let source_dir = root.path().join("source");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+
+    for build_dir in [
+        "target",
+        "dist",
+        "build",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        ".git",
+    ] {
+        let dir = Path::new(&repo).join(build_dir);
+        fs::create_dir_all(&dir).expect("create build output dir");
+        create_directory_link(&source_dir, &dir.join("shared-link"));
+    }
+
+    projects.record_project(repo).expect("record project");
+
+    let links = sync.list_project_symlinks().expect("list project symlinks");
+    assert!(
+        links.is_empty(),
+        "default ignored dirs should skip common build outputs, got {links:?}"
+    );
+}
+
+#[test]
+fn respects_max_depth_setting() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    set_project_symlink_max_depth(&db, "3");
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "depth-project");
+    let source_dir = root.path().join("source");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+
+    let repo_root = fs::canonicalize(&repo).expect("canonicalize repo");
+    fs::create_dir_all(repo_root.join("d1")).expect("create d1");
+    fs::create_dir_all(repo_root.join("d1").join("d2")).expect("create d2");
+    fs::create_dir_all(repo_root.join("d1").join("d2").join("d3")).expect("create d3");
+    create_directory_link(&source_dir, &repo_root.join("l1-link"));
+    create_directory_link(&source_dir, &repo_root.join("d1").join("l2-link"));
+    create_directory_link(&source_dir, &repo_root.join("d1").join("d2").join("l3-link"));
+    create_directory_link(
+        &source_dir,
+        &repo_root.join("d1").join("d2").join("d3").join("l4-link"),
+    );
+
+    projects.record_project(repo).expect("record project");
+
+    let links = sync.list_project_symlinks().expect("list project symlinks");
+    let has = |suffix: &str| links.iter().any(|l| Path::new(&l.target_path).ends_with(suffix));
+
+    assert!(has("l1-link"), "depth 1 link should be listed at max_depth 3, got {links:?}");
+    assert!(has("l2-link"), "depth 2 link should be listed at max_depth 3, got {links:?}");
+    assert!(has("l3-link"), "depth 3 link should be listed at max_depth 3, got {links:?}");
+    assert!(!has("l4-link"), "depth 4 link should be skipped at max_depth 3, got {links:?}");
+}
+
+#[test]
+fn skips_links_beyond_default_max_depth_without_setting_override() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "default-depth-project");
+    let source_dir = root.path().join("source");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+
+    let repo_root = fs::canonicalize(&repo).expect("canonicalize repo");
+    fs::create_dir_all(repo_root.join("d1").join("d2").join("d3")).expect("create deep dirs");
+    create_directory_link(
+        &source_dir,
+        &repo_root.join("d1").join("d2").join("d3").join("l4-link"),
+    );
+    create_directory_link(&source_dir, &repo_root.join("l1-link"));
+
+    projects.record_project(repo).expect("record project");
+
+    let links = sync.list_project_symlinks().expect("list project symlinks");
+    assert!(
+        links.iter().any(|l| Path::new(&l.target_path).ends_with("l1-link")),
+        "shallow link should be listed under default max_depth, got {links:?}"
+    );
+    assert!(
+        !links
+            .iter()
+            .any(|l| Path::new(&l.target_path).ends_with("l4-link")),
+        "depth 4 link should be skipped under default max_depth 3, got {links:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn continues_scan_when_subdirectory_is_inaccessible() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "acl-project");
+    let source_dir = root.path().join("source");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+
+    let repo_root = fs::canonicalize(&repo).expect("canonicalize repo");
+    let private_dir = repo_root.join("private");
+    fs::create_dir_all(&private_dir).expect("create private dir");
+    fs::write(private_dir.join("secret.txt"), "x").expect("write secret file");
+    create_directory_link(&source_dir, &repo_root.join("shared-link"));
+
+    fs::set_permissions(&private_dir, fs::Permissions::from_mode(0o000))
+        .expect("remove directory permissions");
+
+    projects.record_project(repo).expect("record project");
+
+    let result = sync.list_project_symlinks();
+
+    fs::set_permissions(&private_dir, fs::Permissions::from_mode(0o700))
+        .expect("restore directory permissions");
+
+    let links = result.expect("scan should not fail on inaccessible subdirectory");
+    assert!(
+        links
+            .iter()
+            .any(|l| Path::new(&l.target_path).ends_with("shared-link")),
+        "accessible symlink should still be listed when a sibling directory is inaccessible, got {links:?}"
     );
 }

@@ -20,7 +20,30 @@ use crate::{
 };
 
 const PROJECT_SYMLINK_IGNORED_DIRS_SETTING: &str = "sync_project_symlink_ignored_dirs";
-const DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &[&str] = &[".git", ".venv", "node_modules"];
+const PROJECT_SYMLINK_MAX_DEPTH_SETTING: &str = "sync_project_symlink_max_depth";
+const DEFAULT_PROJECT_SYMLINK_MAX_DEPTH: usize = 3;
+const DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &[&str] = &[
+    ".git",
+    ".venv",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "out",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".svelte-kit",
+    ".gradle",
+    ".idea",
+    "coverage",
+    ".tox",
+    ".cache",
+];
 const WEBDAV_URL_SETTING: &str = "webdav_url";
 const WEBDAV_USER_SETTING: &str = "webdav_user";
 const WEBDAV_PASS_SETTING: &str = "webdav_pass";
@@ -122,6 +145,15 @@ struct ProjectRoot {
     path: PathBuf,
 }
 
+struct ScanContext<'a> {
+    target_project: &'a ProjectRoot,
+    projects: &'a [ProjectRoot],
+    ignored_dirs: &'a HashSet<String>,
+    max_depth: usize,
+    seen_targets: &'a mut HashSet<String>,
+    links: &'a mut Vec<ProjectSymlink>,
+}
+
 impl SyncService {
     pub fn new(db: Arc<Database>) -> Self {
         Self { db }
@@ -184,6 +216,7 @@ impl SyncService {
     pub fn list_project_symlinks(&self) -> AppResult<Vec<ProjectSymlink>> {
         let projects = self.list_existing_project_roots()?;
         let ignored_dirs = self.project_symlink_ignored_dirs()?;
+        let max_depth = self.project_symlink_max_depth()?;
         let mut links = Vec::new();
         let mut seen_targets = HashSet::new();
 
@@ -192,6 +225,7 @@ impl SyncService {
                 project,
                 &projects,
                 &ignored_dirs,
+                max_depth,
                 &mut seen_targets,
                 &mut links,
             )?;
@@ -456,6 +490,25 @@ impl SyncService {
                 .iter()
                 .map(|value| value.to_string())
                 .collect(),
+        })
+    }
+
+    fn project_symlink_max_depth(&self) -> AppResult<usize> {
+        let conn = self.db.connection()?;
+        let value = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                [PROJECT_SYMLINK_MAX_DEPTH_SETTING],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+
+        Ok(match value {
+            Some(raw) => raw
+                .trim()
+                .parse::<usize>()
+                .unwrap_or(DEFAULT_PROJECT_SYMLINK_MAX_DEPTH),
+            None => DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
         })
     }
 }
@@ -761,64 +814,77 @@ fn collect_project_symlinks(
     project: &ProjectRoot,
     projects: &[ProjectRoot],
     ignored_dirs: &HashSet<String>,
+    max_depth: usize,
     seen_targets: &mut HashSet<String>,
     links: &mut Vec<ProjectSymlink>,
 ) -> AppResult<()> {
-    collect_symlinks_in_dir(
-        &project.path,
-        project,
+    let mut ctx = ScanContext {
+        target_project: project,
         projects,
         ignored_dirs,
+        max_depth,
         seen_targets,
         links,
-    )
+    };
+    collect_symlinks_in_dir(&mut ctx, &project.path, 0)
 }
 
 fn collect_symlinks_in_dir(
+    ctx: &mut ScanContext<'_>,
     dir: &Path,
-    target_project: &ProjectRoot,
-    projects: &[ProjectRoot],
-    ignored_dirs: &HashSet<String>,
-    seen_targets: &mut HashSet<String>,
-    links: &mut Vec<ProjectSymlink>,
+    depth: usize,
 ) -> AppResult<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
+    if depth >= ctx.max_depth {
+        return Ok(());
+    }
+
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(()),
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
         let path = entry.path();
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
 
-        if ignored_dirs.contains(file_name.as_ref()) {
+        if ctx.ignored_dirs.contains(file_name.as_ref()) {
             continue;
         }
 
-        let metadata = fs::symlink_metadata(&path)?;
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+
         if metadata.file_type().is_symlink() {
-            let target_path = path_to_string(&path)?;
-            if seen_targets.insert(target_path.clone()) {
-                links.push(project_symlink_from_path(
-                    &path,
-                    target_project,
-                    projects,
-                    target_path,
-                )?);
+            if let Some(link) = project_symlink_for_entry(&path, ctx.target_project, ctx.projects) {
+                if ctx.seen_targets.insert(link.target_path.clone()) {
+                    ctx.links.push(link);
+                }
             }
             continue;
         }
 
         if metadata.is_dir() {
-            collect_symlinks_in_dir(
-                &path,
-                target_project,
-                projects,
-                ignored_dirs,
-                seen_targets,
-                links,
-            )?;
+            collect_symlinks_in_dir(ctx, &path, depth + 1)?;
         }
     }
 
     Ok(())
+}
+
+fn project_symlink_for_entry(
+    path: &Path,
+    target_project: &ProjectRoot,
+    projects: &[ProjectRoot],
+) -> Option<ProjectSymlink> {
+    let target_path = path_to_string(path).ok()?;
+    project_symlink_from_path(path, target_project, projects, target_path).ok()
 }
 
 fn parse_ignored_dirs(value: &str) -> HashSet<String> {
@@ -892,4 +958,35 @@ fn project_root_from_row(row: &Row<'_>) -> rusqlite::Result<ProjectRoot> {
         name: row.get(1)?,
         path: PathBuf::from(path),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collect_symlinks_in_dir_returns_ok_when_dir_unreadable() {
+        let missing = std::env::temp_dir().join("agent-nexus-definitely-missing-xyz-test");
+        let project = ProjectRoot {
+            id: "p".to_string(),
+            name: "p".to_string(),
+            path: missing.clone(),
+        };
+        let ignored = HashSet::new();
+        let mut seen = HashSet::new();
+        let mut links = Vec::new();
+        let mut ctx = ScanContext {
+            target_project: &project,
+            projects: &[],
+            ignored_dirs: &ignored,
+            max_depth: 3,
+            seen_targets: &mut seen,
+            links: &mut links,
+        };
+
+        collect_symlinks_in_dir(&mut ctx, &missing, 0)
+            .expect("unreadable dir should not abort scan");
+
+        assert!(links.is_empty());
+    }
 }
