@@ -11,6 +11,7 @@ use nexus_core::{
     database::Database,
     services::{
         paths,
+        project_symlinks::ProjectSymlinkInventory,
         projects::ProjectService,
         sync::{CreateTaskGroupInput, CreateTaskInput, SyncService},
     },
@@ -772,7 +773,7 @@ fn rejects_add_scheduled_task_without_creating_placement() {
 fn deletes_scanned_project_symlink_without_task_record() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db);
+    let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
     let source_repo = git_repo(&root, "source-project");
     let target_repo = git_repo(&root, "target-project");
@@ -787,11 +788,14 @@ fn deletes_scanned_project_symlink_without_task_record() {
         .record_project(target_repo)
         .expect("record target project");
 
-    let links = sync.list_project_symlinks().expect("list project symlinks");
-    sync.delete_project_symlink(links[0].target_path.clone())
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
+    inventory
+        .delete_project_symlink(links[0].target_path.clone())
         .expect("delete project symlink");
 
-    assert!(sync
+    assert!(inventory
         .list_project_symlinks()
         .expect("list project symlinks")
         .is_empty());
@@ -802,7 +806,7 @@ fn deletes_scanned_project_symlink_without_task_record() {
 fn lists_project_symlinks_with_registered_source_and_target_projects() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db);
+    let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
     let source_repo = git_repo(&root, "source-project");
     let target_repo = git_repo(&root, "target-project");
@@ -818,7 +822,9 @@ fn lists_project_symlinks_with_registered_source_and_target_projects() {
         .record_project(target_repo.clone())
         .expect("record target project");
 
-    let links = sync.list_project_symlinks().expect("list project symlinks");
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
 
     assert_eq!(links.len(), 1);
     assert_eq!(
@@ -849,7 +855,7 @@ fn lists_project_symlinks_with_registered_source_and_target_projects() {
 fn does_not_expand_children_inside_directory_symlink() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db);
+    let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
     let target_repo = git_repo(&root, "target-project");
     let external_source = root.path().join("external-source");
@@ -865,7 +871,9 @@ fn does_not_expand_children_inside_directory_symlink() {
         .record_project(target_repo.clone())
         .expect("record target project");
 
-    let links = sync.list_project_symlinks().expect("list project symlinks");
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
 
     assert_eq!(links.len(), 1);
     assert_eq!(
@@ -888,7 +896,7 @@ fn skips_configured_directories_when_scanning_project_symlinks() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     set_project_symlink_ignored_dirs(&db, ".git\n.venv\nnode_modules\nvendor");
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db);
+    let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
     let source_repo = git_repo(&root, "source-project");
     let target_repo = git_repo(&root, "target-project");
@@ -913,7 +921,9 @@ fn skips_configured_directories_when_scanning_project_symlinks() {
         .record_project(target_repo.clone())
         .expect("record target project");
 
-    let links = sync.list_project_symlinks().expect("list project symlinks");
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
 
     assert_eq!(links.len(), 1);
     assert_eq!(
@@ -930,7 +940,7 @@ fn skips_configured_directories_when_scanning_project_symlinks() {
 fn skips_common_build_output_dirs_by_default() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db);
+    let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "build-output-project");
     let source_dir = root.path().join("source");
@@ -952,7 +962,9 @@ fn skips_common_build_output_dirs_by_default() {
 
     projects.record_project(repo).expect("record project");
 
-    let links = sync.list_project_symlinks().expect("list project symlinks");
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
     assert!(
         links.is_empty(),
         "default ignored dirs should skip common build outputs, got {links:?}"
@@ -964,7 +976,7 @@ fn respects_max_depth_setting() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     set_project_symlink_max_depth(&db, "3");
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db);
+    let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "depth-project");
     let source_dir = root.path().join("source");
@@ -987,7 +999,9 @@ fn respects_max_depth_setting() {
 
     projects.record_project(repo).expect("record project");
 
-    let links = sync.list_project_symlinks().expect("list project symlinks");
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
     let has = |suffix: &str| {
         links
             .iter()
@@ -1016,7 +1030,7 @@ fn respects_max_depth_setting() {
 fn skips_links_beyond_default_max_depth_without_setting_override() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db);
+    let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "default-depth-project");
     let source_dir = root.path().join("source");
@@ -1032,7 +1046,9 @@ fn skips_links_beyond_default_max_depth_without_setting_override() {
 
     projects.record_project(repo).expect("record project");
 
-    let links = sync.list_project_symlinks().expect("list project symlinks");
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
     assert!(
         links
             .iter()
@@ -1054,7 +1070,7 @@ fn continues_scan_when_subdirectory_is_inaccessible() {
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db);
+    let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "acl-project");
     let source_dir = root.path().join("source");
@@ -1071,7 +1087,7 @@ fn continues_scan_when_subdirectory_is_inaccessible() {
 
     projects.record_project(repo).expect("record project");
 
-    let result = sync.list_project_symlinks();
+    let result = inventory.list_project_symlinks();
 
     fs::set_permissions(&private_dir, fs::Permissions::from_mode(0o700))
         .expect("restore directory permissions");

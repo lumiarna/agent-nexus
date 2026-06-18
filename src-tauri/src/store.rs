@@ -2,11 +2,15 @@ use std::sync::Arc;
 
 use nexus_core::{
     database::Database,
-    services::{projects::ProjectService, skills::SkillService, sync::SyncService},
+    services::{
+        project_symlinks::ProjectSymlinkInventory, projects::ProjectService, skills::SkillService,
+        sync::SyncService,
+    },
 };
 
 pub struct AppState {
     pub projects: ProjectService,
+    pub project_symlinks: ProjectSymlinkInventory,
     pub skills: SkillService,
     pub sync: SyncService,
 }
@@ -16,6 +20,7 @@ impl AppState {
         let db = Arc::new(db);
         Self {
             projects: ProjectService::new(db.clone()),
+            project_symlinks: ProjectSymlinkInventory::new(db.clone()),
             skills: SkillService::new(db.clone()),
             sync: SyncService::new(db),
         }

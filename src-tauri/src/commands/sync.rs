@@ -3,8 +3,7 @@ use tauri::State;
 use nexus_core::{
     error::AppResult,
     services::sync::{
-        CreateTaskGroupInput, CreateTaskInput, ProjectSymlink, Task, TaskGroup, WebdavSettings,
-        WebdavSettingsInput,
+        CreateTaskGroupInput, CreateTaskInput, Task, TaskGroup, WebdavSettings, WebdavSettingsInput,
     },
 };
 
@@ -66,14 +65,4 @@ pub fn add_task(
 #[tauri::command]
 pub async fn run_task(state: State<'_, AppState>, id: String) -> AppResult<Task> {
     state.sync.run_task(id).await
-}
-
-#[tauri::command]
-pub fn list_project_symlinks(state: State<'_, AppState>) -> AppResult<Vec<ProjectSymlink>> {
-    state.sync.list_project_symlinks()
-}
-
-#[tauri::command]
-pub fn delete_project_symlink(state: State<'_, AppState>, target_path: String) -> AppResult<()> {
-    state.sync.delete_project_symlink(target_path)
 }
