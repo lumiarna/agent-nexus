@@ -11,7 +11,13 @@ use serde::Serialize;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
-    services::{paths, symlink::remove_symlink},
+    services::{
+        paths,
+        placement::{
+            remove_unmanaged_link_placement, scanned_target_identity,
+            task_managed_target_identities,
+        },
+    },
 };
 
 const PROJECT_SYMLINK_IGNORED_DIRS_SETTING: &str = "project_symlink_ignored_dirs";
@@ -85,7 +91,10 @@ impl ProjectSymlinkInventory {
         let projects = self.list_existing_project_roots()?;
         let ignored_dirs = self.project_symlink_ignored_dirs()?;
         let max_depth = self.project_symlink_max_depth()?;
-        let managed_targets = self.managed_link_targets()?;
+        let managed_targets = {
+            let conn = self.db.connection()?;
+            task_managed_target_identities(&conn)?
+        };
         let mut links = Vec::new();
         let mut seen_targets = HashSet::new();
 
@@ -100,9 +109,13 @@ impl ProjectSymlinkInventory {
             )?;
         }
 
-        // Drop symlinks whose target path is already owned by a Sync task — they are
-        // not orphan placements and would just duplicate the task row.
-        links.retain(|link| !managed_targets.contains(&normalise_target_path(&link.target_path)));
+        let mut unmanaged_links = Vec::new();
+        for link in links {
+            if !managed_targets.contains(&scanned_target_identity(Path::new(&link.target_path))?) {
+                unmanaged_links.push(link);
+            }
+        }
+        let mut links = unmanaged_links;
 
         links.sort_by(|left, right| {
             left.source_path
@@ -114,7 +127,7 @@ impl ProjectSymlinkInventory {
 
     pub fn delete_project_symlink(&self, target_path: String) -> AppResult<()> {
         let target_path = required_trimmed(&target_path, "project symlink target path")?;
-        remove_symlink(Path::new(target_path))
+        remove_unmanaged_link_placement(Path::new(target_path))
     }
 
     fn list_existing_project_roots(&self) -> AppResult<Vec<ProjectRoot>> {
@@ -177,31 +190,6 @@ impl ProjectSymlinkInventory {
             None => DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
         })
     }
-
-    /// Targets of Sync tasks that own a link placement on disk. The inventory uses this
-    /// to skip symlinks already shown as task rows. Paths are normalised so that a task
-    /// target stored as `~/foo` and a scanned symlink at `/Users/me/foo` match.
-    ///
-    /// Only tasks with `action IN ('Symlink','Junction')` and `target_type = 'Local'`
-    /// own a placement; Copy and Cloud targets are excluded.
-    fn managed_link_targets(&self) -> AppResult<HashSet<String>> {
-        let conn = self.db.connection()?;
-        let mut stmt = conn.prepare(
-            r#"
-            SELECT target
-            FROM tasks
-            WHERE action IN ('Symlink', 'Junction') AND target_type = 'Local'
-            "#,
-        )?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        let mut set = HashSet::new();
-        for row in rows {
-            let raw = row?;
-            let normalised = normalise_target_path(&raw);
-            set.insert(normalised);
-        }
-        Ok(set)
-    }
 }
 
 fn required_trimmed<'a>(value: &'a str, label: &str) -> AppResult<&'a str> {
@@ -210,20 +198,6 @@ fn required_trimmed<'a>(value: &'a str, label: &str) -> AppResult<&'a str> {
         Err(AppError::Validation(format!("{label} is required")))
     } else {
         Ok(value)
-    }
-}
-
-/// Normalise a target path for cross-source comparison. Resolves via canonicalize
-/// when the path exists on disk so that `~/foo` and `/Users/me/foo` match; falls back
-/// to a trimmed string comparison when the path is missing (e.g. the link was deleted
-/// but the task row remains).
-fn normalise_target_path(raw: &str) -> String {
-    let trimmed = raw.trim();
-    match Path::new(trimmed).canonicalize() {
-        Ok(resolved) => {
-            paths::path_to_string(&resolved, "target path").unwrap_or_else(|_| trimmed.to_string())
-        }
-        Err(_) => trimmed.to_string(),
     }
 }
 

@@ -14,9 +14,9 @@ use crate::{
     error::{AppError, AppResult},
     services::{
         paths::resolve_local_path,
-        symlink::{
-            create_junction_placement, create_symlink_placement, is_junction,
-            remove_symlink_if_present,
+        placement::{
+            create_task_link_placement, remove_created_task_link_placements,
+            task_link_placement_for_task, task_link_placements_for_group, task_link_state,
         },
         webdav,
     },
@@ -156,31 +156,11 @@ impl TaskLifecycle {
     pub(super) fn delete_task(&self, id: String) -> AppResult<()> {
         let id = required_trimmed(&id, "task id")?;
         let conn = self.db.connection()?;
-        let task = conn
-            .query_row(
-                r#"
-                SELECT action, target_type, target
-                FROM tasks
-                WHERE id = ?1
-                "#,
-                [id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
-            )
-            .optional()?;
-
-        let Some((action, target_type, target)) = task else {
+        let Some(placement) = task_link_placement_for_task(&conn, id)? else {
             return Ok(());
         };
 
-        if (action == "Symlink" || action == "Junction") && target_type == "Local" {
-            remove_symlink_if_present(&resolve_local_path(&target)?)?;
-        }
+        placement.remove_if_present()?;
 
         conn.execute("DELETE FROM tasks WHERE id = ?1", [id])?;
         Ok(())
@@ -189,20 +169,10 @@ impl TaskLifecycle {
     pub(super) fn delete_task_group(&self, id: String) -> AppResult<()> {
         let id = required_trimmed(&id, "task group id")?;
         let conn = self.db.connection()?;
-        let mut stmt = conn.prepare(
-            r#"
-            SELECT target
-            FROM tasks
-            WHERE group_id = ?1 AND action IN ('Symlink', 'Junction') AND target_type = 'Local'
-            "#,
-        )?;
-        let targets: Vec<String> = stmt
-            .query_map([id], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(stmt);
+        let placements = task_link_placements_for_group(&conn, id)?;
 
-        for target in &targets {
-            remove_symlink_if_present(&resolve_local_path(target)?)?;
+        for placement in &placements {
+            placement.remove_if_present()?;
         }
 
         conn.execute("DELETE FROM task_groups WHERE id = ?1", [id])?;
@@ -274,7 +244,7 @@ impl TaskLifecycle {
 
         if result.is_err() {
             if let Some(target) = created_link {
-                let _ = remove_symlink_if_present(&target);
+                remove_created_task_link_placements(&[target]);
             }
         }
 
@@ -698,23 +668,11 @@ fn create_link_placements(tasks: &[PreparedTask]) -> AppResult<Vec<PathBuf>> {
 }
 
 fn create_single_link_placement(task: &PreparedTask) -> AppResult<Option<PathBuf>> {
-    let source = resolve_local_path(&task.source)?;
-    let target = resolve_local_path(&task.target)?;
-    let result = match task.action.as_str() {
-        "Symlink" => create_symlink_placement(&source, &target),
-        "Junction" => create_junction_placement(&source, &target),
-        _ => return Ok(None),
-    };
-    result.inspect_err(|_| {
-        let _ = remove_symlink_if_present(&target);
-    })?;
-    Ok(Some(target))
+    create_task_link_placement(&task.action, &task.source, &task.target)
 }
 
 fn remove_created_symlinks(paths: &[PathBuf]) {
-    for path in paths.iter().rev() {
-        let _ = remove_symlink_if_present(path);
-    }
+    remove_created_task_link_placements(paths);
 }
 
 fn list_tasks_for_group(conn: &rusqlite::Connection, group_id: &str) -> AppResult<Vec<Task>> {
@@ -804,24 +762,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
 /// `"missing"`. Copy tasks and Cloud targets have no link placement, so they report
 /// `"present"` — there is nothing to go missing.
 fn derive_link_state(action: &str, target_type: &str, target: &str) -> String {
-    if (action == "Symlink" || action == "Junction") && target_type == "Local" {
-        let exists = resolve_local_path(target)
-            .ok()
-            .and_then(|path| {
-                fs::symlink_metadata(&path)
-                    .map(|metadata| metadata.file_type().is_symlink() || is_junction(&path))
-                    .ok()
-            })
-            .unwrap_or(false);
-        if exists {
-            "present"
-        } else {
-            "missing"
-        }
-    } else {
-        "present"
-    }
-    .to_string()
+    task_link_state(action, target_type, target).to_string()
 }
 
 fn derive_direction(source_type: &str, target_type: &str) -> &'static str {

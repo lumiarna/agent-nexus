@@ -1,6 +1,7 @@
 pub mod agent_capabilities;
 pub mod app_config;
 pub mod paths;
+pub mod placement;
 pub mod project_symlinks;
 pub mod projects;
 pub mod provider_quota;

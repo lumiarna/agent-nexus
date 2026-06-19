@@ -1203,6 +1203,114 @@ fn project_symlink_inventory_skips_symlinks_managed_by_sync_task() {
 }
 
 #[test]
+#[serial]
+fn project_symlink_inventory_skips_task_managed_tilde_target() {
+    let root = TempDir::new().expect("create temp dir");
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", root.path());
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db.clone());
+    let inventory = ProjectSymlinkInventory::new(db);
+    let source_repo = git_repo(&root, "source-project");
+    let target_repo = git_repo(&root, "target-project");
+    fs::create_dir_all(Path::new(&source_repo).join("shared")).expect("create source dir");
+
+    projects
+        .record_project(source_repo)
+        .expect("record source project");
+    projects
+        .record_project(target_repo)
+        .expect("record target project");
+
+    sync.create_task_group(CreateTaskGroupInput {
+        name: "Managed tilde target".to_string(),
+        tasks: vec![CreateTaskInput {
+            action: LINK_ACTION.to_string(),
+            source_type: "Local".to_string(),
+            source: "~/source-project/shared".to_string(),
+            target_type: "Local".to_string(),
+            target: "~/target-project/shared".to_string(),
+            schedule: "manual".to_string(),
+        }],
+    })
+    .expect("create task-managed symlink");
+
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
+
+    match previous_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    assert!(
+        links.is_empty(),
+        "task-managed tilde target should be hidden from inventory, got {links:?}"
+    );
+}
+
+#[test]
+fn project_symlink_inventory_keeps_unmanaged_link_with_same_source_as_task() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db.clone());
+    let inventory = ProjectSymlinkInventory::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_repo = git_repo(&root, "source-project");
+    let target_repo = git_repo(&root, "target-project");
+    let source_dir = Path::new(&source_repo).join("shared");
+    let managed_link = Path::new(&target_repo).join("shared");
+    let unmanaged_same_source_link = Path::new(&target_repo).join("same-source-link");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+
+    projects
+        .record_project(source_repo)
+        .expect("record source project");
+    projects
+        .record_project(target_repo.clone())
+        .expect("record target project");
+
+    sync.create_task_group(CreateTaskGroupInput {
+        name: "Managed shared".to_string(),
+        tasks: vec![CreateTaskInput {
+            action: LINK_ACTION.to_string(),
+            source_type: "Local".to_string(),
+            source: source_dir.to_string_lossy().into_owned(),
+            target_type: "Local".to_string(),
+            target: managed_link.to_string_lossy().into_owned(),
+            schedule: "manual".to_string(),
+        }],
+    })
+    .expect("create task-managed symlink");
+    create_directory_link(&source_dir, &unmanaged_same_source_link);
+
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
+
+    assert_eq!(
+        links.len(),
+        1,
+        "only the unmanaged same-source link should appear, got {links:?}"
+    );
+    assert!(
+        links
+            .iter()
+            .any(|l| Path::new(&l.target_path).ends_with("same-source-link")),
+        "unmanaged link with same source should still be listed, got {links:?}"
+    );
+    assert!(
+        !links
+            .iter()
+            .any(|l| Path::new(&l.target_path).ends_with("shared")),
+        "task-managed link should be hidden from inventory, got {links:?}"
+    );
+}
+
+#[test]
 fn deletes_scanned_project_symlink_without_task_record() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
