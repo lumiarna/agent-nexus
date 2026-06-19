@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 7;
+const CURRENT_SCHEMA_VERSION: i64 = 8;
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
 const NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
@@ -11,6 +11,8 @@ const LEGACY_PROJECT_SYMLINK_IGNORED_DIRS_KEY: &str = "sync_project_symlink_igno
 const LEGACY_PROJECT_SYMLINK_MAX_DEPTH_KEY: &str = "sync_project_symlink_max_depth";
 const PROJECT_SYMLINK_IGNORED_DIRS_KEY: &str = "project_symlink_ignored_dirs";
 const PROJECT_SYMLINK_MAX_DEPTH_KEY: &str = "project_symlink_max_depth";
+const CLAUDE_CONFIG_DIR_KEY: &str = "CLAUDE_CONFIG_DIR";
+const DEFAULT_CLAUDE_CONFIG_DIR: &str = "~/.claude";
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     let current = current_version(conn)?;
@@ -41,6 +43,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         }
         if current < 7 {
             migrate_to_v7(conn)?;
+        }
+        if current < 8 {
+            migrate_to_v8(conn)?;
         }
     }
 
@@ -239,11 +244,15 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         VALUES ('project_symlink_ignored_dirs', '{new_default_ignored_dirs}');
         INSERT INTO settings (key, value)
         VALUES ('project_symlink_max_depth', '{default_max_depth}');
+        INSERT INTO settings (key, value)
+        VALUES ('{claude_config_dir_key}', '{default_claude_config_dir}');
 
         COMMIT;
         "#,
         new_default_ignored_dirs = NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
         default_max_depth = DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
+        claude_config_dir_key = CLAUDE_CONFIG_DIR_KEY,
+        default_claude_config_dir = DEFAULT_CLAUDE_CONFIG_DIR,
     ))
     .or_else(|error| {
         let _ = conn.execute("ROLLBACK", params![]);
@@ -489,6 +498,33 @@ fn migrate_to_v7(conn: &Connection) -> AppResult<()> {
     }
 }
 
+fn migrate_to_v8(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch("BEGIN;").or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    let result = (|| -> AppResult<()> {
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING",
+            params![CLAUDE_CONFIG_DIR_KEY, DEFAULT_CLAUDE_CONFIG_DIR],
+        )?;
+        conn.execute("UPDATE schema_version SET version = 8", [])?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = conn.execute("ROLLBACK", params![]);
+            Err(error)
+        }
+    }
+}
+
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
     if task_column_exists(conn, column)? {
         return Ok(());
@@ -590,8 +626,33 @@ mod tests {
             setting_value(&conn, "project_symlink_max_depth"),
             DEFAULT_PROJECT_SYMLINK_MAX_DEPTH
         );
+        assert_eq!(
+            setting_value(&conn, CLAUDE_CONFIG_DIR_KEY),
+            DEFAULT_CLAUDE_CONFIG_DIR
+        );
         assert_eq!(setting_count(&conn, "sync_project_symlink_ignored_dirs"), 0);
         assert_eq!(setting_count(&conn, "sync_project_symlink_max_depth"), 0);
+    }
+
+    #[test]
+    fn migrates_v7_databases_with_default_claude_config_dir() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+        seed_minimal_v6_project_symlink_settings(
+            &conn,
+            NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
+            DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
+        );
+        migrate_to_v7(&conn).expect("migrate to v7");
+        migrate(&conn).expect("migrate schema");
+
+        assert_eq!(
+            setting_value(&conn, CLAUDE_CONFIG_DIR_KEY),
+            DEFAULT_CLAUDE_CONFIG_DIR
+        );
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
     }
 
     #[test]

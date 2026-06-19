@@ -1,7 +1,9 @@
 pub mod agent_capabilities;
+pub mod app_config;
 pub mod paths;
 pub mod project_symlinks;
 pub mod projects;
+pub mod provider_quota;
 pub mod sessions;
 pub mod skills;
 pub mod symlink;

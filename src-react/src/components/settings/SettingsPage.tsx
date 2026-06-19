@@ -233,9 +233,9 @@ export function SettingsPage() {
               </div>
               <div className="mt-[11px] grid grid-cols-3 gap-3">
                 {a.dirs.map((d) => (
-                  <div key={d.envKey}>
+                  <div key={d.key}>
                     <div className="font-mono text-[9.5px] font-semibold tracking-[.04em] text-[#c3b9a8]">
-                      {d.envKey}
+                      {d.key}
                     </div>
                     <div className="mt-[3px] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
                       {d.value}

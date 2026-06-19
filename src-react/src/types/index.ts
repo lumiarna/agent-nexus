@@ -22,6 +22,8 @@ export interface ProviderWindow {
   label: string;
   used: number;
   reset: string;
+  kind?: "rolling" | "weekly";
+  resetAt?: string;
 }
 
 export interface Provider {

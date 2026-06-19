@@ -1930,6 +1930,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
+ "serde_json",
  "serial_test",
  "tempfile",
  "thiserror 2.0.18",

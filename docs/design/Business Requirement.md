@@ -19,9 +19,9 @@
 	- `${GENERIC_AGENT_SKILLS_DIR}`: `${GENERIC_AGENT_CONFIG_DIR}/skills`
 	- `${GENERIC_AGENT_PROMPT_FILE}`: `${GENERIC_AGENT_CONFIG_DIR}/AGENTS.md`
 - Claude Code
-	- `${CLAUDE_CODE_CONFIG_DIR}`: `~/.claude`
-	- `${CLAUDE_CODE_SKILLS_DIR}`: `${CLAUDE_CODE_CONFIG_DIR}/skills`
-	- `${CLAUDE_CODE_PROMPT_FILE}`: `${CLAUDE_CODE_CONFIG_DIR}/CLAUDE.md`
+	- `${CLAUDE_CONFIG_DIR}`: `~/.claude`
+	- `${CLAUDE_SKILLS_DIR}`: `${CLAUDE_CONFIG_DIR}/skills`
+	- `${CLAUDE_PROMPT_FILE}`: `${CLAUDE_CONFIG_DIR}/CLAUDE.md`
 - CodeX
 	- `${CODEX_CONFIG_DIR}`: `~/.codex`
 	- `${CODEX_AUTH_FILE}`：`${CODEX_CONFIG_DIR}/auth.json`
@@ -42,7 +42,7 @@
 ### Provider
 
 - Claude Code
-	- Quota 数据来源：`${CLAUDE_CODE_CONFIG_DIR}`
+	- Quota 数据来源：`${CLAUDE_CONFIG_DIR}`
 - CodeX
 	- Quota 数据来源：`${CODEX_CONFIG_DIR}`
 - Copilot

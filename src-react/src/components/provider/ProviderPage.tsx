@@ -22,10 +22,13 @@ import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Segmented } from "@/components/ui/segmented";
 import { Toggle } from "@/components/ui/toggle";
 import { ScreenScroll } from "@/components/shell/screen";
+import { formatProviderQuotaDisplay } from "@/components/provider/quotaDisplay";
 import { nexus } from "@/lib/mock";
+import { useProviderQuotaQuery } from "@/lib/query/providers";
 import { quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type { Provider, TrayMetric } from "@/types";
+import type { ProviderQuotaSnapshot } from "@/lib/api/providers";
 
 const MSG: Record<string, { title: string; body: string }> = {
   expired: {
@@ -44,6 +47,29 @@ function actionLabel(st: ProviderUiStatus, loading: boolean): string {
   if (st === "failed") return "Retry";
   if (st === "nocreds") return "Add cred";
   return loading ? "Checking…" : "Refresh";
+}
+
+function mergeProviderQuota(provider: Provider, quota: ProviderQuotaSnapshot): Provider {
+  if (provider.id !== quota.providerId) return provider;
+
+  return {
+    ...provider,
+    status: quota.status,
+    plan: quota.plan ?? provider.plan,
+    credential: quota.credential ?? provider.credential,
+    primary: quota.primary ?? undefined,
+    windows:
+      quota.windows.length > 0
+        ? quota.windows.map((window) => ({
+            label: window.label,
+            used: window.used,
+            reset: "",
+            kind: window.kind,
+            resetAt: window.resetAt ?? undefined,
+          }))
+        : undefined,
+    error: quota.error ?? undefined,
+  };
 }
 
 interface SortableProviderCardProps {
@@ -91,7 +117,7 @@ function SortableProviderCard({
 }
 
 export function ProviderPage() {
-  const [providers] = useState<Provider[]>(() => nexus.providers());
+  const [providers, setProviders] = useState<Provider[]>(() => nexus.providers());
   const [order, setOrder] = useState<string[]>(() => providers.map((p) => p.id));
   const [cardVisible, setCardVisible] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(providers.map((p) => [p.id, !p.hiddenCard])),
@@ -104,6 +130,7 @@ export function ProviderPage() {
   const [trayMetric, setTrayMetric] = useState<TrayMetric>(() => nexus.settings().trayMetric);
   const gridRef = useRef<HTMLDivElement>(null);
   const [cardMinHeight, setCardMinHeight] = useState<number | null>(null);
+  const claudeQuota = useProviderQuotaQuery("claude");
 
   const timers = useRef<Record<string, number>>({});
   useEffect(
@@ -111,7 +138,18 @@ export function ProviderPage() {
     [],
   );
 
+  useEffect(() => {
+    if (!claudeQuota.data) return;
+    setProviders((current) =>
+      current.map((provider) => mergeProviderQuota(provider, claudeQuota.data)),
+    );
+  }, [claudeQuota.data]);
+
   function refreshProvider(id: string) {
+    if (id === "claude") {
+      void claudeQuota.refetch();
+    }
+
     setRefreshing((r) => ({ ...r, [id]: true }));
     window.clearTimeout(timers.current[id]);
     timers.current[id] = window.setTimeout(
@@ -204,10 +242,11 @@ export function ProviderPage() {
             style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}
           >
             {visible.map((p) => {
-              const loading = !!refreshing[p.id];
+              const loading = !!refreshing[p.id] || (p.id === "claude" && claudeQuota.isFetching);
               const st: ProviderUiStatus = loading ? "loading" : p.status;
               const si = statusInfo(st);
               const showQuota = st === "available" && !!p.windows;
+              const quota = formatProviderQuotaDisplay(p);
               const hasMessage =
                 !loading &&
                 (p.status === "expired" || p.status === "nocreds" || p.status === "failed");
@@ -264,17 +303,19 @@ export function ProviderPage() {
                               className="text-[30px] font-extrabold leading-none tracking-[-.03em]"
                               style={{ color: quotaColor(p.primary ?? 0) }}
                             >
-                              {p.primary != null ? `${p.primary}%` : ""}
+                              {quota.primaryLabel}
                             </span>
-                            <span className="text-[12px] text-[#b3a999]">peak window used</span>
+                            <span className="text-[12px] text-[#b3a999]">
+                              {quota.primaryCaption}
+                            </span>
                           </div>
                           <div className="mt-[15px] flex flex-col gap-[13px]">
-                            {(p.windows ?? []).map((w) => (
+                            {quota.windows.map((w) => (
                               <div key={w.label}>
                                 <div className="mb-1.5 flex justify-between text-[12px]">
                                   <span className="text-[#6a6055]">{w.label}</span>
                                   <span className="font-bold" style={{ color: quotaColor(w.used) }}>
-                                    {w.used}%
+                                    {w.usedLabel}
                                   </span>
                                 </div>
                                 <div className="h-2 overflow-hidden rounded-full bg-[#ece2d6]">

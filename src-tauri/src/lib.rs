@@ -43,6 +43,7 @@ pub fn run() {
             commands::skills::set_skill_target,
             commands::sync::create_task_group,
             commands::project_symlinks::delete_project_symlink,
+            commands::providers::get_provider_quota,
             commands::sync::delete_task,
             commands::sync::delete_task_group,
             commands::sync::add_task,

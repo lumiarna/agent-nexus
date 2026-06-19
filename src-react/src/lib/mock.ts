@@ -25,11 +25,17 @@ const clone = <T>(x: T): T => structuredClone(x);
 
 const PROVIDERS: Provider[] = [
   {
-    id: "claude", name: "Claude Code", plan: "Max 20×", status: "available",
-    credential: "~/.claude", primary: 68, isAgent: true,
+    id: "claude", name: "Claude Code", plan: "Claude Pro", status: "available",
+    credential: "~/.claude", primary: 59, isAgent: true,
     windows: [
-      { label: "5-hour limit", used: 42, reset: "Resets in 2h 14m" },
-      { label: "Weekly limit", used: 68, reset: "Resets Mon 09:00" },
+      { label: "5-hour limit", used: 0, reset: "Resets in 4h 59m" },
+      {
+        label: "Weekly limit",
+        used: 59,
+        reset: "",
+        kind: "weekly",
+        resetAt: "2026-06-21T07:00:00Z",
+      },
     ],
   },
   {

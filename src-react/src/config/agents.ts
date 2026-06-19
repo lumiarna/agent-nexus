@@ -2,9 +2,9 @@
 // UI code and mock layer import from here; no computed derivation.
 
 export interface AgentDirDef {
-  envKey: string;
+  key: string;
   value: string;
-  /** The envKey this dir is derived from (e.g. "GENERIC_AGENT_CONFIG_DIR"). */
+  /** The config key this dir is derived from (e.g. "GENERIC_AGENT_CONFIG_DIR"). */
   derivedFrom?: string;
 }
 
@@ -35,9 +35,9 @@ export const AGENTS = [
     color: "#9a7b53",
     surfaces: ["skill", "prompt"],
     dirs: [
-      { envKey: "GENERIC_AGENT_CONFIG_DIR", value: "~/.agents" },
-      { envKey: "GENERIC_AGENT_SKILLS_DIR", value: "~/.agents/skills", derivedFrom: "GENERIC_AGENT_CONFIG_DIR" },
-      { envKey: "GENERIC_AGENT_PROMPT_FILE", value: "~/.agents/AGENTS.md", derivedFrom: "GENERIC_AGENT_CONFIG_DIR" },
+      { key: "GENERIC_AGENT_CONFIG_DIR", value: "~/.agents" },
+      { key: "GENERIC_AGENT_SKILLS_DIR", value: "~/.agents/skills", derivedFrom: "GENERIC_AGENT_CONFIG_DIR" },
+      { key: "GENERIC_AGENT_PROMPT_FILE", value: "~/.agents/AGENTS.md", derivedFrom: "GENERIC_AGENT_CONFIG_DIR" },
     ],
   }),
   agent({
@@ -46,9 +46,9 @@ export const AGENTS = [
     color: "#c2410c",
     surfaces: ["skill", "prompt", "provider"],
     dirs: [
-      { envKey: "CLAUDE_CODE_CONFIG_DIR", value: "~/.claude" },
-      { envKey: "CLAUDE_CODE_SKILLS_DIR", value: "~/.claude/skills", derivedFrom: "CLAUDE_CODE_CONFIG_DIR" },
-      { envKey: "CLAUDE_CODE_PROMPT_FILE", value: "~/.claude/CLAUDE.md", derivedFrom: "CLAUDE_CODE_CONFIG_DIR" },
+      { key: "CLAUDE_CONFIG_DIR", value: "~/.claude" },
+      { key: "CLAUDE_SKILLS_DIR", value: "~/.claude/skills", derivedFrom: "CLAUDE_CONFIG_DIR" },
+      { key: "CLAUDE_PROMPT_FILE", value: "~/.claude/CLAUDE.md", derivedFrom: "CLAUDE_CONFIG_DIR" },
     ],
   }),
   agent({
@@ -58,9 +58,9 @@ export const AGENTS = [
     authFile: "~/.codex/auth.json",
     surfaces: ["skill", "prompt", "provider"],
     dirs: [
-      { envKey: "CODEX_CONFIG_DIR", value: "~/.codex" },
-      { envKey: "CODEX_SKILLS_DIR", value: "~/.codex/skills", derivedFrom: "CODEX_CONFIG_DIR" },
-      { envKey: "CODEX_PROMPT_FILE", value: "~/.codex/AGENTS.md", derivedFrom: "CODEX_CONFIG_DIR" },
+      { key: "CODEX_CONFIG_DIR", value: "~/.codex" },
+      { key: "CODEX_SKILLS_DIR", value: "~/.codex/skills", derivedFrom: "CODEX_CONFIG_DIR" },
+      { key: "CODEX_PROMPT_FILE", value: "~/.codex/AGENTS.md", derivedFrom: "CODEX_CONFIG_DIR" },
     ],
   }),
   agent({
@@ -70,9 +70,9 @@ export const AGENTS = [
     authFile: "$GITHUB_TOKEN",
     surfaces: ["skill", "prompt", "provider"],
     dirs: [
-      { envKey: "COPILOT_CONFIG_DIR", value: "~/.github" },
-      { envKey: "COPILOT_SKILLS_DIR", value: "~/.github/skills", derivedFrom: "COPILOT_CONFIG_DIR" },
-      { envKey: "COPILOT_PROMPT_FILE", value: "~/.github/AGENTS.md", derivedFrom: "COPILOT_CONFIG_DIR" },
+      { key: "COPILOT_CONFIG_DIR", value: "~/.github" },
+      { key: "COPILOT_SKILLS_DIR", value: "~/.github/skills", derivedFrom: "COPILOT_CONFIG_DIR" },
+      { key: "COPILOT_PROMPT_FILE", value: "~/.github/AGENTS.md", derivedFrom: "COPILOT_CONFIG_DIR" },
     ],
   }),
   agent({
@@ -82,9 +82,9 @@ export const AGENTS = [
     authFile: "~/.local/share/opencode/auth.json",
     surfaces: ["skill", "prompt", "provider"],
     dirs: [
-      { envKey: "OPENCODE_CONFIG_DIR", value: "~/.config/opencode" },
-      { envKey: "OPENCODE_SKILLS_DIR", value: "~/.config/opencode/skills", derivedFrom: "OPENCODE_CONFIG_DIR" },
-      { envKey: "OPENCODE_PROMPT_FILE", value: "~/.config/opencode/AGENTS.md", derivedFrom: "OPENCODE_CONFIG_DIR" },
+      { key: "OPENCODE_CONFIG_DIR", value: "~/.config/opencode" },
+      { key: "OPENCODE_SKILLS_DIR", value: "~/.config/opencode/skills", derivedFrom: "OPENCODE_CONFIG_DIR" },
+      { key: "OPENCODE_PROMPT_FILE", value: "~/.config/opencode/AGENTS.md", derivedFrom: "OPENCODE_CONFIG_DIR" },
     ],
   }),
 ] as const;
