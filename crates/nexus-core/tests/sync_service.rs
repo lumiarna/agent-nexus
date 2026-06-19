@@ -1,4 +1,5 @@
 use std::{
+    env,
     fs,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -17,6 +18,7 @@ use nexus_core::{
     },
 };
 use tempfile::TempDir;
+use serial_test::serial;
 
 fn set_project_symlink_ignored_dirs(db: &Database, value: &str) {
     db.connection()
@@ -279,6 +281,65 @@ async fn runs_local_file_copy_task_to_webdav() {
 }
 
 #[tokio::test]
+#[serial]
+async fn runs_local_file_copy_task_with_tilde_source_to_webdav() {
+    let (url, requests, server) = spawn_webdav_server(vec![
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+    ]);
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let source_file = home.join("keymap.json");
+    fs::write(&source_file, "keymap = '[]'\n").expect("write source file");
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", &home);
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    sync.save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
+        url,
+        user: "alice".to_string(),
+        pass: "secret".to_string(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Zed".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: "~/keymap.json".to_string(),
+                target_type: "Cloud".to_string(),
+                target: "config/zed/keymap.json".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert_eq!(groups[0].tasks[0].source, "~/keymap.json");
+
+    let task = sync
+        .run_task(created.tasks[0].id.clone())
+        .await
+        .expect("run tilde source task");
+    match previous_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    server.join().expect("join webdav server");
+    let requests = requests.lock().expect("lock request log");
+    assert_eq!(task.status, "ok");
+    assert!(requests[3].starts_with("PUT /webdav/agent-nexus-sync/config/zed/keymap.json HTTP/1.1"));
+    assert!(requests[3].contains("keymap = '[]'"));
+}
+
+#[tokio::test]
 async fn runs_local_directory_copy_task_to_webdav() {
     let (url, requests, server) = spawn_webdav_server(vec![
         http_response("201 Created"),
@@ -364,6 +425,44 @@ fn creates_symlink_placement_and_lists_custom_task_group() {
 }
 
 #[test]
+#[serial]
+fn creates_symlink_placement_with_tilde_paths() {
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let source_dir = home.join("source");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    let target_link = home.join("target-link");
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", &home);
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    sync.create_task_group(CreateTaskGroupInput {
+        name: "TAP tilde".to_string(),
+        tasks: vec![CreateTaskInput {
+            action: LINK_ACTION.to_string(),
+            source_type: "Local".to_string(),
+            source: "~/source".to_string(),
+            target_type: "Local".to_string(),
+            target: "~/target-link".to_string(),
+            schedule: "manual".to_string(),
+        }],
+    })
+    .expect("create task group");
+
+    match previous_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert_eq!(groups[0].tasks[0].source, "~/source");
+    assert_eq!(groups[0].tasks[0].target, "~/target-link");
+    assert_link_points_to(&source_dir, &target_link);
+}
+
+#[test]
 fn lists_symlink_task_with_present_link_state_when_placement_exists() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db);
@@ -421,6 +520,49 @@ fn marks_symlink_task_link_state_missing_when_placement_removed_manually() {
     assert_eq!(groups[0].tasks[0].link_state, "missing");
     // Task record itself is unchanged — only the derived placement state flips.
     assert_eq!(groups[0].tasks[0].status, "never");
+}
+
+#[test]
+#[serial]
+fn derives_link_state_for_tilde_target() {
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let source_dir = home.join("source");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    let link = home.join("link");
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", &home);
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    sync.create_task_group(CreateTaskGroupInput {
+        name: "TAP tilde state".to_string(),
+        tasks: vec![CreateTaskInput {
+            action: LINK_ACTION.to_string(),
+            source_type: "Local".to_string(),
+            source: "~/source".to_string(),
+            target_type: "Local".to_string(),
+            target: "~/link".to_string(),
+            schedule: "manual".to_string(),
+        }],
+    })
+    .expect("create task group");
+
+    let groups = sync.list_task_groups().expect("list task groups");
+    assert_eq!(groups[0].tasks[0].link_state, "present");
+
+    #[cfg(unix)]
+    fs::remove_file(&link).expect("remove symlink manually");
+    #[cfg(windows)]
+    fs::remove_dir(&link).expect("remove junction manually");
+
+    let groups = sync.list_task_groups().expect("list task groups after remove");
+    match previous_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+    assert_eq!(groups[0].tasks[0].link_state, "missing");
 }
 
 #[test]
@@ -525,6 +667,82 @@ fn deletes_task_group_and_its_symlink_placements() {
     let groups = sync.list_task_groups().expect("list task groups");
     assert!(groups.is_empty());
     assert!(!target_link.exists());
+}
+
+#[test]
+#[serial]
+fn deletes_task_and_removes_tilde_target_link() {
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let source_dir = home.join("source");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    let link = home.join("link");
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", &home);
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "TAP tilde delete".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: LINK_ACTION.to_string(),
+                source_type: "Local".to_string(),
+                source: "~/source".to_string(),
+                target_type: "Local".to_string(),
+                target: "~/link".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+    assert!(link.exists(), "link created at expanded home path");
+
+    sync.delete_task(created.tasks[0].id.clone())
+        .expect("delete task");
+    match previous_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+    assert!(!link.exists(), "tilde target link removed by delete_task");
+}
+
+#[test]
+#[serial]
+fn deletes_task_group_and_removes_tilde_target_link() {
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create home dir");
+    let source_dir = home.join("source");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+    let link = home.join("link");
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", &home);
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "TAP tilde group delete".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: LINK_ACTION.to_string(),
+                source_type: "Local".to_string(),
+                source: "~/source".to_string(),
+                target_type: "Local".to_string(),
+                target: "~/link".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+    assert!(link.exists(), "link created at expanded home path");
+
+    sync.delete_task_group(created.id.clone())
+        .expect("delete task group");
+    match previous_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+    assert!(!link.exists(), "tilde target link removed by delete_task_group");
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
@@ -684,16 +684,10 @@ fn empty_cells() -> BTreeMap<String, String> {
 
 fn expand_home(path: &str) -> Option<PathBuf> {
     if let Some(rest) = path.strip_prefix("~/") {
-        return home_dir().map(|home| home.join(rest));
+        return paths::home_dir().map(|home| home.join(rest));
     }
 
     Some(PathBuf::from(path))
-}
-
-fn home_dir() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
 }
 
 fn agent_by_name(name: &str) -> AppResult<&'static AgentCapabilitySurface> {

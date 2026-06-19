@@ -12,6 +12,7 @@ use crate::{
     database::Database,
     error::{AppError, AppResult},
     services::{
+        paths::resolve_local_path,
         symlink::{
             create_junction_placement, create_symlink_placement, is_junction,
             remove_symlink_if_present,
@@ -172,7 +173,7 @@ impl TaskLifecycle {
         };
 
         if (action == "Symlink" || action == "Junction") && target_type == "Local" {
-            remove_symlink_if_present(Path::new(&target))?;
+            remove_symlink_if_present(&resolve_local_path(&target)?)?;
         }
 
         conn.execute("DELETE FROM tasks WHERE id = ?1", [id])?;
@@ -195,7 +196,7 @@ impl TaskLifecycle {
         drop(stmt);
 
         for target in &targets {
-            remove_symlink_if_present(Path::new(target))?;
+            remove_symlink_if_present(&resolve_local_path(target)?)?;
         }
 
         conn.execute("DELETE FROM task_groups WHERE id = ?1", [id])?;
@@ -426,13 +427,13 @@ fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
 }
 
 async fn push_local_to_cloud(task: &Task, settings: &WebdavSettings) -> AppResult<()> {
-    let source = Path::new(&task.source);
+    let source = resolve_local_path(&task.source)?;
     let auth = webdav::auth_from_credentials(&settings.user, &settings.pass);
 
     if source.is_file() {
-        push_local_file_to_cloud(source, &task.target, settings, &auth).await
+        push_local_file_to_cloud(&source, &task.target, settings, &auth).await
     } else if source.is_dir() {
-        push_local_directory_to_cloud(source, &task.target, settings, &auth).await
+        push_local_directory_to_cloud(&source, &task.target, settings, &auth).await
     } else {
         Err(AppError::Validation(format!(
             "local source does not exist: {}",
@@ -551,17 +552,17 @@ fn create_link_placements(tasks: &[PreparedTask]) -> AppResult<Vec<PathBuf>> {
 }
 
 fn create_single_link_placement(task: &PreparedTask) -> AppResult<Option<PathBuf>> {
-    let source = Path::new(&task.source);
-    let target = Path::new(&task.target);
+    let source = resolve_local_path(&task.source)?;
+    let target = resolve_local_path(&task.target)?;
     let result = match task.action.as_str() {
-        "Symlink" => create_symlink_placement(source, target),
-        "Junction" => create_junction_placement(source, target),
+        "Symlink" => create_symlink_placement(&source, &target),
+        "Junction" => create_junction_placement(&source, &target),
         _ => return Ok(None),
     };
     result.inspect_err(|_| {
-        let _ = remove_symlink_if_present(target);
+        let _ = remove_symlink_if_present(&target);
     })?;
-    Ok(Some(target.to_path_buf()))
+    Ok(Some(target))
 }
 
 fn remove_created_symlinks(paths: &[PathBuf]) {
@@ -620,9 +621,13 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
 /// `"present"` — there is nothing to go missing.
 fn derive_link_state(action: &str, target_type: &str, target: &str) -> String {
     if (action == "Symlink" || action == "Junction") && target_type == "Local" {
-        let path = Path::new(target);
-        let exists = fs::symlink_metadata(path)
-            .map(|metadata| metadata.file_type().is_symlink() || is_junction(path))
+        let exists = resolve_local_path(target)
+            .ok()
+            .and_then(|path| {
+                fs::symlink_metadata(&path)
+                    .map(|metadata| metadata.file_type().is_symlink() || is_junction(&path))
+                    .ok()
+            })
             .unwrap_or(false);
         if exists {
             "present"
