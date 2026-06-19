@@ -204,13 +204,11 @@ impl ProviderQuotaService {
             }
         };
 
-        match fetch_codex_usage(&credentials.access_token, credentials.account_id.as_deref()).await {
+        match fetch_codex_usage(&credentials.access_token, credentials.account_id.as_deref()).await
+        {
             Ok(response) => {
-                let mut snapshot = codex_quota_from_usage_response(
-                    CODEX_PROVIDER_ID,
-                    credentials.plan,
-                    response,
-                );
+                let mut snapshot =
+                    codex_quota_from_usage_response(CODEX_PROVIDER_ID, credentials.plan, response);
                 snapshot.credential = Some(credentials.source);
                 snapshot
             }
@@ -221,7 +219,9 @@ impl ProviderQuotaService {
                 primary: None,
                 windows: Vec::new(),
                 credential: Some(credentials.source),
-                error: Some("Codex authorization was rejected; run codex login to refresh".to_string()),
+                error: Some(
+                    "Codex authorization was rejected; run codex login to refresh".to_string(),
+                ),
             },
             Err(error) => ProviderQuotaSnapshot {
                 provider_id: CODEX_PROVIDER_ID.to_string(),
@@ -246,8 +246,7 @@ impl ProviderQuotaService {
 
         match fetch_copilot_usage(&token).await {
             Ok(response) => {
-                let mut snapshot =
-                    copilot_quota_from_usage_response(COPILOT_PROVIDER_ID, response);
+                let mut snapshot = copilot_quota_from_usage_response(COPILOT_PROVIDER_ID, response);
                 snapshot.credential = Some("GitHub Copilot token".to_string());
                 snapshot
             }
@@ -748,9 +747,8 @@ struct CodexCredentials {
 }
 
 fn parse_codex_credentials(content: &str, path: &Path) -> AppResult<Option<CodexCredentials>> {
-    let json: serde_json::Value = serde_json::from_str(content).map_err(|error| {
-        AppError::Validation(format!("invalid Codex auth.json: {error}"))
-    })?;
+    let json: serde_json::Value = serde_json::from_str(content)
+        .map_err(|error| AppError::Validation(format!("invalid Codex auth.json: {error}")))?;
 
     let tokens = json.get("tokens");
     let access_token = tokens

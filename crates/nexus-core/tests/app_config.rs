@@ -2,9 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use nexus_core::{
     database::Database,
-    services::app_config::{
-        AppConfigService, CLAUDE_CONFIG_DIR_KEY, CODEX_CONFIG_DIR_KEY,
-    },
+    services::app_config::{AppConfigService, CLAUDE_CONFIG_DIR_KEY, CODEX_CONFIG_DIR_KEY},
 };
 
 #[test]
@@ -62,7 +60,10 @@ fn codex_config_dir_defaults_to_dot_codex_when_unset() {
         .get_codex_config_dir()
         .expect("read Codex config dir default");
 
-    assert!(dir.ends_with(".codex"), "default should resolve to ~/.codex, got {dir:?}");
+    assert!(
+        dir.ends_with(".codex"),
+        "default should resolve to ~/.codex, got {dir:?}"
+    );
 }
 
 #[test]

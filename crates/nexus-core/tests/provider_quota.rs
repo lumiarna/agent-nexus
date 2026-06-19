@@ -1,7 +1,7 @@
 use nexus_core::services::provider_quota::{
     claude_code_quota_from_usage_response, codex_quota_from_usage_response,
-    copilot_quota_from_usage_response, ClaudeCodeUsageBucket, ClaudeCodeUsageResponse,
-    parse_opencode_copilot_token, CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse,
+    copilot_quota_from_usage_response, parse_opencode_copilot_token, ClaudeCodeUsageBucket,
+    ClaudeCodeUsageResponse, CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse,
     CopilotQuotaDetail, CopilotQuotaSnapshots, CopilotUsageResponse, ProviderQuotaStatus,
     ProviderQuotaWindowKind,
 };

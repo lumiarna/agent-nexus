@@ -4,6 +4,7 @@ pub mod paths;
 pub mod placement;
 pub mod project_symlinks;
 pub mod projects;
+pub mod prompts;
 pub mod provider_quota;
 pub mod sessions;
 pub mod skills;
