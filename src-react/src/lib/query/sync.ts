@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { syncApi } from "@/lib/api/sync";
 import type { AddTaskInput, CreateTaskGroupInput } from "@/lib/api/sync";
+import type { Task, TaskGroup } from "@/types";
 
 export const syncKeys = {
   webdavSettings: ["sync", "webdavSettings"] as const,
@@ -71,10 +72,30 @@ export function useAddTaskMutation() {
   });
 }
 
+export function useUpdateTaskScheduleMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, schedule }: { id: string; schedule: string }) =>
+      syncApi.updateTaskSchedule(id, schedule),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<TaskGroup[]>(syncKeys.taskGroups, (groups) =>
+        replaceTask(groups, updated),
+      );
+    },
+  });
+}
+
 export function useRunTaskMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => syncApi.runTask(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: syncKeys.taskGroups }),
   });
+}
+
+function replaceTask(groups: TaskGroup[] | undefined, updated: Task): TaskGroup[] | undefined {
+  return groups?.map((group) => ({
+    ...group,
+    tasks: group.tasks.map((task) => (task.id === updated.id ? updated : task)),
+  }));
 }

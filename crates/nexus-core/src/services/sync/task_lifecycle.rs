@@ -6,6 +6,7 @@ use std::{
 };
 
 use rusqlite::{params, OptionalExtension, Row};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::{
@@ -39,6 +40,11 @@ struct PreparedTask {
     target: String,
     schedule: String,
     direction: String,
+}
+
+struct ScheduledTask {
+    task: Task,
+    last_run_at: Option<i64>,
 }
 
 impl TaskLifecycle {
@@ -275,6 +281,28 @@ impl TaskLifecycle {
         result
     }
 
+    pub(super) fn update_task_schedule(&self, id: String, schedule: String) -> AppResult<Task> {
+        let id = required_trimmed(&id, "task id")?.to_string();
+        let task = self
+            .find_task(&id)?
+            .ok_or_else(|| AppError::Validation("task not found".to_string()))?;
+        let schedule = normalize_task_schedule(&schedule, &task.action)?;
+        let now = now_epoch_seconds()?;
+        let conn = self.db.connection()?;
+        conn.execute(
+            r#"
+            UPDATE tasks
+            SET schedule = ?2, updated_at = ?3
+            WHERE id = ?1
+            "#,
+            params![id, schedule, now],
+        )?;
+        drop(conn);
+
+        self.find_task(&id)?
+            .ok_or_else(|| AppError::Internal("updated task was not found".to_string()))
+    }
+
     pub(super) async fn run_task(&self, id: String) -> AppResult<Task> {
         let id = required_trimmed(&id, "task id")?.to_string();
         let task = self
@@ -292,6 +320,41 @@ impl TaskLifecycle {
 
         self.find_task(&id)?
             .ok_or_else(|| AppError::Internal("completed task was not found".to_string()))
+    }
+
+    pub(super) async fn run_due_scheduled_tasks(
+        &self,
+        now_epoch_seconds: i64,
+    ) -> AppResult<Vec<Task>> {
+        let minute_start = now_epoch_seconds - now_epoch_seconds.rem_euclid(60);
+        let scheduled_tasks = {
+            let conn = self.db.connection()?;
+            list_scheduled_copy_tasks(&conn)?
+        };
+        let mut ran = Vec::new();
+
+        for scheduled in scheduled_tasks {
+            if scheduled
+                .last_run_at
+                .is_some_and(|last_run_at| last_run_at >= minute_start)
+            {
+                continue;
+            }
+            if !cron_schedule_matches(&scheduled.task.schedule, minute_start)? {
+                continue;
+            }
+
+            let status = match self.run_task_operation(&scheduled.task).await {
+                Ok(()) => "ok",
+                Err(_) => "failed",
+            };
+            self.record_task_run_at(&scheduled.task.id, status, now_epoch_seconds)?;
+            if let Some(task) = self.find_task(&scheduled.task.id)? {
+                ran.push(task);
+            }
+        }
+
+        Ok(ran)
     }
 
     async fn run_task_operation(&self, task: &Task) -> AppResult<()> {
@@ -361,7 +424,10 @@ impl TaskLifecycle {
     }
 
     fn record_task_run(&self, id: &str, status: &str) -> AppResult<()> {
-        let now = now_epoch_seconds()?;
+        self.record_task_run_at(id, status, now_epoch_seconds()?)
+    }
+
+    fn record_task_run_at(&self, id: &str, status: &str, now: i64) -> AppResult<()> {
         let conn = self.db.connection()?;
         conn.execute(
             r#"
@@ -402,17 +468,7 @@ fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
             "Junction links are only supported on Windows".to_string(),
         ));
     }
-    let schedule = task.schedule.trim();
-    let schedule = if schedule.is_empty() {
-        "manual"
-    } else {
-        schedule
-    };
-    if schedule != "manual" {
-        return Err(AppError::Validation(
-            "scheduled sync tasks are not implemented yet".to_string(),
-        ));
-    }
+    let schedule = normalize_task_schedule(&task.schedule, action)?;
     let direction = derive_direction(source_type, target_type);
 
     Ok(PreparedTask {
@@ -421,9 +477,99 @@ fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
         source: source.to_string(),
         target_type: target_type.to_string(),
         target: target.to_string(),
-        schedule: schedule.to_string(),
+        schedule,
         direction: direction.to_string(),
     })
+}
+
+fn normalize_task_schedule(raw: &str, action: &str) -> AppResult<String> {
+    let schedule = raw.trim();
+    if schedule.is_empty() || schedule == "manual" {
+        return Ok("manual".to_string());
+    }
+    if action != "Copy" {
+        return Err(AppError::Validation(
+            "only Copy tasks can use a schedule".to_string(),
+        ));
+    }
+    validate_cron_schedule(schedule)?;
+    Ok(schedule.to_string())
+}
+
+fn validate_cron_schedule(schedule: &str) -> AppResult<()> {
+    let fields = schedule.split_whitespace().collect::<Vec<_>>();
+    if fields.len() != 5 {
+        return Err(AppError::Validation(
+            "schedule must be 'manual' or a 5-field cron expression".to_string(),
+        ));
+    }
+
+    validate_cron_field(fields[0], 0, 59, "minute")?;
+    validate_cron_field(fields[1], 0, 23, "hour")?;
+    validate_cron_field(fields[2], 1, 31, "day of month")?;
+    validate_cron_field(fields[3], 1, 12, "month")?;
+    validate_cron_field(fields[4], 0, 7, "day of week")?;
+    Ok(())
+}
+
+fn cron_schedule_matches(schedule: &str, now_epoch_seconds: i64) -> AppResult<bool> {
+    validate_cron_schedule(schedule)?;
+    let now = OffsetDateTime::from_unix_timestamp(now_epoch_seconds)
+        .map_err(|error| AppError::Validation(format!("invalid schedule time: {error}")))?;
+    let fields = schedule.split_whitespace().collect::<Vec<_>>();
+    let day_of_week = now.weekday().number_days_from_sunday() as u32;
+
+    Ok(cron_field_matches(fields[0], now.minute() as u32, 0)?
+        && cron_field_matches(fields[1], now.hour() as u32, 0)?
+        && cron_field_matches(fields[2], now.day() as u32, 1)?
+        && cron_field_matches(fields[3], u8::from(now.month()) as u32, 1)?
+        && cron_day_of_week_matches(fields[4], day_of_week)?)
+}
+
+fn cron_field_matches(field: &str, value: u32, range_start: u32) -> AppResult<bool> {
+    if field == "*" {
+        return Ok(true);
+    }
+
+    if let Some(step) = field.strip_prefix("*/") {
+        let step = parse_cron_number(step, "step")?;
+        return Ok((value - range_start) % step == 0);
+    }
+
+    Ok(value == parse_cron_number(field, "value")?)
+}
+
+fn cron_day_of_week_matches(field: &str, value: u32) -> AppResult<bool> {
+    if field == "7" {
+        return Ok(value == 0);
+    }
+    cron_field_matches(field, value, 0)
+}
+
+fn validate_cron_field(field: &str, min: u32, max: u32, label: &str) -> AppResult<()> {
+    if field == "*" {
+        return Ok(());
+    }
+
+    if let Some(step) = field.strip_prefix("*/") {
+        let step = parse_cron_number(step, label)?;
+        let range_size = max - min + 1;
+        if step == 0 || step > range_size {
+            return Err(AppError::Validation(format!("invalid cron {label} field")));
+        }
+        return Ok(());
+    }
+
+    let value = parse_cron_number(field, label)?;
+    if value < min || value > max {
+        return Err(AppError::Validation(format!("invalid cron {label} field")));
+    }
+    Ok(())
+}
+
+fn parse_cron_number(raw: &str, label: &str) -> AppResult<u32> {
+    raw.parse::<u32>()
+        .map_err(|_| AppError::Validation(format!("invalid cron {label} field")))
 }
 
 async fn push_local_to_cloud(task: &Task, settings: &WebdavSettings) -> AppResult<()> {
@@ -595,6 +741,44 @@ fn list_tasks_for_group(conn: &rusqlite::Connection, group_id: &str) -> AppResul
     let mut tasks: Vec<Task> = rows.collect::<Result<Vec<_>, _>>()?;
     for task in &mut tasks {
         task.link_state = derive_link_state(&task.action, &task.target_type, &task.target);
+    }
+    Ok(tasks)
+}
+
+fn list_scheduled_copy_tasks(conn: &rusqlite::Connection) -> AppResult<Vec<ScheduledTask>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            id,
+            direction,
+            action,
+            source_type,
+            source,
+            target_type,
+            target,
+            schedule,
+            COALESCE(strftime('%m-%d %H:%M', last_run_at, 'unixepoch'), '—') AS last_run,
+            COALESCE(last_status, 'never') AS status,
+            last_run_at
+        FROM tasks
+        WHERE action = 'Copy' AND schedule <> 'manual'
+        ORDER BY sort_index IS NULL, sort_index, created_at
+        "#,
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(ScheduledTask {
+            task: task_from_row(row)?,
+            last_run_at: row.get(10)?,
+        })
+    })?;
+    let mut tasks = rows.collect::<Result<Vec<_>, _>>()?;
+    for scheduled in &mut tasks {
+        scheduled.task.link_state = derive_link_state(
+            &scheduled.task.action,
+            &scheduled.task.target_type,
+            &scheduled.task.target,
+        );
     }
     Ok(tasks)
 }

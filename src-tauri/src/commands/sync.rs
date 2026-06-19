@@ -63,6 +63,15 @@ pub fn add_task(
 }
 
 #[tauri::command]
+pub fn update_task_schedule(
+    state: State<'_, AppState>,
+    id: String,
+    schedule: String,
+) -> AppResult<Task> {
+    state.sync.update_task_schedule(id, schedule)
+}
+
+#[tauri::command]
 pub async fn run_task(state: State<'_, AppState>, id: String) -> AppResult<Task> {
     state.sync.run_task(id).await
 }

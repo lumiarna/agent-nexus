@@ -1,7 +1,12 @@
 pub mod commands;
 pub mod store;
 
-use nexus_core::database::Database;
+use std::{
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use nexus_core::{database::Database, services::sync::SyncService};
 use store::AppState;
 use tauri::Manager;
 
@@ -11,7 +16,10 @@ pub fn run() {
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             let db = Database::open(app_data_dir.join("agent-nexus.sqlite3"))?;
-            app.manage(AppState::new(db));
+            let state = AppState::new(db);
+            let scheduler_sync = state.sync.clone();
+            app.manage(state);
+            start_sync_scheduler(scheduler_sync);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -44,6 +52,7 @@ pub fn run() {
             commands::sync::run_task,
             commands::sync::save_webdav_settings,
             commands::sync::test_webdav_connection,
+            commands::sync::update_task_schedule,
         ])
         .on_window_event(|window, event| {
             if window.label() == "main"
@@ -54,4 +63,24 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("failed to run Agent Nexus");
+}
+
+fn start_sync_scheduler(sync: SyncService) {
+    thread::spawn(move || loop {
+        let now = current_epoch_seconds();
+        if let Err(error) = tauri::async_runtime::block_on(sync.run_due_scheduled_tasks(now)) {
+            eprintln!("scheduled sync task runner failed: {error}");
+        }
+
+        let now = current_epoch_seconds();
+        let sleep_secs = 60 - now.rem_euclid(60) as u64;
+        thread::sleep(Duration::from_secs(sleep_secs));
+    });
+}
+
+fn current_epoch_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is before Unix epoch")
+        .as_secs() as i64
 }

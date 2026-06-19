@@ -127,6 +127,12 @@ impl SyncService {
         self.task_lifecycle.run_task(id).await
     }
 
+    pub async fn run_due_scheduled_tasks(&self, now_epoch_seconds: i64) -> AppResult<Vec<Task>> {
+        self.task_lifecycle
+            .run_due_scheduled_tasks(now_epoch_seconds)
+            .await
+    }
+
     pub fn list_task_groups(&self) -> AppResult<Vec<TaskGroup>> {
         self.task_lifecycle.list_task_groups()
     }
@@ -145,6 +151,10 @@ impl SyncService {
 
     pub fn add_task(&self, group_id: String, task: CreateTaskInput) -> AppResult<TaskGroup> {
         self.task_lifecycle.add_task(group_id, task)
+    }
+
+    pub fn update_task_schedule(&self, id: String, schedule: String) -> AppResult<Task> {
+        self.task_lifecycle.update_task_schedule(id, schedule)
     }
 }
 

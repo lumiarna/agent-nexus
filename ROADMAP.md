@@ -1,11 +1,11 @@
 - Project 接入 Tauri folder picker，把手输路径替换为原生选择目
-- Project 支持拖拽排序
 - Skill - Project 应显示 Skill 数量
 - Icon
 - Copy 应先移到回收站再复制
-- 删除 Copy Task 时，应把目标位置的文件也删掉
+- Local 删除 Copy Task 时，应把目标位置的文件也删掉
 - 项目里有三份 Cargo.toml, 两份 package.json/pnpm-workspace.yaml
 - 按 ESC 不应退出全屏
+- 拖拽排序应保存
 
 ---
 

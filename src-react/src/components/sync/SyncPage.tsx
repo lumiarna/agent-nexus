@@ -22,6 +22,7 @@ import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
 import { formatProjectSymlinkDisplayPath } from "@/components/sync/pathDisplay";
+import { DEFAULT_CRON_SCHEDULE, SCHEDULE_PRESETS, cronHuman } from "@/components/sync/schedule";
 import { detectPlatform, type HostPlatform } from "@/lib/runtime";
 import {
   useAddTaskMutation,
@@ -30,6 +31,7 @@ import {
   useDeleteTaskMutation,
   useRunTaskMutation,
   useTaskGroupsQuery,
+  useUpdateTaskScheduleMutation,
 } from "@/lib/query/sync";
 import {
   useDeleteProjectSymlinkMutation,
@@ -48,11 +50,6 @@ import type {
   LocationType,
 } from "@/types";
 
-const SCHEDULE_PRESETS = [
-  { label: "Hourly", expr: "0 * * * *" },
-  { label: "Daily 05:00", expr: "0 5 * * *" },
-  { label: "Weekly Sun 03:00", expr: "0 3 * * 0" },
-];
 // Both tables use a 16-col grid. Action starts at col 8 (0.5+1+5.5 = 1.5+5.5 = 7) so the
 // two Action columns land at the same x without sharing a grid template.
 const TASK_COLS = "0.2fr 0.8fr 6fr 0.8fr 6fr 2.2fr";
@@ -126,16 +123,6 @@ function CopyPathButton({ path }: { path: string }) {
       <Copy size={12} />
     </button>
   );
-}
-
-function cronHuman(expr: string): string {
-  const m: Record<string, string> = {
-    "0 * * * *": "Every hour, on the hour.",
-    "0 5 * * *": "Every day at 05:00.",
-    "0 3 * * 0": "Every Sunday at 03:00.",
-    "0 4 * * *": "Every day at 04:00.",
-  };
-  return m[expr] ?? "Custom schedule expression.";
 }
 
 function ActionBadge({ action }: { action: TaskAction }) {
@@ -244,6 +231,7 @@ export function SyncPage() {
   const deleteTaskGroupMutation = useDeleteTaskGroupMutation();
   const addTaskMutation = useAddTaskMutation();
   const runTaskMutation = useRunTaskMutation();
+  const updateTaskScheduleMutation = useUpdateTaskScheduleMutation();
   const projectSymlinksQuery = useProjectSymlinksQuery();
   const deleteProjectSymlinkMutation = useDeleteProjectSymlinkMutation();
   const [groups, setGroups] = useState<TaskGroup[]>(() => nexus.taskGroups());
@@ -421,6 +409,23 @@ export function SyncPage() {
         updateTask(group.id, task.id, updated);
       }
       toast(`Run group complete · ${group.name}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function saveSchedule() {
+    if (!sched) return;
+    const isCron = sched.mode === "cron";
+    const schedule = isCron ? sched.cronExpr.trim() || "manual" : "manual";
+    try {
+      const updated = await updateTaskScheduleMutation.mutateAsync({
+        id: sched.taskId,
+        schedule,
+      });
+      updateTask(sched.groupId, sched.taskId, updated);
+      setSched(null);
+      toast(isCron ? `Schedule set · ${schedule}` : "Schedule set to Manual");
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -695,7 +700,7 @@ export function SyncPage() {
                                                 taskId: t.id,
                                                 taskName: `${t.direction} · ${t.source || "task"}`,
                                                 mode: t.schedule !== "manual" ? "cron" : "manual",
-                                                cronExpr: t.schedule !== "manual" ? t.schedule : "0 5 * * *",
+                                                cronExpr: t.schedule !== "manual" ? t.schedule : DEFAULT_CRON_SCHEDULE,
                                               })
                                             }
                                             className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
@@ -1054,7 +1059,7 @@ export function SyncPage() {
                               { value: "cron", label: "Schedule" },
                             ]}
                             value={isCron ? "cron" : "manual"}
-                            onChange={(v) => patchFormTask(i, { schedule: v === "manual" ? "manual" : isCron ? tk.schedule : "0 5 * * *" })}
+                            onChange={(v) => patchFormTask(i, { schedule: v === "manual" ? "manual" : isCron ? tk.schedule : DEFAULT_CRON_SCHEDULE })}
                           />
                           {isCron ? (
                             <Input
@@ -1148,13 +1153,7 @@ export function SyncPage() {
               </Button>
               <Button
                 variant="primary"
-                onClick={() => {
-                  const isCron = sched.mode === "cron";
-                  const val = isCron ? sched.cronExpr.trim() || "manual" : "manual";
-                  updateTask(sched.groupId, sched.taskId, { schedule: val });
-                  setSched(null);
-                  toast(isCron ? `Schedule set · ${val}` : "Schedule set to Manual");
-                }}
+                onClick={() => void saveSchedule()}
               >
                 Save schedule
               </Button>
@@ -1374,7 +1373,7 @@ function AddTaskForm({ task, onChange, supportsJunction }: AddTaskFormProps) {
                 { value: "cron", label: "Schedule" },
               ]}
               value={isCron ? "cron" : "manual"}
-              onChange={(v) => onChange({ ...task, schedule: v === "manual" ? "manual" : isCron ? task.schedule : "0 5 * * *" })}
+              onChange={(v) => onChange({ ...task, schedule: v === "manual" ? "manual" : isCron ? task.schedule : DEFAULT_CRON_SCHEDULE })}
             />
             {isCron ? (
               <Input

@@ -277,6 +277,61 @@ async fn runs_local_file_copy_task_to_webdav() {
         requests[3].starts_with("PUT /webdav/agent-nexus-sync/config/warp/settings.toml HTTP/1.1")
     );
     assert!(requests[3].contains("theme = 'dark'"));
+
+    let second_run = sync
+        .run_due_scheduled_tasks(320)
+        .await
+        .expect("same minute check does not fail");
+    assert!(second_run.is_empty());
+}
+
+#[tokio::test]
+async fn runs_due_local_to_cloud_copy_task_on_schedule() {
+    let (url, requests, server) = spawn_webdav_server(vec![
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+    ]);
+    let root = TempDir::new().expect("create temp dir");
+    let source_file = root.path().join("settings.toml");
+    fs::write(&source_file, "theme = 'dark'\n").expect("write source file");
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    sync.save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
+        url,
+        user: "alice".to_string(),
+        pass: "secret".to_string(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+    sync.create_task_group(CreateTaskGroupInput {
+        name: "Warp".to_string(),
+        tasks: vec![CreateTaskInput {
+            action: "Copy".to_string(),
+            source_type: "Local".to_string(),
+            source: source_file.to_string_lossy().into_owned(),
+            target_type: "Cloud".to_string(),
+            target: "config/warp/settings.toml".to_string(),
+            schedule: "*/5 * * * *".to_string(),
+        }],
+    })
+    .expect("create scheduled cloud copy task");
+
+    let ran = sync
+        .run_due_scheduled_tasks(300)
+        .await
+        .expect("run due scheduled tasks");
+
+    assert_eq!(ran.len(), 1);
+    assert_eq!(ran[0].status, "ok");
+    assert_ne!(ran[0].last_run, "—");
+    server.join().expect("join webdav server");
+    let requests = requests.lock().expect("lock request log");
+    assert!(
+        requests[3].starts_with("PUT /webdav/agent-nexus-sync/config/warp/settings.toml HTTP/1.1")
+    );
+    assert!(requests[3].contains("theme = 'dark'"));
 }
 
 #[tokio::test]
@@ -589,25 +644,59 @@ fn rejects_cloud_to_cloud_task() {
 }
 
 #[test]
-fn rejects_scheduled_task_until_scheduler_is_implemented() {
+fn creates_local_to_cloud_copy_task_with_scheduled_cron() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db);
 
-    let error = sync
+    let created = sync
         .create_task_group(CreateTaskGroupInput {
             name: "Scheduled task".to_string(),
             tasks: vec![CreateTaskInput {
                 action: "Copy".to_string(),
                 source_type: "Local".to_string(),
                 source: "/workspace/config".to_string(),
-                target_type: "Local".to_string(),
-                target: "/workspace/target".to_string(),
-                schedule: "0 5 * * *".to_string(),
+                target_type: "Cloud".to_string(),
+                target: "backups/config".to_string(),
+                schedule: "*/5 * * * *".to_string(),
             }],
         })
-        .expect_err("scheduled tasks are not implemented");
+        .expect("create scheduled task");
 
-    assert!(error.to_string().contains("scheduled sync tasks"));
+    assert_eq!(created.tasks[0].direction, "Push");
+    assert_eq!(created.tasks[0].schedule, "*/5 * * * *");
+    assert_eq!(
+        sync.list_task_groups().expect("list task groups")[0].tasks[0].schedule,
+        "*/5 * * * *"
+    );
+}
+
+#[test]
+fn updates_copy_task_schedule_and_lists_the_saved_value() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Scheduled task".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: "/workspace/config".to_string(),
+                target_type: "Cloud".to_string(),
+                target: "backups/config".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task");
+
+    let updated = sync
+        .update_task_schedule(created.tasks[0].id.clone(), "0 * * * *".to_string())
+        .expect("update task schedule");
+
+    assert_eq!(updated.schedule, "0 * * * *");
+    assert_eq!(
+        sync.list_task_groups().expect("list task groups")[0].tasks[0].schedule,
+        "0 * * * *"
+    );
 }
 
 #[test]
@@ -1009,7 +1098,7 @@ fn rejects_add_cloud_to_cloud_task_without_creating_placement() {
 }
 
 #[test]
-fn rejects_add_scheduled_task_without_creating_placement() {
+fn rejects_add_scheduled_link_task_without_creating_placement() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db);
     let root = TempDir::new().expect("create temp dir");
@@ -1043,9 +1132,9 @@ fn rejects_add_scheduled_task_without_creating_placement() {
                 schedule: "0 5 * * *".to_string(),
             },
         )
-        .expect_err("scheduled add task should fail");
+        .expect_err("scheduled link task should fail");
 
-    assert!(error.to_string().contains("scheduled sync tasks"));
+    assert!(error.to_string().contains("only Copy tasks"));
     assert!(!new_target.exists());
     let groups = sync.list_task_groups().expect("list task groups");
     assert_eq!(groups[0].tasks.len(), 1);

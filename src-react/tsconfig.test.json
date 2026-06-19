@@ -11,6 +11,7 @@
   },
   "include": [
     "src/components/sync/pathDisplay.ts",
+    "src/components/sync/schedule.ts",
     "src/lib/query/projectSymlinkInventory.ts",
     "tests/**/*.test.ts"
   ],
