@@ -1,4 +1,4 @@
-import type { ProjectSymlink, TaskAction, TaskGroup, LocationType, WebdavSettings } from "@/types";
+import type { TaskAction, TaskGroup, LocationType, WebdavSettings } from "@/types";
 import { invokeCommand } from "@/lib/api/tauri";
 
 export interface CreateTaskInput {
@@ -58,11 +58,5 @@ export const syncApi = {
   },
   runTask(id: string): Promise<TaskGroup["tasks"][number]> {
     return invokeCommand<TaskGroup["tasks"][number]>("run_task", { id });
-  },
-  listProjectSymlinks(): Promise<ProjectSymlink[]> {
-    return invokeCommand<ProjectSymlink[]>("list_project_symlinks");
-  },
-  deleteProjectSymlink(targetPath: string): Promise<void> {
-    return invokeCommand<void>("delete_project_symlink", { targetPath });
   },
 };

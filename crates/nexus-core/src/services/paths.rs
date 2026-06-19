@@ -1,4 +1,7 @@
-use std::{env, path::{Path, PathBuf}};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 use crate::error::{AppError, AppResult};
 
@@ -11,12 +14,16 @@ pub fn home_dir() -> Option<PathBuf> {
 pub fn resolve_local_path(raw: &str) -> AppResult<PathBuf> {
     if raw == "~" {
         return home_dir().ok_or_else(|| {
-            AppError::Validation("cannot resolve '~': HOME environment variable is not set".to_string())
+            AppError::Validation(
+                "cannot resolve '~': HOME environment variable is not set".to_string(),
+            )
         });
     }
     if let Some(rest) = raw.strip_prefix("~/") {
         return home_dir().map(|home| home.join(rest)).ok_or_else(|| {
-            AppError::Validation("cannot resolve '~': HOME environment variable is not set".to_string())
+            AppError::Validation(
+                "cannot resolve '~': HOME environment variable is not set".to_string(),
+            )
         });
     }
     Ok(PathBuf::from(raw))
@@ -49,8 +56,8 @@ fn normalize_display_path(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{env, path::Path};
     use serial_test::serial;
+    use std::{env, path::Path};
     use tempfile::TempDir;
 
     fn with_home<F: FnOnce(&Path)>(home: &TempDir, f: F) {

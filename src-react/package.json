@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test:unit": "tsc --project tsconfig.test.json && node --test .test-output/tests/pathDisplay.test.js",
+    "test:unit": "tsc --project tsconfig.test.json && node --test .test-output/tests/*.test.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

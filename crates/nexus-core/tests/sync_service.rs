@@ -1,6 +1,5 @@
 use std::{
-    env,
-    fs,
+    env, fs,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::Path,
@@ -17,8 +16,8 @@ use nexus_core::{
         sync::{CreateTaskGroupInput, CreateTaskInput, SyncService},
     },
 };
-use tempfile::TempDir;
 use serial_test::serial;
+use tempfile::TempDir;
 
 fn set_project_symlink_ignored_dirs(db: &Database, value: &str) {
     db.connection()
@@ -26,7 +25,7 @@ fn set_project_symlink_ignored_dirs(db: &Database, value: &str) {
         .execute(
             r#"
             INSERT INTO settings (key, value)
-            VALUES ('sync_project_symlink_ignored_dirs', ?1)
+            VALUES ('project_symlink_ignored_dirs', ?1)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
             "#,
             [value],
@@ -40,7 +39,7 @@ fn set_project_symlink_max_depth(db: &Database, value: &str) {
         .execute(
             r#"
             INSERT INTO settings (key, value)
-            VALUES ('sync_project_symlink_max_depth', ?1)
+            VALUES ('project_symlink_max_depth', ?1)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
             "#,
             [value],
@@ -557,7 +556,9 @@ fn derives_link_state_for_tilde_target() {
     #[cfg(windows)]
     fs::remove_dir(&link).expect("remove junction manually");
 
-    let groups = sync.list_task_groups().expect("list task groups after remove");
+    let groups = sync
+        .list_task_groups()
+        .expect("list task groups after remove");
     match previous_home {
         Some(value) => env::set_var("HOME", value),
         None => env::remove_var("HOME"),
@@ -742,7 +743,10 @@ fn deletes_task_group_and_removes_tilde_target_link() {
         Some(value) => env::set_var("HOME", value),
         None => env::remove_var("HOME"),
     }
-    assert!(!link.exists(), "tilde target link removed by delete_task_group");
+    assert!(
+        !link.exists(),
+        "tilde target link removed by delete_task_group"
+    );
 }
 
 #[test]
@@ -1314,7 +1318,7 @@ fn skips_common_build_output_dirs_by_default() {
 #[test]
 fn respects_max_depth_setting() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
-    set_project_symlink_max_depth(&db, "3");
+    set_project_symlink_max_depth(&db, "2");
     let projects = ProjectService::new(db.clone());
     let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
@@ -1350,19 +1354,19 @@ fn respects_max_depth_setting() {
 
     assert!(
         has("l1-link"),
-        "depth 1 link should be listed at max_depth 3, got {links:?}"
+        "depth 1 link should be listed at max_depth 2, got {links:?}"
     );
     assert!(
         has("l2-link"),
-        "depth 2 link should be listed at max_depth 3, got {links:?}"
+        "depth 2 link should be listed at max_depth 2, got {links:?}"
     );
     assert!(
-        has("l3-link"),
-        "depth 3 link should be listed at max_depth 3, got {links:?}"
+        !has("l3-link"),
+        "depth 3 link should be skipped at max_depth 2, got {links:?}"
     );
     assert!(
         !has("l4-link"),
-        "depth 4 link should be skipped at max_depth 3, got {links:?}"
+        "depth 4 link should be skipped at max_depth 2, got {links:?}"
     );
 }
 

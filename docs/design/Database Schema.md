@@ -251,10 +251,11 @@ INSERT INTO settings (key, value) VALUES ('tray_metric_mode', 'Remaining');
 INSERT INTO settings (key, value) VALUES ('webdav_url', '');
 INSERT INTO settings (key, value) VALUES ('webdav_user', '');
 INSERT INTO settings (key, value) VALUES ('webdav_pass', '');
--- Sync Project symlink scan ignored directory basenames (newline-separated)
-INSERT INTO settings (key, value) VALUES ('sync_project_symlink_ignored_dirs', '.git
+-- Project Symlink inventory scan ignored directory basenames (newline-separated)
+INSERT INTO settings (key, value) VALUES ('project_symlink_ignored_dirs', '.git
 .venv
 node_modules');
+INSERT INTO settings (key, value) VALUES ('project_symlink_max_depth', '3');
 ```
 
 ## 迁移策略

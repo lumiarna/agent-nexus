@@ -14,8 +14,8 @@ use crate::{
     services::{paths, symlink::remove_symlink},
 };
 
-const PROJECT_SYMLINK_IGNORED_DIRS_SETTING: &str = "sync_project_symlink_ignored_dirs";
-const PROJECT_SYMLINK_MAX_DEPTH_SETTING: &str = "sync_project_symlink_max_depth";
+const PROJECT_SYMLINK_IGNORED_DIRS_SETTING: &str = "project_symlink_ignored_dirs";
+const PROJECT_SYMLINK_MAX_DEPTH_SETTING: &str = "project_symlink_max_depth";
 const DEFAULT_PROJECT_SYMLINK_MAX_DEPTH: usize = 3;
 const DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &[&str] = &[
     ".git",

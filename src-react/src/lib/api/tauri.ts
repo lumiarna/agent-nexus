@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import { isTauriRuntime } from "@/lib/runtime";
+import { isTauriRuntime } from "../runtime.js";
 
 export async function invokeCommand<T>(
   command: string,

@@ -26,13 +26,15 @@ import { detectPlatform, type HostPlatform } from "@/lib/runtime";
 import {
   useAddTaskMutation,
   useCreateTaskGroupMutation,
-  useDeleteProjectSymlinkMutation,
   useDeleteTaskGroupMutation,
   useDeleteTaskMutation,
-  useProjectSymlinksQuery,
   useRunTaskMutation,
   useTaskGroupsQuery,
 } from "@/lib/query/sync";
+import {
+  useDeleteProjectSymlinkMutation,
+  useProjectSymlinksQuery,
+} from "@/lib/query/projectSymlinks";
 import { nexus } from "@/lib/mock";
 import { palette } from "@/lib/tokens";
 import { cn } from "@/lib/utils";

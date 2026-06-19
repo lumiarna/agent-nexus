@@ -9,6 +9,10 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["src/components/sync/pathDisplay.ts", "tests/**/*.test.ts"],
+  "include": [
+    "src/components/sync/pathDisplay.ts",
+    "src/lib/query/projectSymlinkInventory.ts",
+    "tests/**/*.test.ts"
+  ],
   "exclude": ["dist", "node_modules", ".test-output"]
 }
