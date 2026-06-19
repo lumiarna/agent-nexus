@@ -10,8 +10,8 @@ import {
   useTestWebdavConnectionMutation,
   useWebdavSettingsQuery,
 } from "@/lib/query/sync";
-import { AGENTS } from "@/config/agents";
-import { agentAbbr, agentColor } from "@/lib/tokens";
+import { fallbackAgentCapabilities } from "@/lib/agentCapabilities";
+import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
 
 type WebdavStatus = "ok" | "testing" | "untested";
 
@@ -38,6 +38,7 @@ function getErrorMessage(error: unknown): string {
 export function SettingsPage() {
   const { go } = useNav();
   const webdavSettingsQuery = useWebdavSettingsQuery();
+  const agentCapabilitiesQuery = useAgentCapabilitiesQuery();
   const saveWebdavSettingsMutation = useSaveWebdavSettingsMutation();
   const testWebdavConnectionMutation = useTestWebdavConnectionMutation();
   const [init] = useState(() => nexus.settings());
@@ -48,7 +49,7 @@ export function SettingsPage() {
   const [webdavStatus, setWebdavStatus] = useState<WebdavStatus>(
     init.webdav.status === "ok" ? "ok" : "untested",
   );
-  const [agents] = useState(AGENTS);
+  const agents = agentCapabilitiesQuery.data ?? fallbackAgentCapabilities();
 
   const ws = WS_INFO[webdavStatus];
 
@@ -211,8 +212,7 @@ export function SettingsPage() {
         <div className="flex flex-wrap items-center gap-2.5">
           <h2 className="m-0 text-[15px] font-extrabold text-nexus-ink">Agent config roots</h2>
           <span className="text-[11px] text-[#b3a999]">
-            Where Skill &amp; Prompt placements are written · order Generic Agent / Claude Code / CodeX /
-            Copilot / OpenCode
+            Where Skill &amp; Prompt placements are written · backend capability order
           </span>
         </div>
         <div className="mt-4 flex flex-col gap-3">
@@ -224,15 +224,15 @@ export function SettingsPage() {
               <div className="flex items-center gap-[9px]">
                 <span
                   className="inline-flex h-6 w-6 items-center justify-center rounded-[7px] text-[9px] font-extrabold text-white"
-                  style={{ background: agentColor(a.name) }}
+                  style={{ background: a.color }}
                 >
-                  {agentAbbr(a.name)}
+                  {a.abbr}
                 </span>
                 <span className="text-[13.5px] font-bold text-nexus-ink">{a.name}</span>
 
               </div>
-              <div className="mt-[11px] grid grid-cols-3 gap-3">
-                {a.dirs.map((d) => (
+              <div className="mt-[11px] grid grid-cols-4 gap-3">
+                {agentDirs(a).map((d) => (
                   <div key={d.key}>
                     <div className="font-mono text-[9.5px] font-semibold tracking-[.04em] text-[#c3b9a8]">
                       {d.key}
@@ -252,4 +252,17 @@ export function SettingsPage() {
       </Card>
     </ScreenScroll>
   );
+}
+
+function agentDirs(agent: ReturnType<typeof fallbackAgentCapabilities>[number]) {
+  return [
+    { key: "CONFIG_ROOT", value: agent.configDir },
+    agent.skill
+      ? { key: "GLOBAL_SKILLS", value: agent.skill.globalDir, derivedFrom: "CONFIG_ROOT" }
+      : null,
+    agent.skill ? { key: "PROJECT_SKILLS", value: agent.skill.projectDir } : null,
+    agent.prompt
+      ? { key: "GLOBAL_PROMPT", value: agent.prompt.globalFile, derivedFrom: "CONFIG_ROOT" }
+      : null,
+  ].filter((dir): dir is { key: string; value: string; derivedFrom?: string } => dir !== null);
 }

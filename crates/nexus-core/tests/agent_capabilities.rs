@@ -1,4 +1,6 @@
-use nexus_core::services::agent_capabilities::{agent_by_name, agent_capability_surfaces};
+use nexus_core::services::agent_capabilities::{
+    agent_by_name, agent_capability_surfaces, list_agent_capability_surfaces,
+};
 
 #[test]
 fn defines_agent_capability_surfaces_in_canonical_order() {
@@ -35,11 +37,22 @@ fn defines_agent_capability_surfaces_in_canonical_order() {
         copilot
             .provider
             .expect("copilot provider surface")
+            .provider_id,
+        "copilot"
+    );
+    assert_eq!(
+        copilot
+            .provider
+            .expect("copilot provider surface")
             .credential_hint,
         Some("$GITHUB_TOKEN")
     );
 
     let codex = agent_by_name("CodeX").expect("codex capability");
+    assert_eq!(
+        codex.provider.expect("codex provider surface").provider_id,
+        "codex"
+    );
     assert_eq!(
         codex
             .provider
@@ -47,4 +60,26 @@ fn defines_agent_capability_surfaces_in_canonical_order() {
             .credential_hint,
         Some("~/.codex/auth.json")
     );
+}
+
+#[test]
+fn exposes_agent_backed_provider_surfaces_without_generic_agent() {
+    let providers = list_agent_capability_surfaces()
+        .into_iter()
+        .filter_map(|agent| agent.provider.map(|provider| (agent.name, provider)))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        providers
+            .iter()
+            .map(|(name, provider)| (*name, provider.provider_id))
+            .collect::<Vec<_>>(),
+        [
+            ("Claude Code", "claude"),
+            ("CodeX", "codex"),
+            ("Copilot", "copilot"),
+            ("OpenCode", "opencode")
+        ]
+    );
+    assert!(!providers.iter().any(|(name, _)| *name == "Generic Agent"));
 }

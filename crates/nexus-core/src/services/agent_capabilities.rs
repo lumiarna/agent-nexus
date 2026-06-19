@@ -1,4 +1,7 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentCapabilitySurface {
     pub name: &'static str,
     pub abbr: &'static str,
@@ -9,19 +12,23 @@ pub struct AgentCapabilitySurface {
     pub provider: Option<ProviderSurface>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SkillSurface {
     pub global_dir: &'static str,
     pub project_dir: &'static str,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PromptSurface {
     pub global_file: &'static str,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderSurface {
+    pub provider_id: &'static str,
     pub credential_hint: Option<&'static str>,
 }
 
@@ -53,6 +60,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
             global_file: "~/.claude/CLAUDE.md",
         }),
         provider: Some(ProviderSurface {
+            provider_id: "claude",
             credential_hint: Some("~/.claude"),
         }),
     },
@@ -69,6 +77,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
             global_file: "~/.codex/AGENTS.md",
         }),
         provider: Some(ProviderSurface {
+            provider_id: "codex",
             credential_hint: Some("~/.codex/auth.json"),
         }),
     },
@@ -85,6 +94,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
             global_file: "~/.github/AGENTS.md",
         }),
         provider: Some(ProviderSurface {
+            provider_id: "copilot",
             credential_hint: Some("$GITHUB_TOKEN"),
         }),
     },
@@ -101,6 +111,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
             global_file: "~/.config/opencode/AGENTS.md",
         }),
         provider: Some(ProviderSurface {
+            provider_id: "opencode",
             credential_hint: Some("~/.local/share/opencode/auth.json"),
         }),
     },
@@ -108,6 +119,10 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
 
 pub fn agent_capability_surfaces() -> &'static [AgentCapabilitySurface] {
     AGENT_CAPABILITY_SURFACES
+}
+
+pub fn list_agent_capability_surfaces() -> Vec<AgentCapabilitySurface> {
+    AGENT_CAPABILITY_SURFACES.to_vec()
 }
 
 pub fn agent_by_name(name: &str) -> Option<&'static AgentCapabilitySurface> {

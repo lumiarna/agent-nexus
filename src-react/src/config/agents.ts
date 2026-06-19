@@ -1,5 +1,5 @@
-// Declarative agent definitions — single source of truth.
-// UI code and mock layer import from here; no computed derivation.
+// Declarative agent definitions for browser preview and TypeScript literals.
+// The desktop runtime consumes the backend Agent Capability Surface.
 
 export interface AgentDirDef {
   key: string;
@@ -16,6 +16,8 @@ export interface AgentDef<Name extends string = string> {
   color: string;
   dirs: readonly AgentDirDef[];
   surfaces: readonly AgentSurface[];
+  projectSkillDir?: string;
+  providerId?: string;
   /** Credential file path, if any. Not a config root — used by Provider logic. */
   authFile?: string;
 }
@@ -34,6 +36,7 @@ export const AGENTS = [
     abbr: "AG",
     color: "#9a7b53",
     surfaces: ["skill", "prompt"],
+    projectSkillDir: ".agents/skills",
     dirs: [
       { key: "GENERIC_AGENT_CONFIG_DIR", value: "~/.agents" },
       { key: "GENERIC_AGENT_SKILLS_DIR", value: "~/.agents/skills", derivedFrom: "GENERIC_AGENT_CONFIG_DIR" },
@@ -45,6 +48,9 @@ export const AGENTS = [
     abbr: "CC",
     color: "#c2410c",
     surfaces: ["skill", "prompt", "provider"],
+    projectSkillDir: ".claude/skills",
+    providerId: "claude",
+    authFile: "~/.claude",
     dirs: [
       { key: "CLAUDE_CONFIG_DIR", value: "~/.claude" },
       { key: "CLAUDE_SKILLS_DIR", value: "~/.claude/skills", derivedFrom: "CLAUDE_CONFIG_DIR" },
@@ -55,6 +61,8 @@ export const AGENTS = [
     name: "CodeX",
     abbr: "CX",
     color: "#4f7a6a",
+    projectSkillDir: ".codex/skills",
+    providerId: "codex",
     authFile: "~/.codex/auth.json",
     surfaces: ["skill", "prompt", "provider"],
     dirs: [
@@ -67,6 +75,8 @@ export const AGENTS = [
     name: "Copilot",
     abbr: "CP",
     color: "#5a7894",
+    projectSkillDir: ".github/skills",
+    providerId: "copilot",
     authFile: "$GITHUB_TOKEN",
     surfaces: ["skill", "prompt", "provider"],
     dirs: [
@@ -79,6 +89,8 @@ export const AGENTS = [
     name: "OpenCode",
     abbr: "OC",
     color: "#7a5c9e",
+    projectSkillDir: ".opencode/skills",
+    providerId: "opencode",
     authFile: "~/.local/share/opencode/auth.json",
     surfaces: ["skill", "prompt", "provider"],
     dirs: [

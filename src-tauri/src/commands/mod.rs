@@ -1,3 +1,4 @@
+pub mod agent_capabilities;
 pub mod app;
 pub mod app_config;
 pub mod project_symlinks;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -25,7 +25,13 @@ import { ScreenScroll } from "@/components/shell/screen";
 import { formatProviderQuotaDisplay } from "@/components/provider/quotaDisplay";
 import { nexus } from "@/lib/mock";
 import { providersApi } from "@/lib/api/providers";
+import {
+  fallbackAgentCapabilities,
+  providerRowsFromAgentCapabilities,
+  reconcileProviderRows,
+} from "@/lib/agentCapabilities";
 import { isTauriRuntime } from "@/lib/runtime";
+import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
 import { useProviderQuotaQuery } from "@/lib/query/providers";
 import { quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
@@ -120,7 +126,18 @@ function SortableProviderCard({
 }
 
 export function ProviderPage() {
-  const [providers, setProviders] = useState<Provider[]>(() => nexus.providers());
+  const agentCapabilitiesQuery = useAgentCapabilitiesQuery();
+  const providerCatalog = useMemo(
+    () =>
+      providerRowsFromAgentCapabilities(
+        agentCapabilitiesQuery.data ?? fallbackAgentCapabilities(),
+        nexus.providers(),
+      ),
+    [agentCapabilitiesQuery.data],
+  );
+  const [providers, setProviders] = useState<Provider[]>(() =>
+    providerRowsFromAgentCapabilities(fallbackAgentCapabilities(), nexus.providers()),
+  );
   const [order, setOrder] = useState<string[]>(() => providers.map((p) => p.id));
   const [cardVisible, setCardVisible] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(providers.map((p) => [p.id, !p.hiddenCard])),
@@ -144,6 +161,28 @@ export function ProviderPage() {
     () => () => Object.values(timers.current).forEach((t) => window.clearTimeout(t)),
     [],
   );
+
+  useEffect(() => {
+    setProviders((current) => reconcileProviderRows(current, providerCatalog));
+  }, [providerCatalog]);
+
+  useEffect(() => {
+    const providerIds = new Set(providers.map((provider) => provider.id));
+    setOrder((current) => [
+      ...current.filter((id) => providerIds.has(id)),
+      ...providers
+        .map((provider) => provider.id)
+        .filter((id) => !current.includes(id)),
+    ]);
+    setCardVisible((current) => ({
+      ...Object.fromEntries(providers.map((provider) => [provider.id, !provider.hiddenCard])),
+      ...current,
+    }));
+    setTrayVisible((current) => ({
+      ...Object.fromEntries(providers.map((provider) => [provider.id, provider.status === "available"])),
+      ...current,
+    }));
+  }, [providers]);
 
   useEffect(() => {
     if (!claudeQuota.data) return;
