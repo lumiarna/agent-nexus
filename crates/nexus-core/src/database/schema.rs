@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 8;
+const CURRENT_SCHEMA_VERSION: i64 = 9;
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
 const NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
@@ -13,6 +13,8 @@ const PROJECT_SYMLINK_IGNORED_DIRS_KEY: &str = "project_symlink_ignored_dirs";
 const PROJECT_SYMLINK_MAX_DEPTH_KEY: &str = "project_symlink_max_depth";
 const CLAUDE_CONFIG_DIR_KEY: &str = "CLAUDE_CONFIG_DIR";
 const DEFAULT_CLAUDE_CONFIG_DIR: &str = "~/.claude";
+const CODEX_CONFIG_DIR_KEY: &str = "CODEX_CONFIG_DIR";
+const DEFAULT_CODEX_CONFIG_DIR: &str = "~/.codex";
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     let current = current_version(conn)?;
@@ -46,6 +48,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         }
         if current < 8 {
             migrate_to_v8(conn)?;
+        }
+        if current < 9 {
+            migrate_to_v9(conn)?;
         }
     }
 
@@ -246,6 +251,8 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         VALUES ('project_symlink_max_depth', '{default_max_depth}');
         INSERT INTO settings (key, value)
         VALUES ('{claude_config_dir_key}', '{default_claude_config_dir}');
+        INSERT INTO settings (key, value)
+        VALUES ('{codex_config_dir_key}', '{default_codex_config_dir}');
 
         COMMIT;
         "#,
@@ -253,6 +260,8 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         default_max_depth = DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
         claude_config_dir_key = CLAUDE_CONFIG_DIR_KEY,
         default_claude_config_dir = DEFAULT_CLAUDE_CONFIG_DIR,
+        codex_config_dir_key = CODEX_CONFIG_DIR_KEY,
+        default_codex_config_dir = DEFAULT_CODEX_CONFIG_DIR,
     ))
     .or_else(|error| {
         let _ = conn.execute("ROLLBACK", params![]);
@@ -510,6 +519,33 @@ fn migrate_to_v8(conn: &Connection) -> AppResult<()> {
             params![CLAUDE_CONFIG_DIR_KEY, DEFAULT_CLAUDE_CONFIG_DIR],
         )?;
         conn.execute("UPDATE schema_version SET version = 8", [])?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = conn.execute("ROLLBACK", params![]);
+            Err(error)
+        }
+    }
+}
+
+fn migrate_to_v9(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch("BEGIN;").or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    let result = (|| -> AppResult<()> {
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING",
+            params![CODEX_CONFIG_DIR_KEY, DEFAULT_CODEX_CONFIG_DIR],
+        )?;
+        conn.execute("UPDATE schema_version SET version = 9", [])?;
         Ok(())
     })();
 

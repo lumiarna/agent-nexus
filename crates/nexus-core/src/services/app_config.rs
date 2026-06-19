@@ -11,6 +11,9 @@ use crate::{
 pub const CLAUDE_CONFIG_DIR_KEY: &str = "CLAUDE_CONFIG_DIR";
 const DEFAULT_CLAUDE_CONFIG_DIR: &str = "~/.claude";
 
+pub const CODEX_CONFIG_DIR_KEY: &str = "CODEX_CONFIG_DIR";
+const DEFAULT_CODEX_CONFIG_DIR: &str = "~/.codex";
+
 #[derive(Clone)]
 pub struct AppConfigService {
     db: Arc<Database>,
@@ -30,6 +33,17 @@ impl AppConfigService {
 
     pub fn get_claude_config_dir_display(&self) -> AppResult<String> {
         path_to_string(&self.get_claude_config_dir()?, "Claude config dir")
+    }
+
+    pub fn get_codex_config_dir(&self) -> AppResult<PathBuf> {
+        let raw = self
+            .read_setting(CODEX_CONFIG_DIR_KEY)?
+            .unwrap_or_else(|| DEFAULT_CODEX_CONFIG_DIR.to_string());
+        resolve_local_path(&raw)
+    }
+
+    pub fn get_codex_config_dir_display(&self) -> AppResult<String> {
+        path_to_string(&self.get_codex_config_dir()?, "Codex config dir")
     }
 
     fn read_setting(&self, key: &str) -> AppResult<Option<String>> {

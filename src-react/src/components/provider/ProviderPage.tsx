@@ -131,6 +131,7 @@ export function ProviderPage() {
   const gridRef = useRef<HTMLDivElement>(null);
   const [cardMinHeight, setCardMinHeight] = useState<number | null>(null);
   const claudeQuota = useProviderQuotaQuery("claude");
+  const codexQuota = useProviderQuotaQuery("codex");
 
   const timers = useRef<Record<string, number>>({});
   useEffect(
@@ -145,9 +146,19 @@ export function ProviderPage() {
     );
   }, [claudeQuota.data]);
 
+  useEffect(() => {
+    if (!codexQuota.data) return;
+    setProviders((current) =>
+      current.map((provider) => mergeProviderQuota(provider, codexQuota.data)),
+    );
+  }, [codexQuota.data]);
+
   function refreshProvider(id: string) {
     if (id === "claude") {
       void claudeQuota.refetch();
+    }
+    if (id === "codex") {
+      void codexQuota.refetch();
     }
 
     setRefreshing((r) => ({ ...r, [id]: true }));
@@ -242,7 +253,10 @@ export function ProviderPage() {
             style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}
           >
             {visible.map((p) => {
-              const loading = !!refreshing[p.id] || (p.id === "claude" && claudeQuota.isFetching);
+              const loading =
+                !!refreshing[p.id] ||
+                (p.id === "claude" && claudeQuota.isFetching) ||
+                (p.id === "codex" && codexQuota.isFetching);
               const st: ProviderUiStatus = loading ? "loading" : p.status;
               const si = statusInfo(st);
               const showQuota = st === "available" && !!p.windows;
