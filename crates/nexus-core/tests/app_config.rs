@@ -8,6 +8,30 @@ use nexus_core::{
 };
 
 #[test]
+fn copilot_github_token_round_trips_through_settings() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = AppConfigService::new(db);
+
+    assert_eq!(
+        service
+            .get_copilot_github_token()
+            .expect("read default copilot token"),
+        Some(String::new()),
+    );
+
+    service
+        .set_copilot_github_token("  gho_token  ")
+        .expect("save copilot token");
+
+    assert_eq!(
+        service
+            .get_copilot_github_token()
+            .expect("read saved copilot token"),
+        Some("gho_token".to_string()),
+    );
+}
+
+#[test]
 fn reads_claude_config_dir_from_app_settings() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     {

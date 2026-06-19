@@ -1,4 +1,5 @@
 pub mod app;
+pub mod app_config;
 pub mod project_symlinks;
 pub mod projects;
 pub mod providers;

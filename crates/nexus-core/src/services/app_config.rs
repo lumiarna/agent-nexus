@@ -14,6 +14,8 @@ const DEFAULT_CLAUDE_CONFIG_DIR: &str = "~/.claude";
 pub const CODEX_CONFIG_DIR_KEY: &str = "CODEX_CONFIG_DIR";
 const DEFAULT_CODEX_CONFIG_DIR: &str = "~/.codex";
 
+pub const COPILOT_GITHUB_TOKEN_KEY: &str = "COPILOT_GITHUB_TOKEN";
+
 #[derive(Clone)]
 pub struct AppConfigService {
     db: Arc<Database>,
@@ -44,6 +46,22 @@ impl AppConfigService {
 
     pub fn get_codex_config_dir_display(&self) -> AppResult<String> {
         path_to_string(&self.get_codex_config_dir()?, "Codex config dir")
+    }
+
+    pub fn get_copilot_github_token(&self) -> AppResult<Option<String>> {
+        Ok(self
+            .read_setting(COPILOT_GITHUB_TOKEN_KEY)?
+            .map(|value| value.trim().to_string()))
+    }
+
+    pub fn set_copilot_github_token(&self, token: &str) -> AppResult<()> {
+        let conn = self.db.connection()?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![COPILOT_GITHUB_TOKEN_KEY, token.trim()],
+        )?;
+        Ok(())
     }
 
     fn read_setting(&self, key: &str) -> AppResult<Option<String>> {

@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 9;
+const CURRENT_SCHEMA_VERSION: i64 = 10;
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
 const NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
@@ -15,6 +15,8 @@ const CLAUDE_CONFIG_DIR_KEY: &str = "CLAUDE_CONFIG_DIR";
 const DEFAULT_CLAUDE_CONFIG_DIR: &str = "~/.claude";
 const CODEX_CONFIG_DIR_KEY: &str = "CODEX_CONFIG_DIR";
 const DEFAULT_CODEX_CONFIG_DIR: &str = "~/.codex";
+const COPILOT_GITHUB_TOKEN_KEY: &str = "COPILOT_GITHUB_TOKEN";
+const DEFAULT_COPILOT_GITHUB_TOKEN: &str = "";
 
 pub fn migrate(conn: &Connection) -> AppResult<()> {
     let current = current_version(conn)?;
@@ -51,6 +53,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         }
         if current < 9 {
             migrate_to_v9(conn)?;
+        }
+        if current < 10 {
+            migrate_to_v10(conn)?;
         }
     }
 
@@ -253,6 +258,8 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         VALUES ('{claude_config_dir_key}', '{default_claude_config_dir}');
         INSERT INTO settings (key, value)
         VALUES ('{codex_config_dir_key}', '{default_codex_config_dir}');
+        INSERT INTO settings (key, value)
+        VALUES ('{copilot_github_token_key}', '{default_copilot_github_token}');
 
         COMMIT;
         "#,
@@ -262,6 +269,8 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         default_claude_config_dir = DEFAULT_CLAUDE_CONFIG_DIR,
         codex_config_dir_key = CODEX_CONFIG_DIR_KEY,
         default_codex_config_dir = DEFAULT_CODEX_CONFIG_DIR,
+        copilot_github_token_key = COPILOT_GITHUB_TOKEN_KEY,
+        default_copilot_github_token = DEFAULT_COPILOT_GITHUB_TOKEN,
     ))
     .or_else(|error| {
         let _ = conn.execute("ROLLBACK", params![]);
@@ -546,6 +555,33 @@ fn migrate_to_v9(conn: &Connection) -> AppResult<()> {
             params![CODEX_CONFIG_DIR_KEY, DEFAULT_CODEX_CONFIG_DIR],
         )?;
         conn.execute("UPDATE schema_version SET version = 9", [])?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = conn.execute("ROLLBACK", params![]);
+            Err(error)
+        }
+    }
+}
+
+fn migrate_to_v10(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch("BEGIN;").or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    let result = (|| -> AppResult<()> {
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING",
+            params![COPILOT_GITHUB_TOKEN_KEY, DEFAULT_COPILOT_GITHUB_TOKEN],
+        )?;
+        conn.execute("UPDATE schema_version SET version = 10", [])?;
         Ok(())
     })();
 

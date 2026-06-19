@@ -3,7 +3,8 @@ export interface ProviderQuotaWindowInput {
   used: number;
   reset?: string;
   resetAt?: string | null;
-  kind?: "rolling" | "weekly" | string;
+  kind?: "rolling" | "weekly" | "monthly" | string;
+  unlimited?: boolean;
 }
 
 export interface ProviderQuotaInput {
@@ -16,6 +17,7 @@ export interface ProviderQuotaDisplayWindow {
   usedLabel: string;
   used: number;
   reset: string;
+  unlimited: boolean;
 }
 
 export interface ProviderQuotaDisplay {
@@ -38,9 +40,10 @@ export function formatProviderQuotaDisplay(
     primaryCaption: "peak window used",
     windows: (provider.windows ?? []).map((window) => ({
       label: window.label,
-      usedLabel: `${window.used}%`,
+      usedLabel: window.unlimited ? "Unlimited" : `${window.used}%`,
       used: window.used,
       reset: formatWindowReset(window, options),
+      unlimited: window.unlimited ?? false,
     })),
   };
 }
@@ -55,7 +58,27 @@ function formatWindowReset(
     return formatRollingReset(window.resetAt, options.now ?? new Date());
   }
 
+  if (window.kind === "monthly") {
+    return formatMonthlyReset(window.resetAt);
+  }
+
   return formatLocalResetTime(window.resetAt, options.timeZone);
+}
+
+function formatMonthlyReset(resetAt: string): string {
+  const reset = new Date(resetAt);
+  if (Number.isNaN(reset.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).formatToParts(reset);
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!month || !day) return "";
+  return `Resets ${month} ${day}`;
 }
 
 function formatRollingReset(resetAt: string, now: Date): string {

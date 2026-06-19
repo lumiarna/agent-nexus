@@ -47,9 +47,12 @@ const PROVIDERS: Provider[] = [
     ],
   },
   {
-    id: "copilot", name: "Copilot", plan: "Business", status: "available",
-    credential: "$GITHUB_TOKEN", primary: 77, isAgent: true,
-    windows: [{ label: "Premium requests (monthly)", used: 77, reset: "Resets Jul 1" }],
+    id: "copilot", name: "Copilot", plan: "Copilot Business", status: "available",
+    credential: "GitHub Copilot token", primary: 77, isAgent: true,
+    windows: [
+      { label: "Premium Interactions", used: 77, reset: "", kind: "monthly", resetAt: "2026-07-01T00:00:00Z" },
+      { label: "Chat Quota", used: 0, reset: "", kind: "monthly", resetAt: "2026-07-01T00:00:00Z", unlimited: true },
+    ],
   },
   {
     id: "opencode-go", name: "OpenCode Go", plan: "Workspace", status: "expired",

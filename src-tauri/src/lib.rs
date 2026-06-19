@@ -44,6 +44,8 @@ pub fn run() {
             commands::sync::create_task_group,
             commands::project_symlinks::delete_project_symlink,
             commands::providers::get_provider_quota,
+            commands::app_config::get_copilot_github_token,
+            commands::app_config::set_copilot_github_token,
             commands::sync::delete_task,
             commands::sync::delete_task_group,
             commands::sync::add_task,

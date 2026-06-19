@@ -24,6 +24,8 @@ import { Toggle } from "@/components/ui/toggle";
 import { ScreenScroll } from "@/components/shell/screen";
 import { formatProviderQuotaDisplay } from "@/components/provider/quotaDisplay";
 import { nexus } from "@/lib/mock";
+import { providersApi } from "@/lib/api/providers";
+import { isTauriRuntime } from "@/lib/runtime";
 import { useProviderQuotaQuery } from "@/lib/query/providers";
 import { quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
@@ -66,6 +68,7 @@ function mergeProviderQuota(provider: Provider, quota: ProviderQuotaSnapshot): P
             reset: "",
             kind: window.kind,
             resetAt: window.resetAt ?? undefined,
+            unlimited: window.unlimited,
           }))
         : undefined,
     error: quota.error ?? undefined,
@@ -126,12 +129,15 @@ export function ProviderPage() {
     Object.fromEntries(providers.map((p) => [p.id, p.status === "available"])),
   );
   const [configId, setConfigId] = useState<string | null>(null);
+  const [copilotToken, setCopilotToken] = useState("");
+  const [copilotTokenSaving, setCopilotTokenSaving] = useState(false);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [trayMetric, setTrayMetric] = useState<TrayMetric>(() => nexus.settings().trayMetric);
   const gridRef = useRef<HTMLDivElement>(null);
   const [cardMinHeight, setCardMinHeight] = useState<number | null>(null);
   const claudeQuota = useProviderQuotaQuery("claude");
   const codexQuota = useProviderQuotaQuery("codex");
+  const copilotQuota = useProviderQuotaQuery("copilot");
 
   const timers = useRef<Record<string, number>>({});
   useEffect(
@@ -153,12 +159,38 @@ export function ProviderPage() {
     );
   }, [codexQuota.data]);
 
+  useEffect(() => {
+    if (!copilotQuota.data) return;
+    setProviders((current) =>
+      current.map((provider) => mergeProviderQuota(provider, copilotQuota.data)),
+    );
+  }, [copilotQuota.data]);
+
+  useEffect(() => {
+    if (configId !== "copilot" || !isTauriRuntime()) return;
+    let active = true;
+    providersApi
+      .getCopilotGithubToken()
+      .then((token) => {
+        if (active) setCopilotToken(token ?? "");
+      })
+      .catch(() => {
+        if (active) setCopilotToken("");
+      });
+    return () => {
+      active = false;
+    };
+  }, [configId]);
+
   function refreshProvider(id: string) {
     if (id === "claude") {
       void claudeQuota.refetch();
     }
     if (id === "codex") {
       void codexQuota.refetch();
+    }
+    if (id === "copilot") {
+      void copilotQuota.refetch();
     }
 
     setRefreshing((r) => ({ ...r, [id]: true }));
@@ -256,7 +288,8 @@ export function ProviderPage() {
               const loading =
                 !!refreshing[p.id] ||
                 (p.id === "claude" && claudeQuota.isFetching) ||
-                (p.id === "codex" && codexQuota.isFetching);
+                (p.id === "codex" && codexQuota.isFetching) ||
+                (p.id === "copilot" && copilotQuota.isFetching);
               const st: ProviderUiStatus = loading ? "loading" : p.status;
               const si = statusInfo(st);
               const showQuota = st === "available" && !!p.windows;
@@ -324,23 +357,27 @@ export function ProviderPage() {
                             </span>
                           </div>
                           <div className="mt-[15px] flex flex-col gap-[13px]">
-                            {quota.windows.map((w) => (
-                              <div key={w.label}>
-                                <div className="mb-1.5 flex justify-between text-[12px]">
-                                  <span className="text-[#6a6055]">{w.label}</span>
-                                  <span className="font-bold" style={{ color: quotaColor(w.used) }}>
-                                    {w.usedLabel}
-                                  </span>
+                            {quota.windows.map((w) => {
+                              const barColor = w.unlimited ? quotaColor(0) : quotaColor(w.used);
+                              const barWidth = w.unlimited ? 100 : w.used;
+                              return (
+                                <div key={w.label}>
+                                  <div className="mb-1.5 flex justify-between text-[12px]">
+                                    <span className="text-[#6a6055]">{w.label}</span>
+                                    <span className="font-bold" style={{ color: barColor }}>
+                                      {w.usedLabel}
+                                    </span>
+                                  </div>
+                                  <div className="h-2 overflow-hidden rounded-full bg-[#ece2d6]">
+                                    <div
+                                      className="h-full rounded-full"
+                                      style={{ width: `${barWidth}%`, background: barColor }}
+                                    />
+                                  </div>
+                                  <div className="mt-1.5 text-[11px] text-[#b3a999]">{w.reset}</div>
                                 </div>
-                                <div className="h-2 overflow-hidden rounded-full bg-[#ece2d6]">
-                                  <div
-                                    className="h-full rounded-full"
-                                    style={{ width: `${w.used}%`, background: quotaColor(w.used) }}
-                                  />
-                                </div>
-                                <div className="mt-1.5 text-[11px] text-[#b3a999]">{w.reset}</div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </>
                       ) : null}
@@ -452,7 +489,25 @@ export function ProviderPage() {
                 <div className="mb-3 text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
                   Connection parameters
                 </div>
-                {cfg.needsParams ? (
+                {cfg.id === "copilot" ? (
+                  <label className="block">
+                    <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">
+                      GitHub token
+                    </div>
+                    <Input
+                      type="password"
+                      className="font-mono"
+                      placeholder="gho_… or ghp_…"
+                      value={copilotToken}
+                      onChange={(e) => setCopilotToken(e.target.value)}
+                    />
+                    <div className="mt-[5px] text-[11px] text-[#b3a999]">
+                      A Copilot-scoped GitHub token used only to read quota. Leave empty to
+                      fall back to opencode&apos;s <span className="font-mono">auth.json</span>{" "}
+                      (<span className="font-mono">github-copilot</span>).
+                    </div>
+                  </label>
+                ) : cfg.needsParams ? (
                   <div className="flex flex-col gap-[13px]">
                     {[
                       {
@@ -533,13 +588,28 @@ export function ProviderPage() {
               </Button>
               <Button
                 variant="primary"
-                onClick={() => {
+                disabled={copilotTokenSaving}
+                onClick={async () => {
                   const n = cfg.name;
+                  if (cfg.id === "copilot") {
+                    setCopilotTokenSaving(true);
+                    try {
+                      await providersApi.setCopilotGithubToken(copilotToken.trim());
+                      setConfigId(null);
+                      toast("Saved Copilot GitHub token");
+                      void copilotQuota.refetch();
+                    } catch {
+                      toast.error("Failed to save Copilot GitHub token");
+                    } finally {
+                      setCopilotTokenSaving(false);
+                    }
+                    return;
+                  }
                   setConfigId(null);
                   toast(`Saved preferences for ${n}`);
                 }}
               >
-                Save
+                {copilotTokenSaving ? "Saving…" : "Save"}
               </Button>
             </ModalFooter>
           </>

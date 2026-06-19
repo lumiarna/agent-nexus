@@ -6,6 +6,9 @@
 - 项目里有三份 Cargo.toml, 两份 package.json/pnpm-workspace.yaml
 - 按 ESC 不应退出全屏
 - 拖拽排序应保存
+- 重构 Provider Quota 模块
+- 重构 Schedule 模块
+- 列文档表示 Provider 取值顺序、显示的 Credential 是什么
 
 ---
 
