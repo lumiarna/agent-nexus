@@ -1,9 +1,17 @@
-use nexus_core::services::provider_quota::{
-    claude_code_quota_from_usage_response, codex_quota_from_usage_response,
-    copilot_quota_from_usage_response, parse_opencode_copilot_token, ClaudeCodeUsageBucket,
-    ClaudeCodeUsageResponse, CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse,
-    CopilotQuotaDetail, CopilotQuotaSnapshots, CopilotUsageResponse, ProviderQuotaStatus,
-    ProviderQuotaWindowKind,
+use std::sync::Arc;
+
+use nexus_core::{
+    database::Database,
+    services::{
+        app_config::{AppConfigService, CODEX_CONFIG_DIR_KEY},
+        provider_quota::{
+            claude_code_quota_from_usage_response, codex_quota_from_usage_response,
+            copilot_quota_from_usage_response, parse_opencode_copilot_token, ClaudeCodeUsageBucket,
+            ClaudeCodeUsageResponse, CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse,
+            CopilotQuotaDetail, CopilotQuotaSnapshots, CopilotUsageResponse, ProviderQuotaService,
+            ProviderQuotaStatus, ProviderQuotaWindowKind,
+        },
+    },
 };
 
 fn copilot_detail(percent_remaining: Option<f64>) -> CopilotQuotaDetail {
@@ -13,6 +21,34 @@ fn copilot_detail(percent_remaining: Option<f64>) -> CopilotQuotaDetail {
         percent_remaining,
         unlimited: None,
     }
+}
+
+#[tokio::test]
+async fn provider_quota_service_dispatches_codex_adapter_without_credentials() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let missing_codex_dir = temp_dir.path().join("missing-codex");
+    let missing_codex_dir = missing_codex_dir.to_string_lossy().into_owned();
+    {
+        let conn = db.connection().expect("open db connection");
+        conn.execute(
+            "UPDATE settings SET value = ?1 WHERE key = ?2",
+            [missing_codex_dir.as_str(), CODEX_CONFIG_DIR_KEY],
+        )
+        .expect("write Codex config dir setting");
+    }
+
+    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let snapshot = service
+        .get_provider_quota("codex")
+        .await
+        .expect("dispatch codex adapter");
+
+    assert_eq!(snapshot.provider_id, "codex");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
+    assert_eq!(snapshot.credential.as_deref(), Some("not found"));
+    assert!(snapshot.windows.is_empty());
+    assert_eq!(snapshot.error, None);
 }
 
 #[test]

@@ -1,6 +1,8 @@
 use std::{
     env, fs,
+    future::Future,
     path::{Path, PathBuf},
+    pin::Pin,
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -122,6 +124,27 @@ struct ClaudeCodeCredentials {
     source: String,
 }
 
+type ProviderQuotaFuture<'a> = Pin<Box<dyn Future<Output = ProviderQuotaSnapshot> + Send + 'a>>;
+
+trait ProviderQuotaAdapter: Sync {
+    fn provider_id(&self) -> &'static str;
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    fn quota<'a>(&'a self, app_config: &'a AppConfigService) -> ProviderQuotaFuture<'a>;
+
+    fn matches(&self, provider_id: &str) -> bool {
+        self.provider_id() == provider_id
+            || self.aliases().iter().any(|alias| *alias == provider_id)
+    }
+}
+
+static CLAUDE_CODE_QUOTA_ADAPTER: ClaudeCodeQuotaAdapter = ClaudeCodeQuotaAdapter;
+static CODEX_QUOTA_ADAPTER: CodexQuotaAdapter = CodexQuotaAdapter;
+static COPILOT_QUOTA_ADAPTER: CopilotQuotaAdapter = CopilotQuotaAdapter;
+
 #[derive(Clone)]
 pub struct ProviderQuotaService {
     app_config: AppConfigService,
@@ -133,16 +156,42 @@ impl ProviderQuotaService {
     }
 
     pub async fn get_provider_quota(&self, provider_id: &str) -> AppResult<ProviderQuotaSnapshot> {
-        match provider_id {
-            CLAUDE_CODE_PROVIDER_ID | "claude-code" => Ok(self.get_claude_code_quota().await),
-            CODEX_PROVIDER_ID => Ok(self.get_codex_quota().await),
-            COPILOT_PROVIDER_ID => Ok(self.get_copilot_quota().await),
-            _ => Err(AppError::Validation("unsupported provider".to_string())),
+        for adapter in provider_quota_adapters() {
+            if adapter.matches(provider_id) {
+                return Ok(adapter.quota(&self.app_config).await);
+            }
         }
+        Err(AppError::Validation("unsupported provider".to_string()))
+    }
+}
+
+fn provider_quota_adapters() -> [&'static dyn ProviderQuotaAdapter; 3] {
+    [
+        &CLAUDE_CODE_QUOTA_ADAPTER,
+        &CODEX_QUOTA_ADAPTER,
+        &COPILOT_QUOTA_ADAPTER,
+    ]
+}
+
+struct ClaudeCodeQuotaAdapter;
+
+impl ProviderQuotaAdapter for ClaudeCodeQuotaAdapter {
+    fn provider_id(&self) -> &'static str {
+        CLAUDE_CODE_PROVIDER_ID
     }
 
-    pub async fn get_claude_code_quota(&self) -> ProviderQuotaSnapshot {
-        let credentials = match self.read_claude_code_credentials() {
+    fn aliases(&self) -> &'static [&'static str] {
+        &["claude-code"]
+    }
+
+    fn quota<'a>(&'a self, app_config: &'a AppConfigService) -> ProviderQuotaFuture<'a> {
+        Box::pin(async move { self.quota_snapshot(app_config).await })
+    }
+}
+
+impl ClaudeCodeQuotaAdapter {
+    async fn quota_snapshot(&self, app_config: &AppConfigService) -> ProviderQuotaSnapshot {
+        let credentials = match self.read_credentials(app_config) {
             Ok(Some(credentials)) => credentials,
             Ok(None) => return claude_code_status(ProviderQuotaStatus::NoCreds, "not found"),
             Err(error) => {
@@ -195,8 +244,41 @@ impl ProviderQuotaService {
         }
     }
 
-    pub async fn get_codex_quota(&self) -> ProviderQuotaSnapshot {
-        let credentials = match self.read_codex_credentials() {
+    fn read_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<ClaudeCodeCredentials>> {
+        #[cfg(target_os = "macos")]
+        if let Some(credentials) = read_claude_code_credentials_from_keychain()? {
+            return Ok(Some(credentials));
+        }
+
+        let path = app_config
+            .get_claude_config_dir()?
+            .join(".credentials.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = fs::read_to_string(&path)?;
+        parse_claude_code_credentials(&content, path)
+    }
+}
+
+struct CodexQuotaAdapter;
+
+impl ProviderQuotaAdapter for CodexQuotaAdapter {
+    fn provider_id(&self) -> &'static str {
+        CODEX_PROVIDER_ID
+    }
+
+    fn quota<'a>(&'a self, app_config: &'a AppConfigService) -> ProviderQuotaFuture<'a> {
+        Box::pin(async move { self.quota_snapshot(app_config).await })
+    }
+}
+
+impl CodexQuotaAdapter {
+    async fn quota_snapshot(&self, app_config: &AppConfigService) -> ProviderQuotaSnapshot {
+        let credentials = match self.read_credentials(app_config) {
             Ok(Some(credentials)) => credentials,
             Ok(None) => return codex_status(ProviderQuotaStatus::NoCreds, "not found"),
             Err(error) => {
@@ -235,8 +317,34 @@ impl ProviderQuotaService {
         }
     }
 
-    pub async fn get_copilot_quota(&self) -> ProviderQuotaSnapshot {
-        let token = match self.read_copilot_github_token() {
+    fn read_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<CodexCredentials>> {
+        let path = app_config.get_codex_config_dir()?.join("auth.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = fs::read_to_string(&path)?;
+        parse_codex_credentials(&content, &path)
+    }
+}
+
+struct CopilotQuotaAdapter;
+
+impl ProviderQuotaAdapter for CopilotQuotaAdapter {
+    fn provider_id(&self) -> &'static str {
+        COPILOT_PROVIDER_ID
+    }
+
+    fn quota<'a>(&'a self, app_config: &'a AppConfigService) -> ProviderQuotaFuture<'a> {
+        Box::pin(async move { self.quota_snapshot(app_config).await })
+    }
+}
+
+impl CopilotQuotaAdapter {
+    async fn quota_snapshot(&self, app_config: &AppConfigService) -> ProviderQuotaSnapshot {
+        let token = match self.read_github_token(app_config) {
             Ok(Some(token)) => token,
             Ok(None) => return copilot_status(ProviderQuotaStatus::NoCreds, "not found"),
             Err(error) => {
@@ -274,41 +382,14 @@ impl ProviderQuotaService {
         }
     }
 
-    fn read_copilot_github_token(&self) -> AppResult<Option<String>> {
-        if let Some(token) = self
-            .app_config
+    fn read_github_token(&self, app_config: &AppConfigService) -> AppResult<Option<String>> {
+        if let Some(token) = app_config
             .get_copilot_github_token()?
             .filter(|token| !token.is_empty())
         {
             return Ok(Some(token));
         }
         Ok(read_opencode_copilot_token())
-    }
-
-    fn read_codex_credentials(&self) -> AppResult<Option<CodexCredentials>> {
-        let path = self.app_config.get_codex_config_dir()?.join("auth.json");
-        if !path.exists() {
-            return Ok(None);
-        }
-        let content = fs::read_to_string(&path)?;
-        parse_codex_credentials(&content, &path)
-    }
-
-    fn read_claude_code_credentials(&self) -> AppResult<Option<ClaudeCodeCredentials>> {
-        #[cfg(target_os = "macos")]
-        if let Some(credentials) = read_claude_code_credentials_from_keychain()? {
-            return Ok(Some(credentials));
-        }
-
-        let path = self
-            .app_config
-            .get_claude_config_dir()?
-            .join(".credentials.json");
-        if !path.exists() {
-            return Ok(None);
-        }
-        let content = fs::read_to_string(&path)?;
-        parse_claude_code_credentials(&content, path)
     }
 }
 
