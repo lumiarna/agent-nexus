@@ -1,10 +1,11 @@
 use std::{
     env, fs,
     future::Future,
-    path::{Path, PathBuf},
-    pin::Pin,
-    process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+	path::{Path, PathBuf},
+	pin::Pin,
+	process::Command,
+	sync::Arc,
+	time::{SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -124,6 +125,38 @@ struct ClaudeCodeCredentials {
     source: String,
 }
 
+type ClaudeCodeUsageFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<ClaudeCodeUsageResponse, ProviderQuotaPollError>> + Send + 'a>>;
+type CodexUsageFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<CodexUsageResponse, ProviderQuotaPollError>> + Send + 'a>>;
+type CopilotUsageFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<CopilotUsageResponse, ProviderQuotaPollError>> + Send + 'a>>;
+
+trait ProviderCredentialSource: Send + Sync {
+    fn claude_code_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<ClaudeCodeCredentials>>;
+    fn codex_credentials(&self, app_config: &AppConfigService) -> AppResult<Option<CodexCredentials>>;
+    fn copilot_token(&self, app_config: &AppConfigService) -> AppResult<Option<String>>;
+}
+
+trait ProviderUsageTransport: Send + Sync {
+    fn claude_code_usage<'a>(&'a self, access_token: &'a str) -> ClaudeCodeUsageFuture<'a>;
+    fn codex_usage<'a>(
+        &'a self,
+        access_token: &'a str,
+        account_id: Option<&'a str>,
+    ) -> CodexUsageFuture<'a>;
+    fn copilot_usage<'a>(&'a self, token: &'a str) -> CopilotUsageFuture<'a>;
+}
+
+#[derive(Clone)]
+struct LocalCredentialSource;
+
+#[derive(Clone)]
+struct HttpUsageTransport;
+
 type ProviderQuotaFuture<'a> = Pin<Box<dyn Future<Output = ProviderQuotaSnapshot> + Send + 'a>>;
 
 trait ProviderQuotaAdapter: Sync {
@@ -133,11 +166,15 @@ trait ProviderQuotaAdapter: Sync {
         &[]
     }
 
-    fn quota<'a>(&'a self, app_config: &'a AppConfigService) -> ProviderQuotaFuture<'a>;
+    fn quota<'a>(
+        &'a self,
+        app_config: &'a AppConfigService,
+        credential_source: &'a dyn ProviderCredentialSource,
+        usage_transport: &'a dyn ProviderUsageTransport,
+    ) -> ProviderQuotaFuture<'a>;
 
     fn matches(&self, provider_id: &str) -> bool {
-        self.provider_id() == provider_id
-            || self.aliases().iter().any(|alias| *alias == provider_id)
+        self.provider_id() == provider_id || self.aliases().contains(&provider_id)
     }
 }
 
@@ -148,17 +185,29 @@ static COPILOT_QUOTA_ADAPTER: CopilotQuotaAdapter = CopilotQuotaAdapter;
 #[derive(Clone)]
 pub struct ProviderQuotaService {
     app_config: AppConfigService,
+    credential_source: Arc<dyn ProviderCredentialSource>,
+    usage_transport: Arc<dyn ProviderUsageTransport>,
 }
 
 impl ProviderQuotaService {
     pub fn new(app_config: AppConfigService) -> Self {
-        Self { app_config }
+        Self {
+            app_config,
+            credential_source: Arc::new(LocalCredentialSource),
+            usage_transport: Arc::new(HttpUsageTransport),
+        }
     }
 
     pub async fn get_provider_quota(&self, provider_id: &str) -> AppResult<ProviderQuotaSnapshot> {
         for adapter in provider_quota_adapters() {
             if adapter.matches(provider_id) {
-                return Ok(adapter.quota(&self.app_config).await);
+                return Ok(adapter
+                    .quota(
+                        &self.app_config,
+                        self.credential_source.as_ref(),
+                        self.usage_transport.as_ref(),
+                    )
+                    .await);
             }
         }
         Err(AppError::Validation("unsupported provider".to_string()))
@@ -173,6 +222,64 @@ fn provider_quota_adapters() -> [&'static dyn ProviderQuotaAdapter; 3] {
     ]
 }
 
+impl ProviderCredentialSource for LocalCredentialSource {
+    fn claude_code_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<ClaudeCodeCredentials>> {
+        #[cfg(target_os = "macos")]
+        if let Some(credentials) = read_claude_code_credentials_from_keychain()? {
+            return Ok(Some(credentials));
+        }
+
+        let path = app_config
+            .get_claude_config_dir()?
+            .join(".credentials.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = fs::read_to_string(&path)?;
+        parse_claude_code_credentials(&content, path)
+    }
+
+    fn codex_credentials(&self, app_config: &AppConfigService) -> AppResult<Option<CodexCredentials>> {
+        let path = app_config.get_codex_config_dir()?.join("auth.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = fs::read_to_string(&path)?;
+        parse_codex_credentials(&content, &path)
+    }
+
+    fn copilot_token(&self, app_config: &AppConfigService) -> AppResult<Option<String>> {
+        if let Some(token) = app_config
+            .get_copilot_github_token()?
+            .filter(|token| !token.is_empty())
+        {
+            return Ok(Some(token));
+        }
+        Ok(read_opencode_copilot_token())
+    }
+}
+
+impl ProviderUsageTransport for HttpUsageTransport {
+    fn claude_code_usage<'a>(&'a self, access_token: &'a str) -> ClaudeCodeUsageFuture<'a> {
+        Box::pin(fetch_claude_code_usage(access_token))
+    }
+
+    fn codex_usage<'a>(
+        &'a self,
+        access_token: &'a str,
+        account_id: Option<&'a str>,
+    ) -> CodexUsageFuture<'a> {
+        Box::pin(fetch_codex_usage(access_token, account_id))
+    }
+
+    fn copilot_usage<'a>(&'a self, token: &'a str) -> CopilotUsageFuture<'a> {
+        Box::pin(fetch_copilot_usage(token))
+    }
+}
+
 struct ClaudeCodeQuotaAdapter;
 
 impl ProviderQuotaAdapter for ClaudeCodeQuotaAdapter {
@@ -184,14 +291,27 @@ impl ProviderQuotaAdapter for ClaudeCodeQuotaAdapter {
         &["claude-code"]
     }
 
-    fn quota<'a>(&'a self, app_config: &'a AppConfigService) -> ProviderQuotaFuture<'a> {
-        Box::pin(async move { self.quota_snapshot(app_config).await })
+    fn quota<'a>(
+        &'a self,
+        app_config: &'a AppConfigService,
+        credential_source: &'a dyn ProviderCredentialSource,
+        usage_transport: &'a dyn ProviderUsageTransport,
+    ) -> ProviderQuotaFuture<'a> {
+        Box::pin(async move {
+            self.quota_snapshot(app_config, credential_source, usage_transport)
+                .await
+        })
     }
 }
 
 impl ClaudeCodeQuotaAdapter {
-    async fn quota_snapshot(&self, app_config: &AppConfigService) -> ProviderQuotaSnapshot {
-        let credentials = match self.read_credentials(app_config) {
+    async fn quota_snapshot(
+        &self,
+        app_config: &AppConfigService,
+        credential_source: &dyn ProviderCredentialSource,
+        usage_transport: &dyn ProviderUsageTransport,
+    ) -> ProviderQuotaSnapshot {
+        let credentials = match credential_source.claude_code_credentials(app_config) {
             Ok(Some(credentials)) => credentials,
             Ok(None) => return claude_code_status(ProviderQuotaStatus::NoCreds, "not found"),
             Err(error) => {
@@ -211,56 +331,10 @@ impl ClaudeCodeQuotaAdapter {
             };
         }
 
-        match fetch_claude_code_usage(&credentials.access_token).await {
-            Ok(response) => {
-                let mut snapshot = claude_code_quota_from_usage_response(
-                    CLAUDE_CODE_PROVIDER_ID,
-                    credentials.plan,
-                    response,
-                );
-                snapshot.credential = Some(credentials.source);
-                snapshot
-            }
-            Err(ProviderQuotaPollError::AuthRequired) => ProviderQuotaSnapshot {
-                provider_id: CLAUDE_CODE_PROVIDER_ID.to_string(),
-                status: ProviderQuotaStatus::Expired,
-                plan: credentials.plan,
-                primary: None,
-                windows: Vec::new(),
-                credential: Some(credentials.source),
-                error: Some(
-                    "Claude Code authorization was rejected; run claude /login".to_string(),
-                ),
-            },
-            Err(error) => ProviderQuotaSnapshot {
-                provider_id: CLAUDE_CODE_PROVIDER_ID.to_string(),
-                status: ProviderQuotaStatus::Failed,
-                plan: credentials.plan,
-                primary: None,
-                windows: Vec::new(),
-                credential: Some(credentials.source),
-                error: Some(error.to_string()),
-            },
-        }
-    }
-
-    fn read_credentials(
-        &self,
-        app_config: &AppConfigService,
-    ) -> AppResult<Option<ClaudeCodeCredentials>> {
-        #[cfg(target_os = "macos")]
-        if let Some(credentials) = read_claude_code_credentials_from_keychain()? {
-            return Ok(Some(credentials));
-        }
-
-        let path = app_config
-            .get_claude_config_dir()?
-            .join(".credentials.json");
-        if !path.exists() {
-            return Ok(None);
-        }
-        let content = fs::read_to_string(&path)?;
-        parse_claude_code_credentials(&content, path)
+        let usage = usage_transport
+            .claude_code_usage(&credentials.access_token)
+            .await;
+        derive_claude_code_snapshot(credentials, usage)
     }
 }
 
@@ -271,14 +345,27 @@ impl ProviderQuotaAdapter for CodexQuotaAdapter {
         CODEX_PROVIDER_ID
     }
 
-    fn quota<'a>(&'a self, app_config: &'a AppConfigService) -> ProviderQuotaFuture<'a> {
-        Box::pin(async move { self.quota_snapshot(app_config).await })
+    fn quota<'a>(
+        &'a self,
+        app_config: &'a AppConfigService,
+        credential_source: &'a dyn ProviderCredentialSource,
+        usage_transport: &'a dyn ProviderUsageTransport,
+    ) -> ProviderQuotaFuture<'a> {
+        Box::pin(async move {
+            self.quota_snapshot(app_config, credential_source, usage_transport)
+                .await
+        })
     }
 }
 
 impl CodexQuotaAdapter {
-    async fn quota_snapshot(&self, app_config: &AppConfigService) -> ProviderQuotaSnapshot {
-        let credentials = match self.read_credentials(app_config) {
+    async fn quota_snapshot(
+        &self,
+        app_config: &AppConfigService,
+        credential_source: &dyn ProviderCredentialSource,
+        usage_transport: &dyn ProviderUsageTransport,
+    ) -> ProviderQuotaSnapshot {
+        let credentials = match credential_source.codex_credentials(app_config) {
             Ok(Some(credentials)) => credentials,
             Ok(None) => return codex_status(ProviderQuotaStatus::NoCreds, "not found"),
             Err(error) => {
@@ -286,47 +373,10 @@ impl CodexQuotaAdapter {
             }
         };
 
-        match fetch_codex_usage(&credentials.access_token, credentials.account_id.as_deref()).await
-        {
-            Ok(response) => {
-                let mut snapshot =
-                    codex_quota_from_usage_response(CODEX_PROVIDER_ID, credentials.plan, response);
-                snapshot.credential = Some(credentials.source);
-                snapshot
-            }
-            Err(ProviderQuotaPollError::AuthRequired) => ProviderQuotaSnapshot {
-                provider_id: CODEX_PROVIDER_ID.to_string(),
-                status: ProviderQuotaStatus::Expired,
-                plan: credentials.plan,
-                primary: None,
-                windows: Vec::new(),
-                credential: Some(credentials.source),
-                error: Some(
-                    "Codex authorization was rejected; run codex login to refresh".to_string(),
-                ),
-            },
-            Err(error) => ProviderQuotaSnapshot {
-                provider_id: CODEX_PROVIDER_ID.to_string(),
-                status: ProviderQuotaStatus::Failed,
-                plan: credentials.plan,
-                primary: None,
-                windows: Vec::new(),
-                credential: Some(credentials.source),
-                error: Some(error.to_string()),
-            },
-        }
-    }
-
-    fn read_credentials(
-        &self,
-        app_config: &AppConfigService,
-    ) -> AppResult<Option<CodexCredentials>> {
-        let path = app_config.get_codex_config_dir()?.join("auth.json");
-        if !path.exists() {
-            return Ok(None);
-        }
-        let content = fs::read_to_string(&path)?;
-        parse_codex_credentials(&content, &path)
+        let usage = usage_transport
+            .codex_usage(&credentials.access_token, credentials.account_id.as_deref())
+            .await;
+        derive_codex_snapshot(credentials, usage)
     }
 }
 
@@ -337,14 +387,27 @@ impl ProviderQuotaAdapter for CopilotQuotaAdapter {
         COPILOT_PROVIDER_ID
     }
 
-    fn quota<'a>(&'a self, app_config: &'a AppConfigService) -> ProviderQuotaFuture<'a> {
-        Box::pin(async move { self.quota_snapshot(app_config).await })
+    fn quota<'a>(
+        &'a self,
+        app_config: &'a AppConfigService,
+        credential_source: &'a dyn ProviderCredentialSource,
+        usage_transport: &'a dyn ProviderUsageTransport,
+    ) -> ProviderQuotaFuture<'a> {
+        Box::pin(async move {
+            self.quota_snapshot(app_config, credential_source, usage_transport)
+                .await
+        })
     }
 }
 
 impl CopilotQuotaAdapter {
-    async fn quota_snapshot(&self, app_config: &AppConfigService) -> ProviderQuotaSnapshot {
-        let token = match self.read_github_token(app_config) {
+    async fn quota_snapshot(
+        &self,
+        app_config: &AppConfigService,
+        credential_source: &dyn ProviderCredentialSource,
+        usage_transport: &dyn ProviderUsageTransport,
+    ) -> ProviderQuotaSnapshot {
+        let token = match credential_source.copilot_token(app_config) {
             Ok(Some(token)) => token,
             Ok(None) => return copilot_status(ProviderQuotaStatus::NoCreds, "not found"),
             Err(error) => {
@@ -352,44 +415,8 @@ impl CopilotQuotaAdapter {
             }
         };
 
-        match fetch_copilot_usage(&token).await {
-            Ok(response) => {
-                let mut snapshot = copilot_quota_from_usage_response(COPILOT_PROVIDER_ID, response);
-                snapshot.credential = Some("GitHub Copilot token".to_string());
-                snapshot
-            }
-            Err(ProviderQuotaPollError::AuthRequired) => ProviderQuotaSnapshot {
-                provider_id: COPILOT_PROVIDER_ID.to_string(),
-                status: ProviderQuotaStatus::Expired,
-                plan: None,
-                primary: None,
-                windows: Vec::new(),
-                credential: Some("GitHub Copilot token".to_string()),
-                error: Some(
-                    "GitHub Copilot token was rejected; provide a valid Copilot-scoped token"
-                        .to_string(),
-                ),
-            },
-            Err(error) => ProviderQuotaSnapshot {
-                provider_id: COPILOT_PROVIDER_ID.to_string(),
-                status: ProviderQuotaStatus::Failed,
-                plan: None,
-                primary: None,
-                windows: Vec::new(),
-                credential: Some("GitHub Copilot token".to_string()),
-                error: Some(error.to_string()),
-            },
-        }
-    }
-
-    fn read_github_token(&self, app_config: &AppConfigService) -> AppResult<Option<String>> {
-        if let Some(token) = app_config
-            .get_copilot_github_token()?
-            .filter(|token| !token.is_empty())
-        {
-            return Ok(Some(token));
-        }
-        Ok(read_opencode_copilot_token())
+        let usage = usage_transport.copilot_usage(&token).await;
+        derive_copilot_snapshot(usage)
     }
 }
 
@@ -500,6 +527,104 @@ pub fn copilot_quota_from_usage_response(
         windows,
         credential: None,
         error: None,
+    }
+}
+
+fn derive_claude_code_snapshot(
+    credentials: ClaudeCodeCredentials,
+    usage: Result<ClaudeCodeUsageResponse, ProviderQuotaPollError>,
+) -> ProviderQuotaSnapshot {
+    let ClaudeCodeCredentials { plan, source, .. } = credentials;
+    match usage {
+        Ok(response) => {
+            let mut snapshot =
+                claude_code_quota_from_usage_response(CLAUDE_CODE_PROVIDER_ID, plan, response);
+            snapshot.credential = Some(source);
+            snapshot
+        }
+        Err(ProviderQuotaPollError::AuthRequired) => ProviderQuotaSnapshot {
+            provider_id: CLAUDE_CODE_PROVIDER_ID.to_string(),
+            status: ProviderQuotaStatus::Expired,
+            plan,
+            primary: None,
+            windows: Vec::new(),
+            credential: Some(source),
+            error: Some("Claude Code authorization was rejected; run claude /login".to_string()),
+        },
+        Err(error) => ProviderQuotaSnapshot {
+            provider_id: CLAUDE_CODE_PROVIDER_ID.to_string(),
+            status: ProviderQuotaStatus::Failed,
+            plan,
+            primary: None,
+            windows: Vec::new(),
+            credential: Some(source),
+            error: Some(error.to_string()),
+        },
+    }
+}
+
+fn derive_codex_snapshot(
+    credentials: CodexCredentials,
+    usage: Result<CodexUsageResponse, ProviderQuotaPollError>,
+) -> ProviderQuotaSnapshot {
+    let CodexCredentials { plan, source, .. } = credentials;
+    match usage {
+        Ok(response) => {
+            let mut snapshot = codex_quota_from_usage_response(CODEX_PROVIDER_ID, plan, response);
+            snapshot.credential = Some(source);
+            snapshot
+        }
+        Err(ProviderQuotaPollError::AuthRequired) => ProviderQuotaSnapshot {
+            provider_id: CODEX_PROVIDER_ID.to_string(),
+            status: ProviderQuotaStatus::Expired,
+            plan,
+            primary: None,
+            windows: Vec::new(),
+            credential: Some(source),
+            error: Some("Codex authorization was rejected; run codex login to refresh".to_string()),
+        },
+        Err(error) => ProviderQuotaSnapshot {
+            provider_id: CODEX_PROVIDER_ID.to_string(),
+            status: ProviderQuotaStatus::Failed,
+            plan,
+            primary: None,
+            windows: Vec::new(),
+            credential: Some(source),
+            error: Some(error.to_string()),
+        },
+    }
+}
+
+fn derive_copilot_snapshot(
+    usage: Result<CopilotUsageResponse, ProviderQuotaPollError>,
+) -> ProviderQuotaSnapshot {
+    match usage {
+        Ok(response) => {
+            let mut snapshot = copilot_quota_from_usage_response(COPILOT_PROVIDER_ID, response);
+            snapshot.credential = Some("GitHub Copilot token".to_string());
+            snapshot
+        }
+        Err(ProviderQuotaPollError::AuthRequired) => ProviderQuotaSnapshot {
+            provider_id: COPILOT_PROVIDER_ID.to_string(),
+            status: ProviderQuotaStatus::Expired,
+            plan: None,
+            primary: None,
+            windows: Vec::new(),
+            credential: Some("GitHub Copilot token".to_string()),
+            error: Some(
+                "GitHub Copilot token was rejected; provide a valid Copilot-scoped token"
+                    .to_string(),
+            ),
+        },
+        Err(error) => ProviderQuotaSnapshot {
+            provider_id: COPILOT_PROVIDER_ID.to_string(),
+            status: ProviderQuotaStatus::Failed,
+            plan: None,
+            primary: None,
+            windows: Vec::new(),
+            credential: Some("GitHub Copilot token".to_string()),
+            error: Some(error.to_string()),
+        },
     }
 }
 

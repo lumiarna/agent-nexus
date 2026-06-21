@@ -1,5 +1,7 @@
 pub mod agent_capabilities;
 pub mod app_config;
+pub mod cron;
+pub mod distribution;
 pub mod paths;
 pub mod placement;
 pub mod project_symlinks;
@@ -10,4 +12,6 @@ pub mod sessions;
 pub mod skills;
 pub mod symlink;
 pub mod sync;
+pub mod system_open;
+pub mod util;
 pub mod webdav;

@@ -14,6 +14,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useQueryClient } from "@tanstack/react-query";
 import { Copy, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,14 @@ import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
 import { formatProjectSymlinkDisplayPath } from "@/components/sync/pathDisplay";
 import { DEFAULT_CRON_SCHEDULE, SCHEDULE_PRESETS, cronHuman } from "@/components/sync/schedule";
+import {
+  actionOptions,
+  expandFormTask,
+  isCronSchedule,
+  normalizeSchedule,
+  scheduleForAction,
+  scheduleForMode,
+} from "@/components/sync/taskRules";
 import { detectPlatform, type HostPlatform } from "@/lib/runtime";
 import {
   useAddTaskMutation,
@@ -32,6 +41,7 @@ import {
   useRunTaskMutation,
   useTaskGroupsQuery,
   useUpdateTaskScheduleMutation,
+  syncKeys,
 } from "@/lib/query/sync";
 import {
   useDeleteProjectSymlinkMutation,
@@ -67,21 +77,6 @@ function directionColor(d: TaskDirection): string {
   if (d === "Push") return "#9a6f0a";
   if (d === "Pull") return "#3f6f55";
   return "#4a6a8a";
-}
-
-/** Link/copy actions for the picker. Junction is Windows-only; Symlink & Junction require a
- *  Local→Local task, so both are disabled while either endpoint is Cloud. */
-function buildActionOptions(
-  hasCloud: boolean,
-  supportsJunction: boolean,
-): { value: TaskAction; label: string; disabled?: boolean }[] {
-  return [
-    { value: "Symlink", label: "Symlink", disabled: hasCloud },
-    ...(supportsJunction
-      ? [{ value: "Junction" as TaskAction, label: "Junction", disabled: hasCloud }]
-      : []),
-    { value: "Copy", label: "Copy" },
-  ];
 }
 
 function statusOf(st: TaskStatus): { label: string; fg: string; dot: string } {
@@ -227,6 +222,7 @@ function SortableTask({ groupId, taskId, children }: {
 }
 
 export function SyncPage() {
+  const queryClient = useQueryClient();
   const taskGroupsQuery = useTaskGroupsQuery();
   const createTaskGroupMutation = useCreateTaskGroupMutation();
   const deleteTaskMutation = useDeleteTaskMutation();
@@ -236,7 +232,6 @@ export function SyncPage() {
   const updateTaskScheduleMutation = useUpdateTaskScheduleMutation();
   const projectSymlinksQuery = useProjectSymlinksQuery();
   const deleteProjectSymlinkMutation = useDeleteProjectSymlinkMutation();
-  const [groups, setGroups] = useState<TaskGroup[]>(() => nexus.taskGroups());
   const [templates] = useState(() => nexus.templates());
   const [system] = useState(() => nexus.systemSync());
   const [openSec, setOpenSec] = useState({ skill: false, prompt: false, backup: false });
@@ -256,20 +251,21 @@ export function SyncPage() {
   const projectSymlinkError = projectSymlinksQuery.error
     ? getErrorMessage(projectSymlinksQuery.error)
     : null;
-
-  useEffect(() => {
-    if (taskGroupsQuery.data) {
-      setGroups(taskGroupsQuery.data);
-    }
-  }, [taskGroupsQuery.data]);
+  const groups = taskGroupsQuery.data ?? [];
 
   useEffect(() => {
     void detectPlatform().then(setPlatform);
   }, []);
 
   // ── mutations ──
+  function updateTaskGroups(updater: (groups: TaskGroup[]) => TaskGroup[]) {
+    queryClient.setQueryData<TaskGroup[]>(syncKeys.taskGroups, (current) =>
+      updater(current ?? []),
+    );
+  }
+
   function updateTask(groupId: string, taskId: string, patch: Partial<Task>) {
-    setGroups((gs) =>
+    updateTaskGroups((gs) =>
       gs.map((g) =>
         g.id !== groupId
           ? g
@@ -280,7 +276,7 @@ export function SyncPage() {
 
   function reorderGroups(fromId: string, toId: string) {
     if (!fromId || fromId === toId) return;
-    setGroups((gs) => {
+    updateTaskGroups((gs) => {
       const fi = gs.findIndex((g) => g.id === fromId);
       const ti = gs.findIndex((g) => g.id === toId);
       if (fi < 0 || ti < 0) return gs;
@@ -289,7 +285,7 @@ export function SyncPage() {
   }
   function reorderTask(groupId: string, fromId: string, toId: string) {
     if (!fromId || fromId === toId) return;
-    setGroups((gs) =>
+    updateTaskGroups((gs) =>
       gs.map((g) => {
         if (g.id !== groupId) return g;
         const fi = g.tasks.findIndex((t) => t.id === fromId);
@@ -323,7 +319,7 @@ export function SyncPage() {
   async function deleteTask(groupId: string, task: Task) {
     try {
       await deleteTaskMutation.mutateAsync(task.id);
-      setGroups((gs) =>
+      updateTaskGroups((gs) =>
         gs.map((g) =>
           g.id === groupId ? { ...g, tasks: g.tasks.filter((t) => t.id !== task.id) } : g,
         ),
@@ -346,7 +342,7 @@ export function SyncPage() {
     const group = deleteTarget;
     try {
       await deleteTaskGroupMutation.mutateAsync(group.id);
-      setGroups((gs) => gs.filter((g) => g.id !== group.id));
+      updateTaskGroups((gs) => gs.filter((g) => g.id !== group.id));
       setDeleteTarget(null);
       toast(`Deleted group · ${group.name}`);
     } catch (error) {
@@ -363,25 +359,15 @@ export function SyncPage() {
   async function submitAddTask() {
     if (!addTarget || !addForm) return;
     const tk = addForm;
-    const validTargets = tk.targets.filter((t) => t.path.trim());
+    const drafts = expandFormTask(tk);
     setAddError(null);
-    if (!validTargets.length || !tk.source.trim()) {
+    if (!drafts.length || !tk.source.trim()) {
       setAddError("Source and at least one target are required");
       return;
     }
     try {
-      for (const tgt of validTargets) {
-        await addTaskMutation.mutateAsync({
-          groupId: addTarget.id,
-          task: {
-            action: tk.action,
-            sourceType: tk.sourceType,
-            source: tk.source,
-            targetType: tgt.type,
-            target: tgt.path.trim(),
-            schedule: (tk.schedule || "manual").trim() || "manual",
-          },
-        });
+      for (const task of drafts) {
+        await addTaskMutation.mutateAsync({ groupId: addTarget.id, task });
       }
       setAddTarget(null);
       setAddForm(null);
@@ -474,13 +460,13 @@ export function SyncPage() {
           source: tk.source || "(source)",
           targetType: tgt.type,
           target: tgt.path.trim() || "(target)",
-          schedule: (tk.schedule || "manual").trim() || "manual",
+          schedule: normalizeSchedule(tk.schedule),
       }));
     });
     setCreateError(null);
     try {
       const created = await createTaskGroupMutation.mutateAsync({ name, tasks });
-      setGroups((gs) => [...gs.filter((g) => g.id !== created.id), created]);
+      updateTaskGroups((gs) => [...gs.filter((g) => g.id !== created.id), created]);
       setCreateOpen(false);
       toast(`Task group "${name}" created · ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`);
     } catch (error) {
@@ -952,7 +938,7 @@ export function SyncPage() {
             </div>
             <div className="flex flex-col gap-3">
               {form.tasks.map((tk, i) => {
-                const isCron = tk.schedule !== "manual";
+                const isCron = isCronSchedule(tk.schedule);
                 return (
                   <div key={tk.id} className="rounded-[14px] border border-nexus-border bg-nexus-sand2 p-3.5">
                     <div className="mb-[11px] flex items-center justify-between gap-2.5">
@@ -972,12 +958,12 @@ export function SyncPage() {
                         <Segmented<TaskAction>
                           className="bg-[#ece2d5]"
                           size="sm"
-                          options={buildActionOptions(
-                            tk.targets.some((t) => t.type === "Cloud") || tk.sourceType === "Cloud",
+                          options={actionOptions(
+                            { sourceType: tk.sourceType, targets: tk.targets },
                             supportsJunction,
                           )}
                           value={tk.action}
-                          onChange={(a) => patchFormTask(i, { action: a, schedule: a === "Copy" ? tk.schedule : "manual" })}
+                          onChange={(a) => patchFormTask(i, { action: a, schedule: scheduleForAction(a, tk.schedule) })}
                         />
                       </div>
                     </div>
@@ -1062,7 +1048,7 @@ export function SyncPage() {
                               { value: "cron", label: "Schedule" },
                             ]}
                             value={isCron ? "cron" : "manual"}
-                            onChange={(v) => patchFormTask(i, { schedule: v === "manual" ? "manual" : isCron ? tk.schedule : DEFAULT_CRON_SCHEDULE })}
+                            onChange={(v) => patchFormTask(i, { schedule: scheduleForMode(v, tk.schedule, DEFAULT_CRON_SCHEDULE) })}
                           />
                           {isCron ? (
                             <Input
@@ -1274,7 +1260,7 @@ interface AddTaskFormProps {
 }
 
 function AddTaskForm({ task, onChange, supportsJunction }: AddTaskFormProps) {
-  const isCron = task.schedule !== "manual";
+  const isCron = isCronSchedule(task.schedule);
   return (
     <div className="rounded-[14px] border border-nexus-border bg-nexus-sand2 p-3.5">
       <div className="mb-[11px] flex items-center justify-between gap-2.5">
@@ -1286,12 +1272,12 @@ function AddTaskForm({ task, onChange, supportsJunction }: AddTaskFormProps) {
           <Segmented<TaskAction>
             className="bg-[#ece2d5]"
             size="sm"
-            options={buildActionOptions(
-              task.targets.some((t) => t.type === "Cloud") || task.sourceType === "Cloud",
+            options={actionOptions(
+              { sourceType: task.sourceType, targets: task.targets },
               supportsJunction,
             )}
             value={task.action}
-            onChange={(a) => onChange({ ...task, action: a, schedule: a === "Copy" ? task.schedule : "manual" })}
+            onChange={(a) => onChange({ ...task, action: a, schedule: scheduleForAction(a, task.schedule) })}
           />
         </div>
       </div>
@@ -1376,7 +1362,7 @@ function AddTaskForm({ task, onChange, supportsJunction }: AddTaskFormProps) {
                 { value: "cron", label: "Schedule" },
               ]}
               value={isCron ? "cron" : "manual"}
-              onChange={(v) => onChange({ ...task, schedule: v === "manual" ? "manual" : isCron ? task.schedule : DEFAULT_CRON_SCHEDULE })}
+              onChange={(v) => onChange({ ...task, schedule: scheduleForMode(v, task.schedule, DEFAULT_CRON_SCHEDULE) })}
             />
             {isCron ? (
               <Input

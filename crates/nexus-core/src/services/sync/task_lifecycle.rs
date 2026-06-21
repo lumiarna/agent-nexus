@@ -1,35 +1,38 @@
 use std::{
+    future::Future,
     fs,
     path::{Path, PathBuf},
+    pin::Pin,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use rusqlite::{params, OptionalExtension, Row};
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::{
     database::Database,
     error::{AppError, AppResult},
     services::{
+        cron::{cron_schedule_matches, normalize_task_schedule},
         paths::resolve_local_path,
         placement::{
             create_task_link_placement, remove_created_task_link_placements,
             task_link_placement_for_task, task_link_placements_for_group, task_link_state,
         },
+        util::{now_epoch_seconds, required_trimmed},
         webdav,
     },
 };
 
 use super::{
-    normalize_webdav_settings, read_webdav_settings, required_trimmed, CreateTaskGroupInput,
-    CreateTaskInput, Task, TaskGroup, WebdavSettings, WebdavSettingsInput,
+    normalize_webdav_settings, read_webdav_settings, CreateTaskGroupInput, CreateTaskInput, Task,
+    TaskGroup, WebdavSettings, WebdavSettingsInput,
 };
 
 #[derive(Clone)]
 pub(super) struct TaskLifecycle {
     db: Arc<Database>,
+    transfer: Arc<dyn Transfer>,
 }
 
 struct PreparedTask {
@@ -47,9 +50,34 @@ struct ScheduledTask {
     last_run_at: Option<i64>,
 }
 
+type TransferFuture<'a> = Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>>;
+
+trait Transfer: Send + Sync {
+    fn push_local_to_cloud<'a>(
+        &'a self,
+        task: &'a Task,
+        settings: &'a WebdavSettings,
+    ) -> TransferFuture<'a>;
+}
+
+struct WebdavTransfer;
+
+impl Transfer for WebdavTransfer {
+    fn push_local_to_cloud<'a>(
+        &'a self,
+        task: &'a Task,
+        settings: &'a WebdavSettings,
+    ) -> TransferFuture<'a> {
+        Box::pin(push_local_to_cloud(task, settings))
+    }
+}
+
 impl TaskLifecycle {
     pub(super) fn new(db: Arc<Database>) -> Self {
-        Self { db }
+        Self {
+            db,
+            transfer: Arc::new(WebdavTransfer),
+        }
     }
 
     pub(super) fn list_task_groups(&self) -> AppResult<Vec<TaskGroup>> {
@@ -337,7 +365,7 @@ impl TaskLifecycle {
         match (task.source_type.as_str(), task.target_type.as_str()) {
             ("Local", "Cloud") => {
                 let settings = self.valid_webdav_settings()?;
-                push_local_to_cloud(task, &settings).await
+                self.transfer.push_local_to_cloud(task, &settings).await
             }
             ("Cloud", "Local") => Err(AppError::Validation(
                 "Cloud to Local copy is not implemented yet".to_string(),
@@ -450,96 +478,6 @@ fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
         schedule,
         direction: direction.to_string(),
     })
-}
-
-fn normalize_task_schedule(raw: &str, action: &str) -> AppResult<String> {
-    let schedule = raw.trim();
-    if schedule.is_empty() || schedule == "manual" {
-        return Ok("manual".to_string());
-    }
-    if action != "Copy" {
-        return Err(AppError::Validation(
-            "only Copy tasks can use a schedule".to_string(),
-        ));
-    }
-    validate_cron_schedule(schedule)?;
-    Ok(schedule.to_string())
-}
-
-fn validate_cron_schedule(schedule: &str) -> AppResult<()> {
-    let fields = schedule.split_whitespace().collect::<Vec<_>>();
-    if fields.len() != 5 {
-        return Err(AppError::Validation(
-            "schedule must be 'manual' or a 5-field cron expression".to_string(),
-        ));
-    }
-
-    validate_cron_field(fields[0], 0, 59, "minute")?;
-    validate_cron_field(fields[1], 0, 23, "hour")?;
-    validate_cron_field(fields[2], 1, 31, "day of month")?;
-    validate_cron_field(fields[3], 1, 12, "month")?;
-    validate_cron_field(fields[4], 0, 7, "day of week")?;
-    Ok(())
-}
-
-fn cron_schedule_matches(schedule: &str, now_epoch_seconds: i64) -> AppResult<bool> {
-    validate_cron_schedule(schedule)?;
-    let now = OffsetDateTime::from_unix_timestamp(now_epoch_seconds)
-        .map_err(|error| AppError::Validation(format!("invalid schedule time: {error}")))?;
-    let fields = schedule.split_whitespace().collect::<Vec<_>>();
-    let day_of_week = now.weekday().number_days_from_sunday() as u32;
-
-    Ok(cron_field_matches(fields[0], now.minute() as u32, 0)?
-        && cron_field_matches(fields[1], now.hour() as u32, 0)?
-        && cron_field_matches(fields[2], now.day() as u32, 1)?
-        && cron_field_matches(fields[3], u8::from(now.month()) as u32, 1)?
-        && cron_day_of_week_matches(fields[4], day_of_week)?)
-}
-
-fn cron_field_matches(field: &str, value: u32, range_start: u32) -> AppResult<bool> {
-    if field == "*" {
-        return Ok(true);
-    }
-
-    if let Some(step) = field.strip_prefix("*/") {
-        let step = parse_cron_number(step, "step")?;
-        return Ok((value - range_start) % step == 0);
-    }
-
-    Ok(value == parse_cron_number(field, "value")?)
-}
-
-fn cron_day_of_week_matches(field: &str, value: u32) -> AppResult<bool> {
-    if field == "7" {
-        return Ok(value == 0);
-    }
-    cron_field_matches(field, value, 0)
-}
-
-fn validate_cron_field(field: &str, min: u32, max: u32, label: &str) -> AppResult<()> {
-    if field == "*" {
-        return Ok(());
-    }
-
-    if let Some(step) = field.strip_prefix("*/") {
-        let step = parse_cron_number(step, label)?;
-        let range_size = max - min + 1;
-        if step == 0 || step > range_size {
-            return Err(AppError::Validation(format!("invalid cron {label} field")));
-        }
-        return Ok(());
-    }
-
-    let value = parse_cron_number(field, label)?;
-    if value < min || value > max {
-        return Err(AppError::Validation(format!("invalid cron {label} field")));
-    }
-    Ok(())
-}
-
-fn parse_cron_number(raw: &str, label: &str) -> AppResult<u32> {
-    raw.parse::<u32>()
-        .map_err(|_| AppError::Validation(format!("invalid cron {label} field")))
 }
 
 async fn push_local_to_cloud(task: &Task, settings: &WebdavSettings) -> AppResult<()> {
@@ -784,9 +722,75 @@ fn validate_one_of<'a>(value: &'a str, allowed: &[&str], label: &str) -> AppResu
     }
 }
 
-fn now_epoch_seconds() -> AppResult<i64> {
-    Ok(SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| AppError::Internal(error.to_string()))?
-        .as_secs() as i64)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingTransfer {
+        calls: Mutex<Vec<(String, String)>>,
+    }
+
+    impl Transfer for RecordingTransfer {
+        fn push_local_to_cloud<'a>(
+            &'a self,
+            task: &'a Task,
+            settings: &'a WebdavSettings,
+        ) -> TransferFuture<'a> {
+            Box::pin(async move {
+                self.calls
+                    .lock()
+                    .expect("lock transfer calls")
+                    .push((task.source.clone(), settings.remote_root.clone()));
+                Ok(())
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn local_to_cloud_copy_runs_through_transfer_seam() {
+        let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+        {
+            let conn = db.connection().expect("open db connection");
+            conn.execute(
+                "UPDATE settings SET value = 'https://dav.example.com/root/' WHERE key = 'webdav_url'",
+                [],
+            )
+            .expect("set webdav url");
+            conn.execute(
+                "UPDATE settings SET value = 'agent-nexus-sync' WHERE key = 'webdav_remote_root'",
+                [],
+            )
+            .expect("set webdav remote root");
+        }
+        let transfer = Arc::new(RecordingTransfer::default());
+        let lifecycle = TaskLifecycle {
+            db,
+            transfer: transfer.clone(),
+        };
+        let task = Task {
+            id: "task-1".to_string(),
+            direction: "Push".to_string(),
+            action: "Copy".to_string(),
+            source_type: "Local".to_string(),
+            source: "~/source.txt".to_string(),
+            target_type: "Cloud".to_string(),
+            target: "backup/source.txt".to_string(),
+            schedule: "manual".to_string(),
+            last_run: "—".to_string(),
+            status: "never".to_string(),
+            link_state: "present".to_string(),
+        };
+
+        lifecycle
+            .run_task_operation(&task)
+            .await
+            .expect("run through transfer seam");
+
+        assert_eq!(
+            *transfer.calls.lock().expect("lock transfer calls"),
+            vec![("~/source.txt".to_string(), "agent-nexus-sync".to_string())],
+        );
+    }
 }

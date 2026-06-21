@@ -2,9 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
-    process::Command,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use rusqlite::{params, OptionalExtension, Row};
@@ -14,11 +12,12 @@ use uuid::Uuid;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
-    services::agent_capabilities::{
-        agent_by_name as capability_by_name, agent_capability_surfaces, AgentCapabilitySurface,
-    },
-    services::paths,
-    services::symlink::{create_managed_directory_link, is_junction, remove_symlink_if_present},
+    services::agent_capabilities::{agent_capability_surfaces, AgentCapabilitySurface},
+    services::distribution::{self, MatrixSource},
+    services::paths::{self, path_to_string},
+    services::symlink::create_managed_directory_link,
+    services::system_open::{open_path, reveal_path},
+    services::util::{now_epoch_seconds, require_agent, required_trimmed},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -64,6 +63,29 @@ struct SkillSource {
     desc: String,
     canonical_path: PathBuf,
     disabled: bool,
+}
+
+impl MatrixSource for SkillSource {
+    fn source_agent(&self) -> &str {
+        self.source_agent
+    }
+
+    fn canonical_path(&self) -> &Path {
+        &self.canonical_path
+    }
+
+    fn target_path_for(&self, agent: &AgentCapabilitySurface) -> AppResult<Option<PathBuf>> {
+        target_path_for_parts(
+            &self.scope,
+            self.project_path.as_deref(),
+            &self.canonical_path,
+            agent,
+        )
+    }
+
+    fn target_path_label(&self) -> &'static str {
+        "skill target path"
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -134,9 +156,9 @@ impl SkillService {
 
     pub fn set_skill_target(&self, input: SetSkillTargetInput) -> AppResult<Skill> {
         let skill_id = required_trimmed(&input.skill_id, "skill id")?;
-        let target_agent = agent_by_name(required_trimmed(&input.agent, "agent")?)?;
+        let target_agent = require_agent(required_trimmed(&input.agent, "agent")?)?;
         let context = self.skill_target_context(skill_id)?;
-        let source_agent = agent_by_name(&context.source_agent)?;
+        let source_agent = require_agent(&context.source_agent)?;
         if source_agent.name == target_agent.name {
             return Err(AppError::Validation(
                 "source agent cannot be toggled as a target".to_string(),
@@ -151,44 +173,20 @@ impl SkillService {
         )?
         .ok_or_else(|| AppError::Validation("skill target path cannot be computed".to_string()))?;
 
-        let created_symlink = if input.enabled {
-            create_managed_directory_link(&context.canonical_path, &target_path)?;
-            true
-        } else {
-            remove_symlink_if_present(&target_path)?;
-            false
-        };
+        distribution::write_target(
+            &self.db,
+            "skill_distributions",
+            "skill_id",
+            skill_id,
+            target_agent.name,
+            input.enabled,
+            &context.canonical_path,
+            &target_path,
+            "skill target path",
+            create_managed_directory_link,
+        )?;
 
-        let result = (|| -> AppResult<Skill> {
-            let conn = self.db.connection()?;
-            conn.execute(
-                r#"
-                INSERT INTO skill_distributions (skill_id, agent, role, target_path)
-                VALUES (?1, ?2, ?3, ?4)
-                ON CONFLICT(skill_id, agent) DO UPDATE SET
-                    role = excluded.role,
-                    target_path = excluded.target_path
-                "#,
-                params![
-                    skill_id,
-                    target_agent.name,
-                    if input.enabled { "target" } else { "none" },
-                    if input.enabled {
-                        Some(path_to_string(&target_path, "skill target path")?)
-                    } else {
-                        None
-                    },
-                ],
-            )?;
-            drop(conn);
-            self.get_skill(skill_id)
-        })();
-
-        if result.is_err() && created_symlink {
-            let _ = remove_symlink_if_present(&target_path);
-        }
-
-        result
+        self.get_skill(skill_id)
     }
 
     pub fn set_skill_disabled(&self, id: String, disabled: bool) -> AppResult<Skill> {
@@ -333,7 +331,7 @@ impl SkillService {
                 "DELETE FROM skill_distributions WHERE skill_id = ?1",
                 params![skill_id],
             )?;
-            for (agent, role, target_path) in distribution_rows(&source)? {
+            for (agent, role, target_path) in distribution::matrix_rows(&source)? {
                 tx.execute(
                     r#"
                     INSERT INTO skill_distributions (skill_id, agent, role, target_path)
@@ -549,56 +547,6 @@ fn set_disable_model_invocation(contents: &str, disabled: bool) -> String {
     format!("---\n{field}\n---\n\n{contents}")
 }
 
-fn distribution_rows(
-    source: &SkillSource,
-) -> AppResult<Vec<(&'static str, String, Option<String>)>> {
-    let mut rows = Vec::new();
-    for agent in agent_capability_surfaces() {
-        if agent.name == source.source_agent {
-            rows.push((agent.name, "source".to_string(), None));
-            continue;
-        }
-
-        let target_path = target_path_for(source, agent)?;
-        let role = if let Some(target_path) = &target_path {
-            if symlink_points_to(target_path, &source.canonical_path)? {
-                "target"
-            } else {
-                "none"
-            }
-        } else {
-            "none"
-        };
-
-        rows.push((
-            agent.name,
-            role.to_string(),
-            if role == "target" {
-                target_path
-                    .as_ref()
-                    .map(|path| path_to_string(path, "skill target path"))
-                    .transpose()?
-            } else {
-                None
-            },
-        ));
-    }
-
-    Ok(rows)
-}
-
-fn target_path_for(
-    source: &SkillSource,
-    agent: &AgentCapabilitySurface,
-) -> AppResult<Option<PathBuf>> {
-    target_path_for_parts(
-        &source.scope,
-        source.project_path.as_deref(),
-        &source.canonical_path,
-        agent,
-    )
-}
-
 fn target_path_for_parts(
     scope: &str,
     project_path: Option<&Path>,
@@ -619,28 +567,10 @@ fn target_path_for_parts(
     Ok(Some(project_path.join(skill.project_dir).join(dir_name)))
 }
 
-fn symlink_points_to(target_path: &Path, source_path: &Path) -> AppResult<bool> {
-    let metadata = match fs::symlink_metadata(target_path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error.into()),
-    };
-    // A managed placement is a symlink (Unix / elevated Windows) or a junction (Windows).
-    if !metadata.file_type().is_symlink() && !is_junction(target_path) {
-        return Ok(false);
-    }
-
-    // Compare canonical paths so both symlink and junction placements resolve to the source.
-    let Ok(resolved_target) = target_path.canonicalize() else {
-        return Ok(false);
-    };
-    Ok(resolved_target == source_path.canonicalize()?)
-}
-
 fn skill_from_row(row: &Row<'_>, conn: &rusqlite::Connection) -> rusqlite::Result<Skill> {
     let id: String = row.get(0)?;
     Ok(Skill {
-        cells: skill_cells(conn, &id)?,
+        cells: distribution::cells(conn, "skill_distributions", "skill_id", &id)?,
         id,
         name: row.get(1)?,
         scope: row.get(2)?,
@@ -651,37 +581,6 @@ fn skill_from_row(row: &Row<'_>, conn: &rusqlite::Connection) -> rusqlite::Resul
     })
 }
 
-fn skill_cells(
-    conn: &rusqlite::Connection,
-    skill_id: &str,
-) -> rusqlite::Result<BTreeMap<String, String>> {
-    let mut cells = empty_cells();
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT agent, role
-        FROM skill_distributions
-        WHERE skill_id = ?1
-        "#,
-    )?;
-    let rows = stmt.query_map([skill_id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-
-    for row in rows {
-        let (agent, role) = row?;
-        cells.insert(agent, role);
-    }
-
-    Ok(cells)
-}
-
-fn empty_cells() -> BTreeMap<String, String> {
-    agent_capability_surfaces()
-        .iter()
-        .map(|agent| (agent.name.to_string(), "none".to_string()))
-        .collect()
-}
-
 fn expand_home(path: &str) -> Option<PathBuf> {
     if let Some(rest) = path.strip_prefix("~/") {
         return paths::home_dir().map(|home| home.join(rest));
@@ -690,73 +589,10 @@ fn expand_home(path: &str) -> Option<PathBuf> {
     Some(PathBuf::from(path))
 }
 
-fn agent_by_name(name: &str) -> AppResult<&'static AgentCapabilitySurface> {
-    capability_by_name(name).ok_or_else(|| AppError::Validation("invalid agent".to_string()))
-}
-
 fn skill_dir_name(path: &Path) -> AppResult<String> {
     path.file_name()
         .and_then(|value| value.to_str())
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .ok_or_else(|| AppError::Validation("skill path has no valid directory name".to_string()))
-}
-
-fn path_to_string(path: &Path, label: &str) -> AppResult<String> {
-    paths::path_to_string(path, label)
-}
-
-fn required_trimmed<'a>(value: &'a str, label: &str) -> AppResult<&'a str> {
-    let value = value.trim();
-    if value.is_empty() {
-        Err(AppError::Validation(format!("{label} is required")))
-    } else {
-        Ok(value)
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn open_path(path: &Path) -> AppResult<()> {
-    Command::new("open").arg(path).spawn()?;
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn open_path(path: &Path) -> AppResult<()> {
-    Command::new("explorer").arg(path).spawn()?;
-    Ok(())
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn open_path(path: &Path) -> AppResult<()> {
-    Command::new("xdg-open").arg(path).spawn()?;
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn reveal_path(path: &Path) -> AppResult<()> {
-    Command::new("open").arg("-R").arg(path).spawn()?;
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn reveal_path(path: &Path) -> AppResult<()> {
-    Command::new("explorer")
-        .arg(format!("/select,{}", path.display()))
-        .spawn()?;
-    Ok(())
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn reveal_path(path: &Path) -> AppResult<()> {
-    let target = path.parent().unwrap_or(path);
-    Command::new("xdg-open").arg(target).spawn()?;
-    Ok(())
-}
-
-fn now_epoch_seconds() -> AppResult<i64> {
-    Ok(SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| AppError::Internal(error.to_string()))?
-        .as_secs() as i64)
 }

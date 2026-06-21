@@ -9,6 +9,7 @@ use url::Url;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
+    services::util::required_trimmed,
     services::webdav,
 };
 
@@ -216,13 +217,4 @@ fn upsert_setting(conn: &rusqlite::Connection, key: &str, value: &str) -> AppRes
         params![key, value],
     )?;
     Ok(())
-}
-
-fn required_trimmed<'a>(value: &'a str, label: &str) -> AppResult<&'a str> {
-    let value = value.trim();
-    if value.is_empty() {
-        Err(AppError::Validation(format!("{label} is required")))
-    } else {
-        Ok(value)
-    }
 }

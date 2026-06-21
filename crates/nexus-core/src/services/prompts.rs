@@ -2,9 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
-    process::Command,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use rusqlite::{params, OptionalExtension, Row};
@@ -14,11 +12,12 @@ use uuid::Uuid;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
-    services::agent_capabilities::{
-        agent_by_name as capability_by_name, agent_capability_surfaces, AgentCapabilitySurface,
-    },
-    services::paths,
-    services::symlink::{create_symlink_placement, is_junction, remove_symlink_if_present},
+    services::agent_capabilities::{agent_capability_surfaces, AgentCapabilitySurface},
+    services::distribution::{self, MatrixSource},
+    services::paths::{self, path_to_string},
+    services::symlink::create_symlink_placement,
+    services::system_open::{open_path, reveal_path},
+    services::util::{now_epoch_seconds, require_agent, required_trimmed},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -54,6 +53,35 @@ struct PromptSource {
 struct PromptTargetContext {
     canonical_path: PathBuf,
     source_agent: String,
+}
+
+/// A scanned Prompt source paired with the already-known target paths, so `matrix_rows` can
+/// honour a previously-recorded target that still exists on disk (Prompt-specific signal).
+struct PromptMatrixSource<'a> {
+    source: &'a PromptSource,
+    existing_targets: &'a BTreeSet<String>,
+}
+
+impl MatrixSource for PromptMatrixSource<'_> {
+    fn source_agent(&self) -> &str {
+        self.source.source_agent
+    }
+
+    fn canonical_path(&self) -> &Path {
+        &self.source.canonical_path
+    }
+
+    fn target_path_for(&self, agent: &AgentCapabilitySurface) -> AppResult<Option<PathBuf>> {
+        target_path_for_agent(agent)
+    }
+
+    fn target_path_label(&self) -> &'static str {
+        "prompt target path"
+    }
+
+    fn is_existing_target(&self, target_path: &Path) -> AppResult<bool> {
+        existing_target_exists(self.existing_targets, target_path)
+    }
 }
 
 impl PromptService {
@@ -98,7 +126,7 @@ impl PromptService {
 
     pub fn set_prompt_target(&self, input: SetPromptTargetInput) -> AppResult<Prompt> {
         let prompt_id = required_trimmed(&input.prompt_id, "prompt id")?;
-        let target_agent = agent_by_name(required_trimmed(&input.agent, "agent")?)?;
+        let target_agent = require_agent(required_trimmed(&input.agent, "agent")?)?;
         if target_agent.prompt.is_none() {
             return Err(AppError::Validation(
                 "agent does not support prompt targets".to_string(),
@@ -106,7 +134,7 @@ impl PromptService {
         }
 
         let context = self.prompt_target_context(prompt_id)?;
-        let source_agent = agent_by_name(&context.source_agent)?;
+        let source_agent = require_agent(&context.source_agent)?;
         if source_agent.name == target_agent.name {
             return Err(AppError::Validation(
                 "source agent cannot be toggled as a target".to_string(),
@@ -117,44 +145,20 @@ impl PromptService {
             AppError::Validation("prompt target path cannot be computed".to_string())
         })?;
 
-        let created_symlink = if input.enabled {
-            create_symlink_placement(&context.canonical_path, &target_path)?;
-            true
-        } else {
-            remove_symlink_if_present(&target_path)?;
-            false
-        };
+        distribution::write_target(
+            &self.db,
+            "prompt_distributions",
+            "prompt_id",
+            prompt_id,
+            target_agent.name,
+            input.enabled,
+            &context.canonical_path,
+            &target_path,
+            "prompt target path",
+            create_symlink_placement,
+        )?;
 
-        let result = (|| -> AppResult<Prompt> {
-            let conn = self.db.connection()?;
-            conn.execute(
-                r#"
-                INSERT INTO prompt_distributions (prompt_id, agent, role, target_path)
-                VALUES (?1, ?2, ?3, ?4)
-                ON CONFLICT(prompt_id, agent) DO UPDATE SET
-                    role = excluded.role,
-                    target_path = excluded.target_path
-                "#,
-                params![
-                    prompt_id,
-                    target_agent.name,
-                    if input.enabled { "target" } else { "none" },
-                    if input.enabled {
-                        Some(path_to_string(&target_path, "prompt target path")?)
-                    } else {
-                        None
-                    },
-                ],
-            )?;
-            drop(conn);
-            self.get_prompt(prompt_id)
-        })();
-
-        if result.is_err() && created_symlink {
-            let _ = remove_symlink_if_present(&target_path);
-        }
-
-        result
+        self.get_prompt(prompt_id)
     }
 
     pub fn open_prompt_source(&self, id: String) -> AppResult<()> {
@@ -220,7 +224,11 @@ impl PromptService {
                 "DELETE FROM prompt_distributions WHERE prompt_id = ?1",
                 params![prompt_id],
             )?;
-            for (agent, role, target_path) in distribution_rows(&source, &existing_targets)? {
+            let matrix_source = PromptMatrixSource {
+                source: &source,
+                existing_targets: &existing_targets,
+            };
+            for (agent, role, target_path) in distribution::matrix_rows(&matrix_source)? {
                 tx.execute(
                     r#"
                     INSERT INTO prompt_distributions (prompt_id, agent, role, target_path)
@@ -352,47 +360,6 @@ fn target_paths_for_prompt(
     rows.collect()
 }
 
-fn distribution_rows(
-    source: &PromptSource,
-    existing_targets: &BTreeSet<String>,
-) -> AppResult<Vec<(&'static str, String, Option<String>)>> {
-    let mut rows = Vec::new();
-    for agent in agent_capability_surfaces() {
-        if agent.name == source.source_agent {
-            rows.push((agent.name, "source".to_string(), None));
-            continue;
-        }
-
-        let target_path = target_path_for_agent(agent)?;
-        let role = if let Some(target_path) = &target_path {
-            if symlink_points_to(target_path, &source.canonical_path)?
-                || existing_target_exists(existing_targets, target_path)?
-            {
-                "target"
-            } else {
-                "none"
-            }
-        } else {
-            "none"
-        };
-
-        rows.push((
-            agent.name,
-            role.to_string(),
-            if role == "target" {
-                target_path
-                    .as_ref()
-                    .map(|path| path_to_string(path, "prompt target path"))
-                    .transpose()?
-            } else {
-                None
-            },
-        ));
-    }
-
-    Ok(rows)
-}
-
 fn target_path_for_agent(agent: &AgentCapabilitySurface) -> AppResult<Option<PathBuf>> {
     let Some(prompt) = agent.prompt else {
         return Ok(None);
@@ -408,61 +375,14 @@ fn existing_target_exists(
     Ok(existing_targets.contains(&target_path) && Path::new(&target_path).exists())
 }
 
-fn symlink_points_to(target_path: &Path, source_path: &Path) -> AppResult<bool> {
-    let metadata = match fs::symlink_metadata(target_path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error.into()),
-    };
-    if !metadata.file_type().is_symlink() && !is_junction(target_path) {
-        return Ok(false);
-    }
-
-    let Ok(resolved_target) = target_path.canonicalize() else {
-        return Ok(false);
-    };
-    Ok(resolved_target == source_path.canonicalize()?)
-}
-
 fn prompt_from_row(row: &Row<'_>, conn: &rusqlite::Connection) -> rusqlite::Result<Prompt> {
     let id: String = row.get(0)?;
     Ok(Prompt {
-        cells: prompt_cells(conn, &id)?,
+        cells: distribution::cells(conn, "prompt_distributions", "prompt_id", &id)?,
         id,
         name: row.get(1)?,
         path: row.get(2)?,
     })
-}
-
-fn prompt_cells(
-    conn: &rusqlite::Connection,
-    prompt_id: &str,
-) -> rusqlite::Result<BTreeMap<String, String>> {
-    let mut cells = empty_cells();
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT agent, role
-        FROM prompt_distributions
-        WHERE prompt_id = ?1
-        "#,
-    )?;
-    let rows = stmt.query_map([prompt_id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-
-    for row in rows {
-        let (agent, role) = row?;
-        cells.insert(agent, role);
-    }
-
-    Ok(cells)
-}
-
-fn empty_cells() -> BTreeMap<String, String> {
-    agent_capability_surfaces()
-        .iter()
-        .map(|agent| (agent.name.to_string(), "none".to_string()))
-        .collect()
 }
 
 fn source_index(prompt: &Prompt) -> usize {
@@ -480,67 +400,4 @@ fn source_index_for_agent(agent_name: &str) -> usize {
         .iter()
         .position(|agent| agent.name == agent_name)
         .unwrap_or(usize::MAX)
-}
-
-fn agent_by_name(name: &str) -> AppResult<&'static AgentCapabilitySurface> {
-    capability_by_name(name).ok_or_else(|| AppError::Validation("invalid agent".to_string()))
-}
-
-fn path_to_string(path: &Path, label: &str) -> AppResult<String> {
-    paths::path_to_string(path, label)
-}
-
-fn required_trimmed<'a>(value: &'a str, label: &str) -> AppResult<&'a str> {
-    let value = value.trim();
-    if value.is_empty() {
-        Err(AppError::Validation(format!("{label} is required")))
-    } else {
-        Ok(value)
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn open_path(path: &Path) -> AppResult<()> {
-    Command::new("open").arg(path).spawn()?;
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn open_path(path: &Path) -> AppResult<()> {
-    Command::new("explorer").arg(path).spawn()?;
-    Ok(())
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn open_path(path: &Path) -> AppResult<()> {
-    Command::new("xdg-open").arg(path).spawn()?;
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn reveal_path(path: &Path) -> AppResult<()> {
-    Command::new("open").arg("-R").arg(path).spawn()?;
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn reveal_path(path: &Path) -> AppResult<()> {
-    Command::new("explorer")
-        .arg(format!("/select,{}", path.display()))
-        .spawn()?;
-    Ok(())
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn reveal_path(path: &Path) -> AppResult<()> {
-    let target = path.parent().unwrap_or(path);
-    Command::new("xdg-open").arg(target).spawn()?;
-    Ok(())
-}
-
-fn now_epoch_seconds() -> AppResult<i64> {
-    Ok(SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| AppError::Internal(error.to_string()))?
-        .as_secs() as i64)
 }
