@@ -50,9 +50,11 @@ import type {
   LocationType,
 } from "@/types";
 
-// Both tables use a 16-col grid. Action starts at col 8 (0.5+1+5.5 = 1.5+5.5 = 7) so the
-// two Action columns land at the same x without sharing a grid template.
-const TASK_COLS = "0.2fr 0.8fr 6fr 0.8fr 6fr 2.2fr";
+// Both tables use a 16fr grid and must keep their Action column aligned. A column's x is
+// `sum(fr before it) + sum(gaps before it)`, so alignment needs BOTH the leading fr (7) AND
+// the leading cell-count (→ gap-count) to match. Each table therefore has exactly 2 cells
+// before Action: Task folds its drag handle into the Direction cell so it isn't a 3rd column.
+const TASK_COLS = "1fr 6fr 0.8fr 6fr 2.2fr";
 const LINK_COLS = "1.4fr 5.6fr 1fr 1.4fr 5.6fr 1fr";
 
 function actionColors(a: TaskAction): { fg: string; bg: string } {
@@ -605,7 +607,6 @@ export function SyncPage() {
                           className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
                           style={{ gridTemplateColumns: TASK_COLS }}
                         >
-                          <div />
                           <div>Direction</div>
                           <div>Source</div>
                           <div>Action</div>
@@ -647,21 +648,23 @@ export function SyncPage() {
                                     }}
                                     {...attributes}
                                   >
-                                    <span
-                                      ref={setActivatorNodeRef}
-                                      {...listeners}
-                                      title="Drag to reorder task"
-                                      className="cursor-grab text-[12px] leading-none tracking-[-1px] text-[#d4c9b6]"
-                                    >
-                                      ⠿
-                                    </span>
-                                    <span
-                                      className="text-[9.5px] font-bold uppercase tracking-[.03em]"
-                                      style={{ color: directionColor(t.direction) }}
-                                      title={t.direction}
-                                    >
-                                      {t.direction}
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        ref={setActivatorNodeRef}
+                                        {...listeners}
+                                        title="Drag to reorder task"
+                                        className="cursor-grab text-[12px] leading-none tracking-[-1px] text-[#d4c9b6]"
+                                      >
+                                        ⠿
+                                      </span>
+                                      <span
+                                        className="text-[9.5px] font-bold uppercase tracking-[.03em]"
+                                        style={{ color: directionColor(t.direction) }}
+                                        title={t.direction}
+                                      >
+                                        {t.direction}
+                                      </span>
+                                    </div>
                                     <div className="flex min-w-0 items-center gap-1.5">
                                       <LocationTag type={t.sourceType} />
                                       <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
