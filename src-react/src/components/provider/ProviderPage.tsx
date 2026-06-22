@@ -83,7 +83,6 @@ function mergeProviderQuota(provider: Provider, quota: ProviderQuotaSnapshot): P
 
 interface SortableProviderCardProps {
   id: string;
-  minHeight: number | null;
   children: (activator: {
     setActivatorNodeRef: (node: HTMLElement | null) => void;
     listeners: ReturnType<typeof useSortable>["listeners"];
@@ -92,7 +91,6 @@ interface SortableProviderCardProps {
 
 function SortableProviderCard({
   id,
-  minHeight,
   children,
 }: SortableProviderCardProps) {
   const {
@@ -116,7 +114,6 @@ function SortableProviderCard({
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
-        minHeight: minHeight ?? undefined,
       }}
       {...attributes}
     >
@@ -153,18 +150,29 @@ export function ProviderPage() {
   const [opencodeGoSaving, setOpencodeGoSaving] = useState(false);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [trayMetric, setTrayMetric] = useState<TrayMetric>(() => nexus.settings().trayMetric);
-  const gridRef = useRef<HTMLDivElement>(null);
-  const [cardMinHeight, setCardMinHeight] = useState<number | null>(null);
+  const [colCount, setColCount] = useState(1);
   const claudeQuota = useProviderQuotaQuery("claude");
   const codexQuota = useProviderQuotaQuery("codex");
   const copilotQuota = useProviderQuotaQuery("copilot");
   const opencodeGoQuota = useProviderQuotaQuery("opencode-go");
 
+  const gridRef = useRef<HTMLDivElement>(null);
   const timers = useRef<Record<string, number>>({});
   useEffect(
     () => () => Object.values(timers.current).forEach((t) => window.clearTimeout(t)),
     [],
   );
+
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const update = () =>
+      setColCount(Math.max(1, Math.floor((el.clientWidth + 16) / (300 + 16))));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     setProviders((current) => reconcileProviderRows(current, providerCatalog));
@@ -304,24 +312,8 @@ export function ProviderPage() {
   const visible = ordered.filter((p) => cardVisible[p.id] !== false);
   const hidden = ordered.filter((p) => cardVisible[p.id] === false);
   const cfg = configId ? providers.find((p) => p.id === configId) ?? null : null;
-
-  useEffect(() => {
-    const grid = gridRef.current;
-    if (!grid) return;
-    const update = () => {
-      let max = 0;
-      for (const child of Array.from(grid.children)) {
-        const h = (child as HTMLElement).getBoundingClientRect().height;
-        if (h > max) max = h;
-      }
-      setCardMinHeight(max || null);
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(grid);
-    for (const child of Array.from(grid.children)) ro.observe(child as HTMLElement);
-    return () => ro.disconnect();
-  }, [visible.map((p) => p.id).join(","), visible.length]);
+  const columns: Provider[][] = Array.from({ length: colCount }, () => []);
+  visible.forEach((p, i) => columns[i % colCount].push(p));
 
   return (
     <ScreenScroll>
@@ -352,12 +344,10 @@ export function ProviderPage() {
         onDragEnd={handleDragEnd}
       >
         <SortableContext items={visible.map((p) => p.id)} strategy={rectSortingStrategy}>
-          <div
-            ref={gridRef}
-            className="mt-[22px] grid gap-4"
-            style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}
-          >
-            {visible.map((p) => {
+          <div ref={gridRef} className="mt-[22px] flex items-start gap-4">
+            {columns.map((col, ci) => (
+              <div key={ci} className="flex min-w-0 flex-1 flex-col gap-4">
+                {col.map((p) => {
               const loading =
                 !!refreshing[p.id] ||
                 (p.id === "claude" && claudeQuota.isFetching) ||
@@ -374,11 +364,7 @@ export function ProviderPage() {
               const mm = MSG[p.status] ?? { title: "", body: "" };
               const body = p.status === "failed" ? p.error ?? mm.body : mm.body;
               return (
-                <SortableProviderCard
-                  key={p.id}
-                  id={p.id}
-                  minHeight={cardMinHeight}
-                >
+                <SortableProviderCard key={p.id} id={p.id}>
                   {({ setActivatorNodeRef, listeners }) => (
                     <>
                       <div className="flex items-start justify-between gap-2.5">
@@ -501,7 +487,9 @@ export function ProviderPage() {
                   )}
                 </SortableProviderCard>
               );
-            })}
+                })}
+              </div>
+            ))}
           </div>
         </SortableContext>
       </DndContext>
