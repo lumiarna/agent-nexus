@@ -26,7 +26,7 @@ const clone = <T>(x: T): T => structuredClone(x);
 const PROVIDERS: Provider[] = [
   {
     id: "claude", name: "Claude Code", plan: "Claude Pro", status: "available",
-    credential: "~/.claude", primary: 59, isAgent: true,
+    credential: "~/.claude", primary: 0, isAgent: true,
     windows: [
       { label: "5-hour limit", used: 0, reset: "Resets in 4h 59m" },
       {
@@ -40,7 +40,7 @@ const PROVIDERS: Provider[] = [
   },
   {
     id: "codex", name: "CodeX", plan: "ChatGPT Plus", status: "available",
-    credential: "~/.codex/auth.json", primary: 51, isAgent: true,
+    credential: "~/.codex/auth.json", primary: 23, isAgent: true,
     windows: [
       { label: "5-hour limit", used: 23, reset: "Resets in 3h 40m" },
       { label: "Weekly limit", used: 51, reset: "Resets Thu 14:00" },
@@ -74,8 +74,11 @@ const PROVIDERS: Provider[] = [
   },
   {
     id: "openrouter", name: "OpenRouter", plan: "Credits", status: "available",
-    credential: "~/.local/share/opencode/auth.json", primary: 34,
-    windows: [{ label: "Credit balance", used: 34, reset: "$66.00 of $100.00 left" }],
+    credential: "~/.local/share/opencode/auth.json",
+    windows: [
+      { label: "Credit used", used: 0, valueLabel: "34.00 credits used", valueOnly: true, reset: "" },
+      { label: "Credit balance", used: 0, valueLabel: "66.00 credits balance", valueOnly: true, reset: "" },
+    ],
   },
 ];
 

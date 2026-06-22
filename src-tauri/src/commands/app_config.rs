@@ -1,6 +1,9 @@
 use tauri::State;
 
-use nexus_core::{error::AppResult, services::app_config::OpenCodeGoConnectionParams};
+use nexus_core::{
+    error::AppResult,
+    services::app_config::{OpenCodeGoConnectionParams, ProviderConnectionParams},
+};
 
 use crate::store::AppState;
 
@@ -27,4 +30,25 @@ pub fn set_opencode_go_connection_params(
     params: OpenCodeGoConnectionParams,
 ) -> AppResult<()> {
     state.app_config.set_opencode_go_connection_params(&params)
+}
+
+#[tauri::command]
+pub fn get_provider_connection_params(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> AppResult<ProviderConnectionParams> {
+    state
+        .app_config
+        .get_provider_connection_params(&provider_id)
+}
+
+#[tauri::command]
+pub fn set_provider_connection_params(
+    state: State<'_, AppState>,
+    provider_id: String,
+    params: ProviderConnectionParams,
+) -> AppResult<()> {
+    state
+        .app_config
+        .set_provider_connection_params(&provider_id, &params)
 }

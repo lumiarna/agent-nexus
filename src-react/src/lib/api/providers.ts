@@ -4,6 +4,8 @@ export interface ProviderQuotaWindowSnapshot {
   label: string;
   kind: "rolling" | "weekly" | "monthly";
   used: number;
+  valueLabel?: string | null;
+  valueOnly: boolean;
   resetAt?: string | null;
   unlimited: boolean;
 }
@@ -23,6 +25,10 @@ export interface OpenCodeGoConnectionParams {
   authCookie: string;
 }
 
+export interface ProviderConnectionParams {
+  apiKey: string;
+}
+
 export const providersApi = {
   getQuota(providerId: string): Promise<ProviderQuotaSnapshot> {
     return invokeCommand<ProviderQuotaSnapshot>("get_provider_quota", { providerId });
@@ -38,5 +44,16 @@ export const providersApi = {
   },
   setOpenCodeGoConnectionParams(params: OpenCodeGoConnectionParams): Promise<void> {
     return invokeCommand<void>("set_opencode_go_connection_params", { params });
+  },
+  getProviderConnectionParams(providerId: string): Promise<ProviderConnectionParams> {
+    return invokeCommand<ProviderConnectionParams>("get_provider_connection_params", {
+      providerId,
+    });
+  },
+  setProviderConnectionParams(
+    providerId: string,
+    params: ProviderConnectionParams,
+  ): Promise<void> {
+    return invokeCommand<void>("set_provider_connection_params", { providerId, params });
   },
 };

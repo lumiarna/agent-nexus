@@ -21,6 +21,8 @@ export type ProviderStatus = "available" | "expired" | "failed" | "nocreds";
 export interface ProviderWindow {
   label: string;
   used: number;
+  valueLabel?: string;
+  valueOnly?: boolean;
   reset: string;
   kind?: "rolling" | "weekly" | "monthly";
   resetAt?: string;

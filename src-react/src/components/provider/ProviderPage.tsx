@@ -50,6 +50,31 @@ const MSG: Record<string, { title: string; body: string }> = {
   failed: { title: "Request failed", body: "Quota request failed." },
 };
 
+const API_KEY_PROVIDER_HINTS: Record<
+  string,
+  { placeholder: string; authKey: string; savedLabel: string }
+> = {
+  "minimax-token": {
+    placeholder: "sk-...",
+    authKey: "minimax-cn-coding-plan",
+    savedLabel: "MiniMax Token Plan CN API key",
+  },
+  deepseek: {
+    placeholder: "sk-...",
+    authKey: "deepseek",
+    savedLabel: "DeepSeek API key",
+  },
+  openrouter: {
+    placeholder: "sk-or-v1-...",
+    authKey: "openrouter",
+    savedLabel: "OpenRouter API key",
+  },
+};
+
+function isApiKeyProvider(providerId: string): boolean {
+  return providerId in API_KEY_PROVIDER_HINTS;
+}
+
 function actionLabel(st: ProviderUiStatus, loading: boolean): string {
   if (st === "expired") return "Re-check";
   if (st === "failed") return "Retry";
@@ -71,6 +96,8 @@ function mergeProviderQuota(provider: Provider, quota: ProviderQuotaSnapshot): P
         ? quota.windows.map((window) => ({
             label: window.label,
             used: window.used,
+            valueLabel: window.valueLabel ?? undefined,
+            valueOnly: window.valueOnly,
             reset: "",
             kind: window.kind,
             resetAt: window.resetAt ?? undefined,
@@ -148,6 +175,8 @@ export function ProviderPage() {
   const [opencodeGoWorkspaceId, setOpencodeGoWorkspaceId] = useState("");
   const [opencodeGoAuthCookie, setOpencodeGoAuthCookie] = useState("");
   const [opencodeGoSaving, setOpencodeGoSaving] = useState(false);
+  const [providerApiKey, setProviderApiKey] = useState("");
+  const [providerApiKeySaving, setProviderApiKeySaving] = useState(false);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [trayMetric, setTrayMetric] = useState<TrayMetric>(() => nexus.settings().trayMetric);
   const [colCount, setColCount] = useState(1);
@@ -156,6 +185,8 @@ export function ProviderPage() {
   const copilotQuota = useProviderQuotaQuery("copilot");
   const opencodeGoQuota = useProviderQuotaQuery("opencode-go");
   const minimaxTokenQuota = useProviderQuotaQuery("minimax-token");
+  const deepseekQuota = useProviderQuotaQuery("deepseek");
+  const openrouterQuota = useProviderQuotaQuery("openrouter");
 
   const gridRef = useRef<HTMLDivElement>(null);
   const timers = useRef<Record<string, number>>({});
@@ -233,6 +264,20 @@ export function ProviderPage() {
   }, [minimaxTokenQuota.data]);
 
   useEffect(() => {
+    if (!deepseekQuota.data) return;
+    setProviders((current) =>
+      current.map((provider) => mergeProviderQuota(provider, deepseekQuota.data)),
+    );
+  }, [deepseekQuota.data]);
+
+  useEffect(() => {
+    if (!openrouterQuota.data) return;
+    setProviders((current) =>
+      current.map((provider) => mergeProviderQuota(provider, openrouterQuota.data)),
+    );
+  }, [openrouterQuota.data]);
+
+  useEffect(() => {
     if (configId !== "copilot" || !isTauriRuntime()) return;
     let active = true;
     providersApi
@@ -268,6 +313,22 @@ export function ProviderPage() {
     };
   }, [configId]);
 
+  useEffect(() => {
+    if (!configId || !isApiKeyProvider(configId) || !isTauriRuntime()) return;
+    let active = true;
+    providersApi
+      .getProviderConnectionParams(configId)
+      .then((params) => {
+        if (active) setProviderApiKey(params.apiKey);
+      })
+      .catch(() => {
+        if (active) setProviderApiKey("");
+      });
+    return () => {
+      active = false;
+    };
+  }, [configId]);
+
   function refreshProvider(id: string) {
     if (id === "claude") {
       void claudeQuota.refetch();
@@ -283,6 +344,12 @@ export function ProviderPage() {
     }
     if (id === "minimax-token") {
       void minimaxTokenQuota.refetch();
+    }
+    if (id === "deepseek") {
+      void deepseekQuota.refetch();
+    }
+    if (id === "openrouter") {
+      void openrouterQuota.refetch();
     }
 
     setRefreshing((r) => ({ ...r, [id]: true }));
@@ -365,7 +432,9 @@ export function ProviderPage() {
                 (p.id === "codex" && codexQuota.isFetching) ||
                 (p.id === "copilot" && copilotQuota.isFetching) ||
                 (p.id === "opencode-go" && opencodeGoQuota.isFetching) ||
-                (p.id === "minimax-token" && minimaxTokenQuota.isFetching);
+                (p.id === "minimax-token" && minimaxTokenQuota.isFetching) ||
+                (p.id === "deepseek" && deepseekQuota.isFetching) ||
+                (p.id === "openrouter" && openrouterQuota.isFetching);
               const st: ProviderUiStatus = loading ? "loading" : p.status;
               const si = statusInfo(st);
               const showQuota = st === "available" && !!p.windows;
@@ -417,18 +486,20 @@ export function ProviderPage() {
 
                       {showQuota ? (
                         <>
-                          <div className="mt-[18px] flex items-baseline gap-[7px]">
-                            <span
-                              className="text-[30px] font-extrabold leading-none tracking-[-.03em]"
-                              style={{ color: quotaColor(p.primary ?? 0) }}
-                            >
-                              {quota.primaryLabel}
-                            </span>
-                            <span className="text-[12px] text-[#b3a999]">
-                              {quota.primaryCaption}
-                            </span>
-                          </div>
-                          <div className="mt-[15px] flex flex-col gap-[13px]">
+                          {quota.primaryLabel ? (
+                            <div className="mt-[18px] flex items-baseline gap-[7px]">
+                              <span
+                                className="text-[30px] font-extrabold leading-none tracking-[-.03em]"
+                                style={{ color: quotaColor(p.primary ?? 0) }}
+                              >
+                                {quota.primaryLabel}
+                              </span>
+                              <span className="text-[12px] text-[#b3a999]">
+                                {quota.primaryCaption}
+                              </span>
+                            </div>
+                          ) : null}
+                          <div className={cn("flex flex-col gap-[13px]", quota.primaryLabel ? "mt-[15px]" : "mt-[18px]")}>
                             {quota.windows.map((w) => {
                               const barColor = w.unlimited ? quotaColor(0) : quotaColor(w.used);
                               const barWidth = w.unlimited ? 100 : w.used;
@@ -440,13 +511,19 @@ export function ProviderPage() {
                                       {w.usedLabel}
                                     </span>
                                   </div>
-                                  <div className="h-2 overflow-hidden rounded-full bg-[#ece2d6]">
-                                    <div
-                                      className="h-full rounded-full"
-                                      style={{ width: `${barWidth}%`, background: barColor }}
-                                    />
-                                  </div>
-                                  <div className="mt-1.5 text-[11px] text-[#b3a999]">{w.reset}</div>
+                                  {w.valueOnly ? null : (
+                                    <div className="h-2 overflow-hidden rounded-full bg-[#ece2d6]">
+                                      <div
+                                        className="h-full rounded-full"
+                                        style={{ width: `${barWidth}%`, background: barColor }}
+                                      />
+                                    </div>
+                                  )}
+                                  {w.reset ? (
+                                    <div className="mt-1.5 text-[11px] text-[#b3a999]">
+                                      {w.reset}
+                                    </div>
+                                  ) : null}
                                 </div>
                               );
                             })}
@@ -581,6 +658,27 @@ export function ProviderPage() {
                       (<span className="font-mono">github-copilot</span>).
                     </div>
                   </label>
+                ) : isApiKeyProvider(cfg.id) ? (
+                  <label className="block">
+                    <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">
+                      API key
+                    </div>
+                    <Input
+                      type="password"
+                      className="font-mono"
+                      placeholder={API_KEY_PROVIDER_HINTS[cfg.id].placeholder}
+                      value={providerApiKey}
+                      onChange={(e) => setProviderApiKey(e.target.value)}
+                    />
+                    <div className="mt-[5px] text-[11px] text-[#b3a999]">
+                      Used only to read quota. Leave empty to fall back to opencode&apos;s{" "}
+                      <span className="font-mono">auth.json</span> (
+                      <span className="font-mono">
+                        {API_KEY_PROVIDER_HINTS[cfg.id].authKey}
+                      </span>
+                      ).
+                    </div>
+                  </label>
                 ) : cfg.id === "opencode-go" ? (
                   <div className="flex flex-col gap-[13px]">
                     <label className="block">
@@ -671,7 +769,7 @@ export function ProviderPage() {
               </Button>
               <Button
                 variant="primary"
-                disabled={copilotTokenSaving || opencodeGoSaving}
+                disabled={copilotTokenSaving || opencodeGoSaving || providerApiKeySaving}
                 onClick={async () => {
                   const n = cfg.name;
                   if (cfg.id === "copilot") {
@@ -685,6 +783,22 @@ export function ProviderPage() {
                       toast.error("Failed to save Copilot GitHub token");
                     } finally {
                       setCopilotTokenSaving(false);
+                    }
+                    return;
+                  }
+                  if (isApiKeyProvider(cfg.id)) {
+                    setProviderApiKeySaving(true);
+                    try {
+                      await providersApi.setProviderConnectionParams(cfg.id, {
+                        apiKey: providerApiKey.trim(),
+                      });
+                      setConfigId(null);
+                      toast(`Saved ${API_KEY_PROVIDER_HINTS[cfg.id].savedLabel}`);
+                      refreshProvider(cfg.id);
+                    } catch {
+                      toast.error(`Failed to save ${API_KEY_PROVIDER_HINTS[cfg.id].savedLabel}`);
+                    } finally {
+                      setProviderApiKeySaving(false);
                     }
                     return;
                   }
@@ -709,7 +823,9 @@ export function ProviderPage() {
                   toast(`Saved preferences for ${n}`);
                 }}
               >
-                {copilotTokenSaving || opencodeGoSaving ? "Saving..." : "Save"}
+                {copilotTokenSaving || opencodeGoSaving || providerApiKeySaving
+                  ? "Saving..."
+                  : "Save"}
               </Button>
             </ModalFooter>
           </>

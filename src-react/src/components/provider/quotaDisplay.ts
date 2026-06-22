@@ -1,6 +1,8 @@
 export interface ProviderQuotaWindowInput {
   label: string;
   used: number;
+  valueLabel?: string | null;
+  valueOnly?: boolean;
   reset?: string;
   resetAt?: string | null;
   kind?: "rolling" | "weekly" | "monthly" | string;
@@ -18,6 +20,7 @@ export interface ProviderQuotaDisplayWindow {
   used: number;
   reset: string;
   unlimited: boolean;
+  valueOnly?: boolean;
 }
 
 export interface ProviderQuotaDisplay {
@@ -37,14 +40,18 @@ export function formatProviderQuotaDisplay(
 ): ProviderQuotaDisplay {
   return {
     primaryLabel: provider.primary != null ? `${provider.primary}%` : "",
-    primaryCaption: "peak window used",
-    windows: (provider.windows ?? []).map((window) => ({
-      label: window.label,
-      usedLabel: window.unlimited ? "Unlimited" : `${window.used}%`,
-      used: window.used,
-      reset: formatWindowReset(window, options),
-      unlimited: window.unlimited ?? false,
-    })),
+    primaryCaption: provider.primary != null ? "shortest window used" : "",
+    windows: (provider.windows ?? []).map((window) => {
+      const valueOnly = window.valueOnly ?? false;
+      return {
+        label: window.label,
+        usedLabel: window.valueLabel ?? (window.unlimited ? "Unlimited" : `${window.used}%`),
+        used: window.used,
+        reset: formatWindowReset(window, options),
+        unlimited: window.unlimited ?? false,
+        ...(valueOnly ? { valueOnly } : {}),
+      };
+    }),
   };
 }
 

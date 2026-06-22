@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     database::Database,
-    error::AppResult,
+    error::{AppError, AppResult},
     services::paths::{path_to_string, resolve_local_path},
 };
 
@@ -18,12 +18,21 @@ const DEFAULT_CODEX_CONFIG_DIR: &str = "~/.codex";
 pub const COPILOT_GITHUB_TOKEN_KEY: &str = "COPILOT_GITHUB_TOKEN";
 pub const OPENCODE_GO_WORKSPACE_ID_KEY: &str = "OPENCODE_GO_WORKSPACE_ID";
 pub const OPENCODE_GO_AUTH_COOKIE_KEY: &str = "OPENCODE_GO_AUTH_COOKIE";
+const MINIMAX_TOKEN_PLAN_CN_API_KEY_KEY: &str = "PROVIDER_API_KEY_MINIMAX_TOKEN";
+const DEEPSEEK_API_KEY_KEY: &str = "PROVIDER_API_KEY_DEEPSEEK";
+const OPENROUTER_API_KEY_KEY: &str = "PROVIDER_API_KEY_OPENROUTER";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenCodeGoConnectionParams {
     pub workspace_id: String,
     pub auth_cookie: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderConnectionParams {
+    pub api_key: String,
 }
 
 #[derive(Clone)]
@@ -107,6 +116,36 @@ impl AppConfigService {
         Ok(())
     }
 
+    pub fn get_provider_connection_params(
+        &self,
+        provider_id: &str,
+    ) -> AppResult<ProviderConnectionParams> {
+        Ok(ProviderConnectionParams {
+            api_key: self
+                .read_setting(provider_api_key_setting_key(provider_id)?)?
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+        })
+    }
+
+    pub fn set_provider_connection_params(
+        &self,
+        provider_id: &str,
+        params: &ProviderConnectionParams,
+    ) -> AppResult<()> {
+        let conn = self.db.connection()?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![
+                provider_api_key_setting_key(provider_id)?,
+                params.api_key.trim()
+            ],
+        )?;
+        Ok(())
+    }
+
     fn read_setting(&self, key: &str) -> AppResult<Option<String>> {
         let conn = self.db.connection()?;
         conn.query_row(
@@ -116,5 +155,16 @@ impl AppConfigService {
         )
         .optional()
         .map_err(Into::into)
+    }
+}
+
+fn provider_api_key_setting_key(provider_id: &str) -> AppResult<&'static str> {
+    match provider_id {
+        "minimax-token" => Ok(MINIMAX_TOKEN_PLAN_CN_API_KEY_KEY),
+        "deepseek" => Ok(DEEPSEEK_API_KEY_KEY),
+        "openrouter" => Ok(OPENROUTER_API_KEY_KEY),
+        _ => Err(AppError::Validation(format!(
+            "unsupported provider connection params: {provider_id}"
+        ))),
     }
 }

@@ -6,12 +6,15 @@ use nexus_core::{
         app_config::{AppConfigService, CODEX_CONFIG_DIR_KEY},
         provider_quota::{
             claude_code_quota_from_usage_response, codex_quota_from_usage_response,
-            copilot_quota_from_usage_response, minimax_token_plan_cn_quota_from_usage_response,
-            opencode_go_quota_from_html, parse_opencode_copilot_token, ClaudeCodeUsageBucket,
-            ClaudeCodeUsageResponse, CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse,
-            CopilotQuotaDetail, CopilotQuotaSnapshots, CopilotUsageResponse,
-            MiniMaxTokenPlanCnModelRemain, MiniMaxTokenPlanCnUsageResponse, ProviderQuotaService,
-            ProviderQuotaStatus, ProviderQuotaWindowKind,
+            copilot_quota_from_usage_response, deepseek_balance_quota_from_usage_response,
+            minimax_token_plan_cn_quota_from_usage_response, opencode_go_quota_from_html,
+            openrouter_credits_quota_from_usage_response, parse_opencode_copilot_token,
+            parse_opencode_provider_token, ClaudeCodeUsageBucket, ClaudeCodeUsageResponse,
+            CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse, CopilotQuotaDetail,
+            CopilotQuotaSnapshots, CopilotUsageResponse, DeepSeekBalanceInfo,
+            DeepSeekBalanceResponse, MiniMaxTokenPlanCnModelRemain,
+            MiniMaxTokenPlanCnUsageResponse, OpenRouterCreditsData, OpenRouterCreditsResponse,
+            ProviderQuotaService, ProviderQuotaStatus, ProviderQuotaWindowKind,
         },
     },
 };
@@ -100,6 +103,60 @@ async fn provider_quota_service_dispatches_minimax_token_plan_cn_adapter_without
     assert_eq!(snapshot.error, None);
 }
 
+#[tokio::test]
+#[serial]
+async fn provider_quota_service_dispatches_deepseek_adapter_without_credentials() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let missing_auth_file = temp_dir.path().join("missing-opencode-auth.json");
+    let previous_auth_file = std::env::var_os("OPENCODE_AUTH_FILE");
+    std::env::set_var("OPENCODE_AUTH_FILE", &missing_auth_file);
+
+    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let snapshot = service
+        .get_provider_quota("deepseek")
+        .await
+        .expect("dispatch DeepSeek adapter");
+
+    match previous_auth_file {
+        Some(value) => std::env::set_var("OPENCODE_AUTH_FILE", value),
+        None => std::env::remove_var("OPENCODE_AUTH_FILE"),
+    }
+
+    assert_eq!(snapshot.provider_id, "deepseek");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
+    assert_eq!(snapshot.credential.as_deref(), Some("not found"));
+    assert!(snapshot.windows.is_empty());
+    assert_eq!(snapshot.error, None);
+}
+
+#[tokio::test]
+#[serial]
+async fn provider_quota_service_dispatches_openrouter_adapter_without_credentials() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let missing_auth_file = temp_dir.path().join("missing-opencode-auth.json");
+    let previous_auth_file = std::env::var_os("OPENCODE_AUTH_FILE");
+    std::env::set_var("OPENCODE_AUTH_FILE", &missing_auth_file);
+
+    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let snapshot = service
+        .get_provider_quota("openrouter")
+        .await
+        .expect("dispatch OpenRouter adapter");
+
+    match previous_auth_file {
+        Some(value) => std::env::set_var("OPENCODE_AUTH_FILE", value),
+        None => std::env::remove_var("OPENCODE_AUTH_FILE"),
+    }
+
+    assert_eq!(snapshot.provider_id, "openrouter");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
+    assert_eq!(snapshot.credential.as_deref(), Some("not found"));
+    assert!(snapshot.windows.is_empty());
+    assert_eq!(snapshot.error, None);
+}
+
 #[test]
 fn claude_code_usage_endpoint_maps_to_provider_quota_snapshot() {
     let snapshot = claude_code_quota_from_usage_response(
@@ -120,7 +177,7 @@ fn claude_code_usage_endpoint_maps_to_provider_quota_snapshot() {
     assert_eq!(snapshot.provider_id, "claude");
     assert_eq!(snapshot.status, ProviderQuotaStatus::Available);
     assert_eq!(snapshot.plan.as_deref(), Some("Claude Pro"));
-    assert_eq!(snapshot.primary, Some(59));
+    assert_eq!(snapshot.primary, Some(0));
     assert_eq!(snapshot.windows.len(), 2);
     assert_eq!(snapshot.windows[0].label, "5-hour limit");
     assert_eq!(snapshot.windows[0].kind, ProviderQuotaWindowKind::Rolling);
@@ -163,7 +220,7 @@ fn codex_usage_endpoint_maps_to_provider_quota_snapshot() {
     assert_eq!(snapshot.provider_id, "codex");
     assert_eq!(snapshot.status, ProviderQuotaStatus::Available);
     assert_eq!(snapshot.plan.as_deref(), Some("ChatGPT Plus"));
-    assert_eq!(snapshot.primary, Some(51));
+    assert_eq!(snapshot.primary, Some(23));
     assert_eq!(snapshot.windows.len(), 2);
     assert_eq!(snapshot.windows[0].label, "5-hour limit");
     assert_eq!(snapshot.windows[0].kind, ProviderQuotaWindowKind::Rolling);
@@ -277,7 +334,7 @@ fn copilot_usage_endpoint_maps_premium_and_chat_windows() {
     assert_eq!(snapshot.provider_id, "copilot");
     assert_eq!(snapshot.status, ProviderQuotaStatus::Available);
     assert_eq!(snapshot.plan.as_deref(), Some("Copilot Business"));
-    // premium used = 100 - 23 = 77, chat used = 100 - 80 = 20; peak = 77.
+    // Both windows are monthly, so the shortest-window display uses the higher monthly usage.
     assert_eq!(snapshot.primary, Some(77));
     assert_eq!(snapshot.windows.len(), 2);
     assert_eq!(snapshot.windows[0].label, "Premium Interactions");
@@ -371,7 +428,7 @@ fn minimax_token_plan_cn_usage_maps_remaining_percent_to_used_windows() {
     assert_eq!(snapshot.provider_id, "minimax-token");
     assert_eq!(snapshot.status, ProviderQuotaStatus::Available);
     assert_eq!(snapshot.plan.as_deref(), Some("Token plan"));
-    assert_eq!(snapshot.primary, Some(5));
+    assert_eq!(snapshot.primary, Some(2));
     assert_eq!(snapshot.windows.len(), 2);
     assert_eq!(snapshot.windows[0].label, "5-hour limit");
     assert_eq!(snapshot.windows[0].kind, ProviderQuotaWindowKind::Rolling);
@@ -387,6 +444,71 @@ fn minimax_token_plan_cn_usage_maps_remaining_percent_to_used_windows() {
         snapshot.windows[1].reset_at.as_deref(),
         Some("2026-06-18T13:03:20Z"),
     );
+}
+
+#[test]
+fn deepseek_balance_response_maps_to_balance_window() {
+    let snapshot = deepseek_balance_quota_from_usage_response(
+        "deepseek",
+        DeepSeekBalanceResponse {
+            is_available: true,
+            balance_infos: vec![DeepSeekBalanceInfo {
+                currency: "CNY".to_string(),
+                total_balance: "12.34".to_string(),
+            }],
+        },
+    )
+    .expect("map DeepSeek balance");
+
+    assert_eq!(snapshot.provider_id, "deepseek");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::Available);
+    assert_eq!(snapshot.plan.as_deref(), Some("Balance"));
+    assert_eq!(snapshot.primary, None);
+    assert_eq!(snapshot.windows.len(), 1);
+    assert_eq!(snapshot.windows[0].label, "CNY balance");
+    assert_eq!(snapshot.windows[0].kind, ProviderQuotaWindowKind::Monthly);
+    assert_eq!(snapshot.windows[0].used, 0);
+    assert_eq!(
+        snapshot.windows[0].value_label.as_deref(),
+        Some("12.34 CNY")
+    );
+    assert!(snapshot.windows[0].value_only);
+}
+
+#[test]
+fn openrouter_credits_response_maps_to_credit_window() {
+    let snapshot = openrouter_credits_quota_from_usage_response(
+        "openrouter",
+        OpenRouterCreditsResponse {
+            data: OpenRouterCreditsData {
+                total_credits: 100.50,
+                total_usage: 25.75,
+            },
+        },
+    )
+    .expect("map OpenRouter credits");
+
+    assert_eq!(snapshot.provider_id, "openrouter");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::Available);
+    assert_eq!(snapshot.plan.as_deref(), Some("Credits"));
+    assert_eq!(snapshot.primary, None);
+    assert_eq!(snapshot.windows.len(), 2);
+    assert_eq!(snapshot.windows[0].label, "Credit used");
+    assert_eq!(snapshot.windows[0].kind, ProviderQuotaWindowKind::Monthly);
+    assert_eq!(snapshot.windows[0].used, 0);
+    assert_eq!(
+        snapshot.windows[0].value_label.as_deref(),
+        Some("25.75 credits used"),
+    );
+    assert!(snapshot.windows[0].value_only);
+    assert_eq!(snapshot.windows[1].label, "Credit balance");
+    assert_eq!(snapshot.windows[1].kind, ProviderQuotaWindowKind::Monthly);
+    assert_eq!(snapshot.windows[1].used, 0);
+    assert_eq!(
+        snapshot.windows[1].value_label.as_deref(),
+        Some("74.75 credits balance"),
+    );
+    assert!(snapshot.windows[1].value_only);
 }
 
 #[test]
@@ -473,6 +595,23 @@ fn opencode_auth_yields_github_copilot_access_token() {
     assert_eq!(
         parse_opencode_copilot_token(content).as_deref(),
         Some("gho_access"),
+    );
+}
+
+#[test]
+fn opencode_auth_yields_configured_provider_api_keys() {
+    let content = r#"{
+        "deepseek": { "type": "api", "key": "sk-deepseek" },
+        "openrouter": { "type": "api", "key": "sk-or-xxx" }
+    }"#;
+
+    assert_eq!(
+        parse_opencode_provider_token(content, "deepseek").as_deref(),
+        Some("sk-deepseek"),
+    );
+    assert_eq!(
+        parse_opencode_provider_token(content, "openrouter").as_deref(),
+        Some("sk-or-xxx"),
     );
 }
 

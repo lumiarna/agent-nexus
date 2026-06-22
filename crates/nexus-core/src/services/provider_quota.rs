@@ -37,6 +37,14 @@ const MINIMAX_TOKEN_PLAN_CN_OPENCODE_KEY: &str = "minimax-cn-coding-plan";
 const MINIMAX_TOKEN_PLAN_CN_USAGE_URL: &str =
     "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains";
 
+const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
+const DEEPSEEK_OPENCODE_KEY: &str = "deepseek";
+const DEEPSEEK_BALANCE_URL: &str = "https://api.deepseek.com/user/balance";
+
+const OPENROUTER_PROVIDER_ID: &str = "openrouter";
+const OPENROUTER_OPENCODE_KEY: &str = "openrouter";
+const OPENROUTER_CREDITS_URL: &str = "https://openrouter.ai/api/v1/credits";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderQuotaStatus {
@@ -61,6 +69,9 @@ pub struct ProviderQuotaWindow {
     pub label: String,
     pub kind: ProviderQuotaWindowKind,
     pub used: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_label: Option<String>,
+    pub value_only: bool,
     pub reset_at: Option<String>,
     pub unlimited: bool,
 }
@@ -153,6 +164,30 @@ pub struct MiniMaxTokenPlanCnModelRemain {
     pub current_weekly_status: Option<i64>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct DeepSeekBalanceResponse {
+    pub is_available: bool,
+    #[serde(default)]
+    pub balance_infos: Vec<DeepSeekBalanceInfo>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DeepSeekBalanceInfo {
+    pub currency: String,
+    pub total_balance: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct OpenRouterCreditsResponse {
+    pub data: OpenRouterCreditsData,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct OpenRouterCreditsData {
+    pub total_credits: f64,
+    pub total_usage: f64,
+}
+
 #[derive(Clone, Debug)]
 struct ClaudeCodeCredentials {
     access_token: String,
@@ -168,6 +203,12 @@ struct OpenCodeGoCredentials {
     source: String,
 }
 
+#[derive(Clone, Debug)]
+struct ConfiguredProviderCredentials {
+    api_key: String,
+    source: String,
+}
+
 type ClaudeCodeUsageFuture<'a> = Pin<
     Box<dyn Future<Output = Result<ClaudeCodeUsageResponse, ProviderQuotaPollError>> + Send + 'a>,
 >;
@@ -177,13 +218,67 @@ type CopilotUsageFuture<'a> =
     Pin<Box<dyn Future<Output = Result<CopilotUsageResponse, ProviderQuotaPollError>> + Send + 'a>>;
 type OpenCodeGoPageFuture<'a> =
     Pin<Box<dyn Future<Output = Result<String, ProviderQuotaPollError>> + Send + 'a>>;
-type MiniMaxTokenPlanCnUsageFuture<'a> = Pin<
+type ConfiguredProviderUsageFuture<'a> = Pin<
     Box<
-        dyn Future<Output = Result<MiniMaxTokenPlanCnUsageResponse, ProviderQuotaPollError>>
+        dyn Future<Output = Result<ConfiguredProviderUsageResponse, ProviderQuotaPollError>>
             + Send
             + 'a,
     >,
 >;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConfiguredProviderQuotaKind {
+    MiniMaxTokenPlanCn,
+    DeepSeekBalance,
+    OpenRouterCredits,
+}
+
+#[derive(Clone, Copy)]
+struct ConfiguredProviderQuotaConfig {
+    provider_id: &'static str,
+    opencode_key: &'static str,
+    plan: &'static str,
+    manual_credential: &'static str,
+    opencode_credential: &'static str,
+    auth_error: &'static str,
+    kind: ConfiguredProviderQuotaKind,
+}
+
+enum ConfiguredProviderUsageResponse {
+    MiniMaxTokenPlanCn(MiniMaxTokenPlanCnUsageResponse),
+    DeepSeekBalance(DeepSeekBalanceResponse),
+    OpenRouterCredits(OpenRouterCreditsResponse),
+}
+
+const CONFIGURED_PROVIDER_QUOTA_CONFIGS: &[ConfiguredProviderQuotaConfig] = &[
+    ConfiguredProviderQuotaConfig {
+        provider_id: MINIMAX_TOKEN_PLAN_CN_PROVIDER_ID,
+        opencode_key: MINIMAX_TOKEN_PLAN_CN_OPENCODE_KEY,
+        plan: "Token plan",
+        manual_credential: "manual API key",
+        opencode_credential: "opencode auth.json · minimax-cn-coding-plan",
+        auth_error: "MiniMax Token Plan CN API key was rejected",
+        kind: ConfiguredProviderQuotaKind::MiniMaxTokenPlanCn,
+    },
+    ConfiguredProviderQuotaConfig {
+        provider_id: DEEPSEEK_PROVIDER_ID,
+        opencode_key: DEEPSEEK_OPENCODE_KEY,
+        plan: "Balance",
+        manual_credential: "manual API key",
+        opencode_credential: "opencode auth.json · deepseek",
+        auth_error: "DeepSeek API key was rejected",
+        kind: ConfiguredProviderQuotaKind::DeepSeekBalance,
+    },
+    ConfiguredProviderQuotaConfig {
+        provider_id: OPENROUTER_PROVIDER_ID,
+        opencode_key: OPENROUTER_OPENCODE_KEY,
+        plan: "Credits",
+        manual_credential: "manual API key",
+        opencode_credential: "opencode auth.json · openrouter",
+        auth_error: "OpenRouter API key was rejected or lacks credits permission",
+        kind: ConfiguredProviderQuotaKind::OpenRouterCredits,
+    },
+];
 
 trait ProviderCredentialSource: Send + Sync {
     fn claude_code_credentials(
@@ -199,7 +294,11 @@ trait ProviderCredentialSource: Send + Sync {
         &self,
         app_config: &AppConfigService,
     ) -> AppResult<Option<OpenCodeGoCredentials>>;
-    fn minimax_token_plan_cn_token(&self) -> AppResult<Option<String>>;
+    fn configured_provider_credentials(
+        &self,
+        app_config: &AppConfigService,
+        config: &'static ConfiguredProviderQuotaConfig,
+    ) -> AppResult<Option<ConfiguredProviderCredentials>>;
 }
 
 trait ProviderUsageTransport: Send + Sync {
@@ -215,10 +314,11 @@ trait ProviderUsageTransport: Send + Sync {
         workspace_id: &'a str,
         auth_cookie: &'a str,
     ) -> OpenCodeGoPageFuture<'a>;
-    fn minimax_token_plan_cn_usage<'a>(
+    fn configured_provider_usage<'a>(
         &'a self,
+        config: &'static ConfiguredProviderQuotaConfig,
         api_key: &'a str,
-    ) -> MiniMaxTokenPlanCnUsageFuture<'a>;
+    ) -> ConfiguredProviderUsageFuture<'a>;
 }
 
 #[derive(Clone)]
@@ -238,6 +338,7 @@ trait ProviderQuotaAdapter: Sync {
 
     fn quota<'a>(
         &'a self,
+        provider_id: &'a str,
         app_config: &'a AppConfigService,
         credential_source: &'a dyn ProviderCredentialSource,
         usage_transport: &'a dyn ProviderUsageTransport,
@@ -252,8 +353,8 @@ static CLAUDE_CODE_QUOTA_ADAPTER: ClaudeCodeQuotaAdapter = ClaudeCodeQuotaAdapte
 static CODEX_QUOTA_ADAPTER: CodexQuotaAdapter = CodexQuotaAdapter;
 static COPILOT_QUOTA_ADAPTER: CopilotQuotaAdapter = CopilotQuotaAdapter;
 static OPENCODE_GO_QUOTA_ADAPTER: OpenCodeGoQuotaAdapter = OpenCodeGoQuotaAdapter;
-static MINIMAX_TOKEN_PLAN_CN_QUOTA_ADAPTER: MiniMaxTokenPlanCnQuotaAdapter =
-    MiniMaxTokenPlanCnQuotaAdapter;
+static CONFIGURED_PROVIDER_QUOTA_ADAPTER: ConfiguredProviderQuotaAdapter =
+    ConfiguredProviderQuotaAdapter;
 
 #[derive(Clone)]
 pub struct ProviderQuotaService {
@@ -276,6 +377,7 @@ impl ProviderQuotaService {
             if adapter.matches(provider_id) {
                 return Ok(adapter
                     .quota(
+                        provider_id,
                         &self.app_config,
                         self.credential_source.as_ref(),
                         self.usage_transport.as_ref(),
@@ -293,7 +395,7 @@ fn provider_quota_adapters() -> [&'static dyn ProviderQuotaAdapter; 5] {
         &CODEX_QUOTA_ADAPTER,
         &COPILOT_QUOTA_ADAPTER,
         &OPENCODE_GO_QUOTA_ADAPTER,
-        &MINIMAX_TOKEN_PLAN_CN_QUOTA_ADAPTER,
+        &CONFIGURED_PROVIDER_QUOTA_ADAPTER,
     ]
 }
 
@@ -357,8 +459,27 @@ impl ProviderCredentialSource for LocalCredentialSource {
         }))
     }
 
-    fn minimax_token_plan_cn_token(&self) -> AppResult<Option<String>> {
-        Ok(read_opencode_auth_token(MINIMAX_TOKEN_PLAN_CN_OPENCODE_KEY))
+    fn configured_provider_credentials(
+        &self,
+        app_config: &AppConfigService,
+        config: &'static ConfiguredProviderQuotaConfig,
+    ) -> AppResult<Option<ConfiguredProviderCredentials>> {
+        let manual = app_config.get_provider_connection_params(config.provider_id)?;
+        if !manual.api_key.is_empty() {
+            return Ok(Some(ConfiguredProviderCredentials {
+                api_key: manual.api_key,
+                source: config.manual_credential.to_string(),
+            }));
+        }
+
+        Ok(
+            read_opencode_auth_token(config.opencode_key).map(|api_key| {
+                ConfiguredProviderCredentials {
+                    api_key,
+                    source: config.opencode_credential.to_string(),
+                }
+            }),
+        )
     }
 }
 
@@ -387,11 +508,12 @@ impl ProviderUsageTransport for HttpUsageTransport {
         Box::pin(fetch_opencode_go_page(workspace_id, auth_cookie))
     }
 
-    fn minimax_token_plan_cn_usage<'a>(
+    fn configured_provider_usage<'a>(
         &'a self,
+        config: &'static ConfiguredProviderQuotaConfig,
         api_key: &'a str,
-    ) -> MiniMaxTokenPlanCnUsageFuture<'a> {
-        Box::pin(fetch_minimax_token_plan_cn_usage(api_key))
+    ) -> ConfiguredProviderUsageFuture<'a> {
+        Box::pin(fetch_configured_provider_usage(config, api_key))
     }
 }
 
@@ -408,6 +530,7 @@ impl ProviderQuotaAdapter for ClaudeCodeQuotaAdapter {
 
     fn quota<'a>(
         &'a self,
+        _provider_id: &'a str,
         app_config: &'a AppConfigService,
         credential_source: &'a dyn ProviderCredentialSource,
         usage_transport: &'a dyn ProviderUsageTransport,
@@ -462,6 +585,7 @@ impl ProviderQuotaAdapter for CodexQuotaAdapter {
 
     fn quota<'a>(
         &'a self,
+        _provider_id: &'a str,
         app_config: &'a AppConfigService,
         credential_source: &'a dyn ProviderCredentialSource,
         usage_transport: &'a dyn ProviderUsageTransport,
@@ -504,6 +628,7 @@ impl ProviderQuotaAdapter for CopilotQuotaAdapter {
 
     fn quota<'a>(
         &'a self,
+        _provider_id: &'a str,
         app_config: &'a AppConfigService,
         credential_source: &'a dyn ProviderCredentialSource,
         usage_transport: &'a dyn ProviderUsageTransport,
@@ -544,6 +669,7 @@ impl ProviderQuotaAdapter for OpenCodeGoQuotaAdapter {
 
     fn quota<'a>(
         &'a self,
+        _provider_id: &'a str,
         app_config: &'a AppConfigService,
         credential_source: &'a dyn ProviderCredentialSource,
         usage_transport: &'a dyn ProviderUsageTransport,
@@ -587,41 +713,89 @@ impl OpenCodeGoQuotaAdapter {
     }
 }
 
-struct MiniMaxTokenPlanCnQuotaAdapter;
+struct ConfiguredProviderQuotaAdapter;
 
-impl ProviderQuotaAdapter for MiniMaxTokenPlanCnQuotaAdapter {
+impl ProviderQuotaAdapter for ConfiguredProviderQuotaAdapter {
     fn provider_id(&self) -> &'static str {
-        MINIMAX_TOKEN_PLAN_CN_PROVIDER_ID
+        "configured-provider"
+    }
+
+    fn matches(&self, provider_id: &str) -> bool {
+        configured_provider_quota_config(provider_id).is_some()
     }
 
     fn quota<'a>(
         &'a self,
-        _app_config: &'a AppConfigService,
+        provider_id: &'a str,
+        app_config: &'a AppConfigService,
         credential_source: &'a dyn ProviderCredentialSource,
         usage_transport: &'a dyn ProviderUsageTransport,
     ) -> ProviderQuotaFuture<'a> {
         Box::pin(async move {
-            let token = match credential_source.minimax_token_plan_cn_token() {
-                Ok(Some(token)) => token,
-                Ok(None) => {
-                    return minimax_token_plan_cn_status(
-                        ProviderQuotaStatus::NoCreds,
-                        "not found",
-                        None,
-                    );
-                }
-                Err(error) => {
-                    return minimax_token_plan_cn_status(
-                        ProviderQuotaStatus::Failed,
-                        "not found",
-                        Some(error.to_string()),
-                    );
-                }
+            let Some(config) = configured_provider_quota_config(provider_id) else {
+                return configured_provider_status(
+                    provider_id,
+                    ProviderQuotaStatus::Failed,
+                    "—",
+                    "not found",
+                    Some("unsupported provider".to_string()),
+                );
             };
 
-            let usage = usage_transport.minimax_token_plan_cn_usage(&token).await;
-            derive_minimax_token_plan_cn_snapshot(usage)
+            let credentials =
+                match credential_source.configured_provider_credentials(app_config, config) {
+                    Ok(Some(credentials)) => credentials,
+                    Ok(None) => {
+                        return configured_provider_status(
+                            config.provider_id,
+                            ProviderQuotaStatus::NoCreds,
+                            config.plan,
+                            "not found",
+                            None,
+                        );
+                    }
+                    Err(error) => {
+                        return configured_provider_status(
+                            config.provider_id,
+                            ProviderQuotaStatus::Failed,
+                            config.plan,
+                            "not found",
+                            Some(error.to_string()),
+                        );
+                    }
+                };
+
+            let usage = usage_transport
+                .configured_provider_usage(config, &credentials.api_key)
+                .await;
+            derive_configured_provider_snapshot(config, credentials, usage)
         })
+    }
+}
+
+fn configured_provider_quota_config(
+    provider_id: &str,
+) -> Option<&'static ConfiguredProviderQuotaConfig> {
+    CONFIGURED_PROVIDER_QUOTA_CONFIGS
+        .iter()
+        .find(|config| config.provider_id == provider_id)
+}
+
+fn configured_provider_status(
+    provider_id: &str,
+    status: ProviderQuotaStatus,
+    plan: &str,
+    credential: &str,
+    error: Option<String>,
+) -> ProviderQuotaSnapshot {
+    ProviderQuotaSnapshot {
+        provider_id: provider_id.to_string(),
+        status,
+        plan: Some(plan.to_string()),
+        primary: None,
+        windows: Vec::new(),
+        credential: Some(credential.to_string()),
+        error,
     }
 }
 
@@ -642,7 +816,7 @@ pub fn claude_code_quota_from_usage_response(
     .flatten()
     .collect::<Vec<_>>();
 
-    let primary = windows.iter().map(|window| window.used).max();
+    let primary = shortest_percent_window_used(&windows);
 
     ProviderQuotaSnapshot {
         provider_id: provider_id.to_string(),
@@ -672,6 +846,8 @@ pub fn codex_quota_from_usage_response(
                     label,
                     kind,
                     used: percent_to_u8(used_percent),
+                    value_label: None,
+                    value_only: false,
                     reset_at: window.reset_at.and_then(unix_seconds_to_iso),
                     unlimited: false,
                 });
@@ -679,7 +855,7 @@ pub fn codex_quota_from_usage_response(
         }
     }
 
-    let primary = windows.iter().map(|window| window.used).max();
+    let primary = shortest_percent_window_used(&windows);
 
     let plan = response
         .plan_type
@@ -721,7 +897,7 @@ pub fn copilot_quota_from_usage_response(
     .flatten()
     .collect::<Vec<_>>();
 
-    let primary = windows.iter().map(|window| window.used).max();
+    let primary = shortest_percent_window_used(&windows);
     let plan = response.copilot_plan.as_deref().map(copilot_plan_label);
 
     ProviderQuotaSnapshot {
@@ -774,11 +950,7 @@ pub fn opencode_go_quota_from_html(
         ));
     }
 
-    let primary = rolling
-        .as_ref()
-        .or(weekly.as_ref())
-        .or(monthly.as_ref())
-        .map(|window| percent_to_u8(window.usage_percent));
+    let primary = shortest_percent_window_used(&windows);
     let plan =
         Some(extract_string_field(html, "subscriptionPlan").unwrap_or_else(|| "Go".to_string()));
 
@@ -808,6 +980,8 @@ pub fn minimax_token_plan_cn_quota_from_usage_response(
             label: "5-hour limit".to_string(),
             kind: ProviderQuotaWindowKind::Rolling,
             used: percent_to_u8(100.0 - remaining),
+            value_label: None,
+            value_only: false,
             reset_at: model.end_time.and_then(unix_millis_to_iso),
             unlimited: false,
         });
@@ -818,6 +992,8 @@ pub fn minimax_token_plan_cn_quota_from_usage_response(
                 label: "Weekly limit".to_string(),
                 kind: ProviderQuotaWindowKind::Weekly,
                 used: percent_to_u8(100.0 - remaining),
+                value_label: None,
+                value_only: false,
                 reset_at: model.weekly_end_time.and_then(unix_millis_to_iso),
                 unlimited: false,
             });
@@ -828,7 +1004,7 @@ pub fn minimax_token_plan_cn_quota_from_usage_response(
         return None;
     }
 
-    let primary = windows.iter().map(|window| window.used).max();
+    let primary = shortest_percent_window_used(&windows);
     Some(ProviderQuotaSnapshot {
         provider_id: provider_id.to_string(),
         status: ProviderQuotaStatus::Available,
@@ -840,20 +1016,90 @@ pub fn minimax_token_plan_cn_quota_from_usage_response(
     })
 }
 
-fn minimax_token_plan_cn_status(
-    status: ProviderQuotaStatus,
-    credential: &str,
-    error: Option<String>,
-) -> ProviderQuotaSnapshot {
-    ProviderQuotaSnapshot {
-        provider_id: MINIMAX_TOKEN_PLAN_CN_PROVIDER_ID.to_string(),
-        status,
-        plan: Some("Token plan".to_string()),
-        primary: None,
-        windows: Vec::new(),
-        credential: Some(credential.to_string()),
-        error,
+pub fn deepseek_balance_quota_from_usage_response(
+    provider_id: &str,
+    response: DeepSeekBalanceResponse,
+) -> Option<ProviderQuotaSnapshot> {
+    if response.balance_infos.is_empty() {
+        return None;
     }
+
+    let windows = response
+        .balance_infos
+        .into_iter()
+        .map(|info| ProviderQuotaWindow {
+            label: format!("{} balance", info.currency),
+            kind: ProviderQuotaWindowKind::Monthly,
+            used: 0,
+            value_label: Some(format!("{} {}", info.total_balance, info.currency)),
+            value_only: true,
+            reset_at: None,
+            unlimited: false,
+        })
+        .collect();
+
+    Some(ProviderQuotaSnapshot {
+        provider_id: provider_id.to_string(),
+        status: ProviderQuotaStatus::Available,
+        plan: Some("Balance".to_string()),
+        primary: None,
+        windows,
+        credential: None,
+        error: if response.is_available {
+            None
+        } else {
+            Some("Insufficient balance".to_string())
+        },
+    })
+}
+
+pub fn openrouter_credits_quota_from_usage_response(
+    provider_id: &str,
+    response: OpenRouterCreditsResponse,
+) -> Option<ProviderQuotaSnapshot> {
+    let total = response.data.total_credits;
+    let used = response.data.total_usage;
+    if !total.is_finite() || !used.is_finite() {
+        return None;
+    }
+
+    let remaining = total - used;
+
+    Some(ProviderQuotaSnapshot {
+        provider_id: provider_id.to_string(),
+        status: ProviderQuotaStatus::Available,
+        plan: Some("Credits".to_string()),
+        primary: None,
+        windows: vec![
+            ProviderQuotaWindow {
+                label: "Credit used".to_string(),
+                kind: ProviderQuotaWindowKind::Monthly,
+                used: 0,
+                value_label: Some(format!("{} credits used", format_credit_value(used))),
+                value_only: true,
+                reset_at: None,
+                unlimited: false,
+            },
+            ProviderQuotaWindow {
+                label: "Credit balance".to_string(),
+                kind: ProviderQuotaWindowKind::Monthly,
+                used: 0,
+                value_label: Some(format!(
+                    "{} credits balance",
+                    format_credit_value(remaining)
+                )),
+                value_only: true,
+                reset_at: None,
+                unlimited: false,
+            },
+        ],
+        credential: None,
+        error: if remaining > 0.0 {
+            None
+        } else {
+            Some("No credits remaining".to_string())
+        },
+    })
 }
 
 fn derive_claude_code_snapshot(
@@ -1004,36 +1250,52 @@ fn derive_opencode_go_snapshot(
     }
 }
 
-fn derive_minimax_token_plan_cn_snapshot(
-    usage: Result<MiniMaxTokenPlanCnUsageResponse, ProviderQuotaPollError>,
+fn derive_configured_provider_snapshot(
+    config: &'static ConfiguredProviderQuotaConfig,
+    credentials: ConfiguredProviderCredentials,
+    usage: Result<ConfiguredProviderUsageResponse, ProviderQuotaPollError>,
 ) -> ProviderQuotaSnapshot {
-    let credential = "opencode auth.json · minimax-cn-coding-plan";
     match usage {
         Ok(response) => {
-            let Some(mut snapshot) = minimax_token_plan_cn_quota_from_usage_response(
-                MINIMAX_TOKEN_PLAN_CN_PROVIDER_ID,
-                response,
-            ) else {
-                return minimax_token_plan_cn_status(
+            let snapshot = match response {
+                ConfiguredProviderUsageResponse::MiniMaxTokenPlanCn(response) => {
+                    minimax_token_plan_cn_quota_from_usage_response(config.provider_id, response)
+                }
+                ConfiguredProviderUsageResponse::DeepSeekBalance(response) => {
+                    deepseek_balance_quota_from_usage_response(config.provider_id, response)
+                }
+                ConfiguredProviderUsageResponse::OpenRouterCredits(response) => {
+                    openrouter_credits_quota_from_usage_response(config.provider_id, response)
+                }
+            };
+
+            let Some(mut snapshot) = snapshot else {
+                return configured_provider_status(
+                    config.provider_id,
                     ProviderQuotaStatus::Failed,
-                    credential,
-                    Some(
-                        "MiniMax Token Plan CN response did not contain coding-plan usage"
-                            .to_string(),
-                    ),
+                    config.plan,
+                    &credentials.source,
+                    Some(format!(
+                        "{} response did not contain recognizable quota data",
+                        config.provider_id
+                    )),
                 );
             };
-            snapshot.credential = Some(credential.to_string());
+            snapshot.credential = Some(credentials.source);
             snapshot
         }
-        Err(ProviderQuotaPollError::AuthRequired) => minimax_token_plan_cn_status(
+        Err(ProviderQuotaPollError::AuthRequired) => configured_provider_status(
+            config.provider_id,
             ProviderQuotaStatus::Expired,
-            credential,
-            Some("MiniMax Token Plan CN API key was rejected".to_string()),
+            config.plan,
+            &credentials.source,
+            Some(config.auth_error.to_string()),
         ),
-        Err(error) => minimax_token_plan_cn_status(
+        Err(error) => configured_provider_status(
+            config.provider_id,
             ProviderQuotaStatus::Failed,
-            credential,
+            config.plan,
+            &credentials.source,
             Some(error.to_string()),
         ),
     }
@@ -1049,6 +1311,8 @@ fn copilot_window(
         label: label.to_string(),
         kind: ProviderQuotaWindowKind::Monthly,
         used: percent_to_u8(100.0 - remaining),
+        value_label: None,
+        value_only: false,
         reset_at,
         unlimited: detail.unlimited == Some(true),
     })
@@ -1087,6 +1351,8 @@ fn opencode_go_window(
         label: label.to_string(),
         kind,
         used: percent_to_u8(window.usage_percent),
+        value_label: None,
+        value_only: false,
         reset_at: reset_seconds_to_iso(now_epoch_seconds, window.reset_in_sec),
         unlimited: false,
     }
@@ -1197,9 +1463,13 @@ pub fn parse_opencode_copilot_token(content: &str) -> Option<String> {
     parse_opencode_auth_token(content, "github-copilot", &["access", "key"])
 }
 
+pub fn parse_opencode_provider_token(content: &str, provider_key: &str) -> Option<String> {
+    parse_opencode_auth_token(content, provider_key, &["key", "access"])
+}
+
 fn read_opencode_auth_token(provider_key: &str) -> Option<String> {
     let content = read_opencode_auth_content()?;
-    parse_opencode_auth_token(&content, provider_key, &["key", "access"])
+    parse_opencode_provider_token(&content, provider_key)
 }
 
 fn read_opencode_auth_content() -> Option<String> {
@@ -1287,6 +1557,8 @@ fn quota_window(
         label: label.to_string(),
         kind,
         used: percent_to_u8(bucket.utilization),
+        value_label: None,
+        value_only: false,
         reset_at: bucket.resets_at,
         unlimited: false,
     }
@@ -1297,6 +1569,33 @@ fn percent_to_u8(value: f64) -> u8 {
         return 0;
     }
     value.round().clamp(0.0, 100.0) as u8
+}
+
+fn shortest_percent_window_used(windows: &[ProviderQuotaWindow]) -> Option<u8> {
+    let shortest_rank = windows
+        .iter()
+        .filter(|window| !window.value_only)
+        .map(|window| quota_window_kind_rank(&window.kind))
+        .min()?;
+
+    windows
+        .iter()
+        .filter(|window| !window.value_only)
+        .filter(|window| quota_window_kind_rank(&window.kind) == shortest_rank)
+        .map(|window| window.used)
+        .max()
+}
+
+fn quota_window_kind_rank(kind: &ProviderQuotaWindowKind) -> u8 {
+    match kind {
+        ProviderQuotaWindowKind::Rolling => 0,
+        ProviderQuotaWindowKind::Weekly => 1,
+        ProviderQuotaWindowKind::Monthly => 2,
+    }
+}
+
+fn format_credit_value(value: f64) -> String {
+    format!("{value:.2}")
 }
 
 async fn fetch_claude_code_usage(
@@ -1617,6 +1916,83 @@ async fn fetch_minimax_token_plan_cn_usage(
         }
     }
     Ok(parsed)
+}
+
+async fn fetch_configured_provider_usage(
+    config: &'static ConfiguredProviderQuotaConfig,
+    api_key: &str,
+) -> Result<ConfiguredProviderUsageResponse, ProviderQuotaPollError> {
+    match config.kind {
+        ConfiguredProviderQuotaKind::MiniMaxTokenPlanCn => {
+            fetch_minimax_token_plan_cn_usage(api_key)
+                .await
+                .map(ConfiguredProviderUsageResponse::MiniMaxTokenPlanCn)
+        }
+        ConfiguredProviderQuotaKind::DeepSeekBalance => fetch_deepseek_balance(api_key)
+            .await
+            .map(ConfiguredProviderUsageResponse::DeepSeekBalance),
+        ConfiguredProviderQuotaKind::OpenRouterCredits => fetch_openrouter_credits(api_key)
+            .await
+            .map(ConfiguredProviderUsageResponse::OpenRouterCredits),
+    }
+}
+
+async fn fetch_deepseek_balance(
+    api_key: &str,
+) -> Result<DeepSeekBalanceResponse, ProviderQuotaPollError> {
+    let response = reqwest::Client::new()
+        .get(DEEPSEEK_BALANCE_URL)
+        .bearer_auth(api_key)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(ProviderQuotaPollError::AuthRequired);
+    }
+    if !status.is_success() {
+        return Err(ProviderQuotaPollError::Request(format!(
+            "DeepSeek balance endpoint returned {status}"
+        )));
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+    serde_json::from_str::<DeepSeekBalanceResponse>(&body)
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
+}
+
+async fn fetch_openrouter_credits(
+    api_key: &str,
+) -> Result<OpenRouterCreditsResponse, ProviderQuotaPollError> {
+    let response = reqwest::Client::new()
+        .get(OPENROUTER_CREDITS_URL)
+        .bearer_auth(api_key)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(ProviderQuotaPollError::AuthRequired);
+    }
+    if !status.is_success() {
+        return Err(ProviderQuotaPollError::Request(format!(
+            "OpenRouter credits endpoint returned {status}"
+        )));
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+    serde_json::from_str::<OpenRouterCreditsResponse>(&body)
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
 }
 
 async fn fetch_copilot_usage(token: &str) -> Result<CopilotUsageResponse, ProviderQuotaPollError> {

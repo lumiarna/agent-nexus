@@ -3,7 +3,8 @@ use std::{path::PathBuf, sync::Arc};
 use nexus_core::{
     database::Database,
     services::app_config::{
-        AppConfigService, OpenCodeGoConnectionParams, CLAUDE_CONFIG_DIR_KEY, CODEX_CONFIG_DIR_KEY,
+        AppConfigService, OpenCodeGoConnectionParams, ProviderConnectionParams,
+        CLAUDE_CONFIG_DIR_KEY, CODEX_CONFIG_DIR_KEY,
     },
 };
 
@@ -57,6 +58,37 @@ fn opencode_go_connection_params_round_trip_through_settings() {
         OpenCodeGoConnectionParams {
             workspace_id: "wrk_abc".to_string(),
             auth_cookie: "Fe26.2**cookie".to_string(),
+        },
+    );
+}
+
+#[test]
+fn provider_connection_params_round_trip_through_settings() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = AppConfigService::new(db);
+
+    assert_eq!(
+        service
+            .get_provider_connection_params("deepseek")
+            .expect("read default DeepSeek params"),
+        ProviderConnectionParams::default(),
+    );
+
+    service
+        .set_provider_connection_params(
+            "deepseek",
+            &ProviderConnectionParams {
+                api_key: "  sk-deepseek  ".to_string(),
+            },
+        )
+        .expect("save DeepSeek params");
+
+    assert_eq!(
+        service
+            .get_provider_connection_params("deepseek")
+            .expect("read saved DeepSeek params"),
+        ProviderConnectionParams {
+            api_key: "sk-deepseek".to_string(),
         },
     );
 }
