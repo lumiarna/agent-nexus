@@ -88,7 +88,7 @@ export const AGENTS = [
   agent({
     name: "OpenCode",
     abbr: "OC",
-    color: "#7a5c9e",
+    color: "#8b5cf6",
     projectSkillDir: ".opencode/skills",
     surfaces: ["skill", "prompt"],
     dirs: [

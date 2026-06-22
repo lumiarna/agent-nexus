@@ -14,31 +14,28 @@ interface AgentIconProps {
 const BASE =
   "inline-flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[8px] bg-white transition-all select-none";
 
-/** Container style for a matrix cell by role. Logos keep their brand color;
- *  state is carried by the chip — tinted ring (source), thin ring (target),
- *  dashed + desaturated (none). */
-function cellStyle(col: string, role: CellRole): { style: CSSProperties; cls: string } {
+/** Static visual for a matrix cell by role: source = tinted bg + brand ring,
+ *  target = tinted bg, none = gray bg + desaturated logo. Cursor/hover are
+ *  layered on by the caller so legends stay non-interactive. */
+function cellStyle(col: string, role: CellRole): { style: CSSProperties; tone: string } {
   if (role === "source") {
-    return {
-      style: { background: col + "1a", boxShadow: `inset 0 0 0 1.5px ${col}` },
-      cls: "cursor-default",
-    };
+    return { style: { background: col + "1a", boxShadow: `inset 0 0 0 1.5px ${col}` }, tone: "" };
   }
   if (role === "target") {
-    return {
-      style: { boxShadow: `inset 0 0 0 1px ${col}59` },
-      cls: "cursor-pointer hover:brightness-95",
-    };
+    return { style: { background: col + "26" }, tone: "" };
   }
-  return {
-    style: { border: "1px dashed #ddccb6" },
-    cls: "cursor-pointer opacity-50 grayscale hover:opacity-80",
-  };
+  return { style: { background: "#ece7dd" }, tone: "opacity-60 grayscale" };
 }
 
-/** One Agent Matrix cell: source (filled ring), target (thin ring), none (dashed). */
+/** One Agent Matrix cell. */
 export function AgentIcon({ role, agent, onClick, title }: AgentIconProps) {
-  const { style, cls } = cellStyle(agentColor(agent), role);
+  const { style, tone } = cellStyle(agentColor(agent), role);
+  const cls = cn(
+    tone,
+    role === "source" ? "cursor-default" : "cursor-pointer",
+    role === "target" && "hover:brightness-95",
+    role === "none" && "hover:opacity-90",
+  );
   return (
     <span onClick={onClick} title={title} className={cn(BASE, cls)} style={style}>
       <AgentLogo agent={agent} className="h-[15px] w-[15px]" />
@@ -95,13 +92,13 @@ export function AgentMatrixCells({
 
 /** A single legend chip — a non-interactive cell in a given role. */
 function LegendChip({ agent, role, label }: { agent: AgentName; role: CellRole; label: string }) {
-  const { style } = cellStyle(agentColor(agent), role);
+  const { style, tone } = cellStyle(agentColor(agent), role);
   return (
     <span className="inline-flex items-center gap-1.5">
       <span
         className={cn(
           "inline-flex h-[20px] w-[20px] items-center justify-center rounded-[6px] bg-white",
-          role === "none" && "opacity-50 grayscale",
+          tone,
         )}
         style={style}
       >

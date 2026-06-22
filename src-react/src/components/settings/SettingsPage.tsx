@@ -12,6 +12,8 @@ import {
 } from "@/lib/query/sync";
 import { fallbackAgentCapabilities } from "@/lib/agentCapabilities";
 import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
+import { AgentLogo } from "@/components/ui/agent-logo";
+import type { AgentName } from "@/types";
 
 type WebdavStatus = "ok" | "testing" | "untested";
 
@@ -223,10 +225,10 @@ export function SettingsPage() {
             >
               <div className="flex items-center gap-[9px]">
                 <span
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-[7px] text-[9px] font-extrabold text-white"
-                  style={{ background: a.color }}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-[7px]"
+                  style={{ background: a.color + "1c" }}
                 >
-                  {a.abbr}
+                  <AgentLogo agent={a.name as AgentName} className="h-3.5 w-3.5" />
                 </span>
                 <span className="text-[13.5px] font-bold text-nexus-ink">{a.name}</span>
 

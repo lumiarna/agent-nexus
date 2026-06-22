@@ -6,9 +6,8 @@ interface LogoProps {
 }
 
 // Brand marks, inlined so they inherit `currentColor` and need no asset
-// pipeline. openai/github ship as currentColor already; claude/generic are
-// recolored to currentColor so the Agent Matrix can tint them per cell state.
-// opencode is an app-icon mark (filled dark square) and keeps its two tones.
+// pipeline. openai/github ship as currentColor already; the rest are recolored
+// to currentColor so the Agent Matrix can tint each per its canonical color.
 
 function GenericAgentLogo({ className }: LogoProps) {
   return (
@@ -54,9 +53,9 @@ function GithubLogo({ className }: LogoProps) {
 
 function OpenCodeLogo({ className }: LogoProps) {
   return (
-    <svg viewBox="0 0 240 300" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M180 240H60V120H180V240Z" fill="#CFCECD" />
-      <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="#211E1E" />
+    <svg viewBox="0 0 240 300" className={className} fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M180 240H60V120H180V240Z" />
+      <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" />
     </svg>
   );
 }
@@ -69,8 +68,8 @@ const LOGOS: Record<AgentName, (props: LogoProps) => JSX.Element> = {
   OpenCode: OpenCodeLogo,
 };
 
-/** The brand mark for an agent, tinted with its canonical color (where the
- *  mark uses currentColor). Wrap in a state-styled container for the matrix. */
+/** The brand mark for an agent, tinted with its canonical color. Wrap in a
+ *  state-styled container for the Agent Matrix. */
 export function AgentLogo({ agent, className }: { agent: AgentName; className?: string }) {
   const Logo = LOGOS[agent];
   return (
