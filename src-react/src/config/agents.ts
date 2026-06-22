@@ -90,9 +90,7 @@ export const AGENTS = [
     abbr: "OC",
     color: "#7a5c9e",
     projectSkillDir: ".opencode/skills",
-    providerId: "opencode",
-    authFile: "~/.local/share/opencode/auth.json",
-    surfaces: ["skill", "prompt", "provider"],
+    surfaces: ["skill", "prompt"],
     dirs: [
       { key: "OPENCODE_CONFIG_DIR", value: "~/.config/opencode" },
       { key: "OPENCODE_SKILLS_DIR", value: "~/.config/opencode/skills", derivedFrom: "OPENCODE_CONFIG_DIR" },

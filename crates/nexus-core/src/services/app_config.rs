@@ -1,6 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use rusqlite::{params, OptionalExtension};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     database::Database,
@@ -15,6 +16,15 @@ pub const CODEX_CONFIG_DIR_KEY: &str = "CODEX_CONFIG_DIR";
 const DEFAULT_CODEX_CONFIG_DIR: &str = "~/.codex";
 
 pub const COPILOT_GITHUB_TOKEN_KEY: &str = "COPILOT_GITHUB_TOKEN";
+pub const OPENCODE_GO_WORKSPACE_ID_KEY: &str = "OPENCODE_GO_WORKSPACE_ID";
+pub const OPENCODE_GO_AUTH_COOKIE_KEY: &str = "OPENCODE_GO_AUTH_COOKIE";
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenCodeGoConnectionParams {
+    pub workspace_id: String,
+    pub auth_cookie: String,
+}
 
 #[derive(Clone)]
 pub struct AppConfigService {
@@ -60,6 +70,39 @@ impl AppConfigService {
             "INSERT INTO settings (key, value) VALUES (?1, ?2) \
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![COPILOT_GITHUB_TOKEN_KEY, token.trim()],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_opencode_go_connection_params(&self) -> AppResult<OpenCodeGoConnectionParams> {
+        Ok(OpenCodeGoConnectionParams {
+            workspace_id: self
+                .read_setting(OPENCODE_GO_WORKSPACE_ID_KEY)?
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            auth_cookie: self
+                .read_setting(OPENCODE_GO_AUTH_COOKIE_KEY)?
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+        })
+    }
+
+    pub fn set_opencode_go_connection_params(
+        &self,
+        params: &OpenCodeGoConnectionParams,
+    ) -> AppResult<()> {
+        let conn = self.db.connection()?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![OPENCODE_GO_WORKSPACE_ID_KEY, params.workspace_id.trim()],
+        )?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![OPENCODE_GO_AUTH_COOKIE_KEY, params.auth_cookie.trim()],
         )?;
         Ok(())
     }

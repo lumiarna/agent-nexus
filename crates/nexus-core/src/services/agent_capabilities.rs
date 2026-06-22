@@ -110,10 +110,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
         prompt: Some(PromptSurface {
             global_file: "~/.config/opencode/AGENTS.md",
         }),
-        provider: Some(ProviderSurface {
-            provider_id: "opencode",
-            credential_hint: Some("~/.local/share/opencode/auth.json"),
-        }),
+        provider: None,
     },
 ];
 

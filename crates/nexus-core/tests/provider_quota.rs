@@ -6,10 +6,11 @@ use nexus_core::{
         app_config::{AppConfigService, CODEX_CONFIG_DIR_KEY},
         provider_quota::{
             claude_code_quota_from_usage_response, codex_quota_from_usage_response,
-            copilot_quota_from_usage_response, parse_opencode_copilot_token, ClaudeCodeUsageBucket,
-            ClaudeCodeUsageResponse, CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse,
-            CopilotQuotaDetail, CopilotQuotaSnapshots, CopilotUsageResponse, ProviderQuotaService,
-            ProviderQuotaStatus, ProviderQuotaWindowKind,
+            copilot_quota_from_usage_response, opencode_go_quota_from_html,
+            parse_opencode_copilot_token, ClaudeCodeUsageBucket, ClaudeCodeUsageResponse,
+            CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse, CopilotQuotaDetail,
+            CopilotQuotaSnapshots, CopilotUsageResponse, ProviderQuotaService, ProviderQuotaStatus,
+            ProviderQuotaWindowKind,
         },
     },
 };
@@ -47,6 +48,25 @@ async fn provider_quota_service_dispatches_codex_adapter_without_credentials() {
     assert_eq!(snapshot.provider_id, "codex");
     assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
     assert_eq!(snapshot.credential.as_deref(), Some("not found"));
+    assert!(snapshot.windows.is_empty());
+    assert_eq!(snapshot.error, None);
+}
+
+#[tokio::test]
+async fn provider_quota_service_dispatches_opencode_go_adapter_without_connection_params() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let snapshot = service
+        .get_provider_quota("opencode-go")
+        .await
+        .expect("dispatch opencode go adapter");
+
+    assert_eq!(snapshot.provider_id, "opencode-go");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
+    assert_eq!(
+        snapshot.credential.as_deref(),
+        Some("manual workspace id + auth cookie"),
+    );
     assert!(snapshot.windows.is_empty());
     assert_eq!(snapshot.error, None);
 }
@@ -244,6 +264,50 @@ fn copilot_usage_endpoint_maps_premium_and_chat_windows() {
     assert_eq!(
         snapshot.windows[1].reset_at.as_deref(),
         Some("2026-07-01T00:00:00Z"),
+    );
+}
+
+#[test]
+fn opencode_go_html_maps_to_provider_quota_snapshot() {
+    let html = r#"
+        <script>
+        self.$R=[
+          {subscriptionPlan:"Team"},
+          {rollingUsage:{status:"ok",resetInSec:18000,usagePercent:23.4}},
+          {weeklyUsage:$R[2]={status:"ok",resetInSec:604800,usagePercent:51}},
+          {monthlyUsage:123,monthlyUsage:{status:"ok",resetInSec:2592000,usagePercent:34}}
+        ];
+        </script>
+    "#;
+
+    let snapshot = opencode_go_quota_from_html("opencode-go", html, 1_781_269_400)
+        .expect("parse OpenCode Go usage from hydration HTML");
+
+    assert_eq!(snapshot.provider_id, "opencode-go");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::Available);
+    assert_eq!(snapshot.plan.as_deref(), Some("Team"));
+    assert_eq!(snapshot.primary, Some(23));
+    assert_eq!(snapshot.windows.len(), 3);
+    assert_eq!(snapshot.windows[0].label, "Rolling (5h)");
+    assert_eq!(snapshot.windows[0].kind, ProviderQuotaWindowKind::Rolling);
+    assert_eq!(snapshot.windows[0].used, 23);
+    assert_eq!(
+        snapshot.windows[0].reset_at.as_deref(),
+        Some("2026-06-12T18:03:20Z"),
+    );
+    assert_eq!(snapshot.windows[1].label, "Weekly limit");
+    assert_eq!(snapshot.windows[1].kind, ProviderQuotaWindowKind::Weekly);
+    assert_eq!(snapshot.windows[1].used, 51);
+    assert_eq!(
+        snapshot.windows[1].reset_at.as_deref(),
+        Some("2026-06-19T13:03:20Z"),
+    );
+    assert_eq!(snapshot.windows[2].label, "Monthly limit");
+    assert_eq!(snapshot.windows[2].kind, ProviderQuotaWindowKind::Monthly);
+    assert_eq!(snapshot.windows[2].used, 34);
+    assert_eq!(
+        snapshot.windows[2].reset_at.as_deref(),
+        Some("2026-07-12T13:03:20Z"),
     );
 }
 

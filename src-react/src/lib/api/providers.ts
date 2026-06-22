@@ -18,6 +18,11 @@ export interface ProviderQuotaSnapshot {
   error?: string | null;
 }
 
+export interface OpenCodeGoConnectionParams {
+  workspaceId: string;
+  authCookie: string;
+}
+
 export const providersApi = {
   getQuota(providerId: string): Promise<ProviderQuotaSnapshot> {
     return invokeCommand<ProviderQuotaSnapshot>("get_provider_quota", { providerId });
@@ -27,5 +32,11 @@ export const providersApi = {
   },
   setCopilotGithubToken(token: string): Promise<void> {
     return invokeCommand<void>("set_copilot_github_token", { token });
+  },
+  getOpenCodeGoConnectionParams(): Promise<OpenCodeGoConnectionParams> {
+    return invokeCommand<OpenCodeGoConnectionParams>("get_opencode_go_connection_params");
+  },
+  setOpenCodeGoConnectionParams(params: OpenCodeGoConnectionParams): Promise<void> {
+    return invokeCommand<void>("set_opencode_go_connection_params", { params });
   },
 };

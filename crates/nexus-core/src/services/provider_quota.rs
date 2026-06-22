@@ -1,19 +1,21 @@
 use std::{
     env, fs,
     future::Future,
-	path::{Path, PathBuf},
-	pin::Pin,
-	process::Command,
-	sync::Arc,
-	time::{SystemTime, UNIX_EPOCH},
+    path::{Path, PathBuf},
+    pin::Pin,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(target_os = "macos")]
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::{
     error::{AppError, AppResult},
-    services::app_config::AppConfigService,
+    services::app_config::{AppConfigService, OpenCodeGoConnectionParams},
 };
 
 const CLAUDE_CODE_PROVIDER_ID: &str = "claude";
@@ -24,6 +26,11 @@ const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 
 const COPILOT_PROVIDER_ID: &str = "copilot";
 const COPILOT_USAGE_URL: &str = "https://api.github.com/copilot_internal/user";
+
+const OPENCODE_GO_PROVIDER_ID: &str = "opencode-go";
+const OPENCODE_GO_BROWSER_UA: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -125,20 +132,37 @@ struct ClaudeCodeCredentials {
     source: String,
 }
 
-type ClaudeCodeUsageFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<ClaudeCodeUsageResponse, ProviderQuotaPollError>> + Send + 'a>>;
+#[derive(Clone, Debug)]
+struct OpenCodeGoCredentials {
+    workspace_id: String,
+    auth_cookie: String,
+    source: String,
+}
+
+type ClaudeCodeUsageFuture<'a> = Pin<
+    Box<dyn Future<Output = Result<ClaudeCodeUsageResponse, ProviderQuotaPollError>> + Send + 'a>,
+>;
 type CodexUsageFuture<'a> =
     Pin<Box<dyn Future<Output = Result<CodexUsageResponse, ProviderQuotaPollError>> + Send + 'a>>;
 type CopilotUsageFuture<'a> =
     Pin<Box<dyn Future<Output = Result<CopilotUsageResponse, ProviderQuotaPollError>> + Send + 'a>>;
+type OpenCodeGoPageFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<String, ProviderQuotaPollError>> + Send + 'a>>;
 
 trait ProviderCredentialSource: Send + Sync {
     fn claude_code_credentials(
         &self,
         app_config: &AppConfigService,
     ) -> AppResult<Option<ClaudeCodeCredentials>>;
-    fn codex_credentials(&self, app_config: &AppConfigService) -> AppResult<Option<CodexCredentials>>;
+    fn codex_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<CodexCredentials>>;
     fn copilot_token(&self, app_config: &AppConfigService) -> AppResult<Option<String>>;
+    fn opencode_go_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<OpenCodeGoCredentials>>;
 }
 
 trait ProviderUsageTransport: Send + Sync {
@@ -149,6 +173,11 @@ trait ProviderUsageTransport: Send + Sync {
         account_id: Option<&'a str>,
     ) -> CodexUsageFuture<'a>;
     fn copilot_usage<'a>(&'a self, token: &'a str) -> CopilotUsageFuture<'a>;
+    fn opencode_go_page<'a>(
+        &'a self,
+        workspace_id: &'a str,
+        auth_cookie: &'a str,
+    ) -> OpenCodeGoPageFuture<'a>;
 }
 
 #[derive(Clone)]
@@ -181,6 +210,7 @@ trait ProviderQuotaAdapter: Sync {
 static CLAUDE_CODE_QUOTA_ADAPTER: ClaudeCodeQuotaAdapter = ClaudeCodeQuotaAdapter;
 static CODEX_QUOTA_ADAPTER: CodexQuotaAdapter = CodexQuotaAdapter;
 static COPILOT_QUOTA_ADAPTER: CopilotQuotaAdapter = CopilotQuotaAdapter;
+static OPENCODE_GO_QUOTA_ADAPTER: OpenCodeGoQuotaAdapter = OpenCodeGoQuotaAdapter;
 
 #[derive(Clone)]
 pub struct ProviderQuotaService {
@@ -214,11 +244,12 @@ impl ProviderQuotaService {
     }
 }
 
-fn provider_quota_adapters() -> [&'static dyn ProviderQuotaAdapter; 3] {
+fn provider_quota_adapters() -> [&'static dyn ProviderQuotaAdapter; 4] {
     [
         &CLAUDE_CODE_QUOTA_ADAPTER,
         &CODEX_QUOTA_ADAPTER,
         &COPILOT_QUOTA_ADAPTER,
+        &OPENCODE_GO_QUOTA_ADAPTER,
     ]
 }
 
@@ -242,7 +273,10 @@ impl ProviderCredentialSource for LocalCredentialSource {
         parse_claude_code_credentials(&content, path)
     }
 
-    fn codex_credentials(&self, app_config: &AppConfigService) -> AppResult<Option<CodexCredentials>> {
+    fn codex_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<CodexCredentials>> {
         let path = app_config.get_codex_config_dir()?.join("auth.json");
         if !path.exists() {
             return Ok(None);
@@ -259,6 +293,24 @@ impl ProviderCredentialSource for LocalCredentialSource {
             return Ok(Some(token));
         }
         Ok(read_opencode_copilot_token())
+    }
+
+    fn opencode_go_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<OpenCodeGoCredentials>> {
+        let OpenCodeGoConnectionParams {
+            workspace_id,
+            auth_cookie,
+        } = app_config.get_opencode_go_connection_params()?;
+        if workspace_id.is_empty() || auth_cookie.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(OpenCodeGoCredentials {
+            workspace_id,
+            auth_cookie,
+            source: "manual workspace id + auth cookie".to_string(),
+        }))
     }
 }
 
@@ -277,6 +329,14 @@ impl ProviderUsageTransport for HttpUsageTransport {
 
     fn copilot_usage<'a>(&'a self, token: &'a str) -> CopilotUsageFuture<'a> {
         Box::pin(fetch_copilot_usage(token))
+    }
+
+    fn opencode_go_page<'a>(
+        &'a self,
+        workspace_id: &'a str,
+        auth_cookie: &'a str,
+    ) -> OpenCodeGoPageFuture<'a> {
+        Box::pin(fetch_opencode_go_page(workspace_id, auth_cookie))
     }
 }
 
@@ -420,6 +480,58 @@ impl CopilotQuotaAdapter {
     }
 }
 
+struct OpenCodeGoQuotaAdapter;
+
+impl ProviderQuotaAdapter for OpenCodeGoQuotaAdapter {
+    fn provider_id(&self) -> &'static str {
+        OPENCODE_GO_PROVIDER_ID
+    }
+
+    fn quota<'a>(
+        &'a self,
+        app_config: &'a AppConfigService,
+        credential_source: &'a dyn ProviderCredentialSource,
+        usage_transport: &'a dyn ProviderUsageTransport,
+    ) -> ProviderQuotaFuture<'a> {
+        Box::pin(async move {
+            self.quota_snapshot(app_config, credential_source, usage_transport)
+                .await
+        })
+    }
+}
+
+impl OpenCodeGoQuotaAdapter {
+    async fn quota_snapshot(
+        &self,
+        app_config: &AppConfigService,
+        credential_source: &dyn ProviderCredentialSource,
+        usage_transport: &dyn ProviderUsageTransport,
+    ) -> ProviderQuotaSnapshot {
+        let credentials = match credential_source.opencode_go_credentials(app_config) {
+            Ok(Some(credentials)) => credentials,
+            Ok(None) => {
+                return opencode_go_status(
+                    ProviderQuotaStatus::NoCreds,
+                    "manual workspace id + auth cookie",
+                    None,
+                );
+            }
+            Err(error) => {
+                return opencode_go_status(
+                    ProviderQuotaStatus::Failed,
+                    "manual workspace id + auth cookie",
+                    Some(error.to_string()),
+                );
+            }
+        };
+
+        let html = usage_transport
+            .opencode_go_page(&credentials.workspace_id, &credentials.auth_cookie)
+            .await;
+        derive_opencode_go_snapshot(credentials, html)
+    }
+}
+
 pub fn claude_code_quota_from_usage_response(
     provider_id: &str,
     plan: Option<String>,
@@ -530,6 +642,64 @@ pub fn copilot_quota_from_usage_response(
     }
 }
 
+pub fn opencode_go_quota_from_html(
+    provider_id: &str,
+    html: &str,
+    now_epoch_seconds: i64,
+) -> Option<ProviderQuotaSnapshot> {
+    let rolling = extract_opencode_go_window(html, "rollingUsage");
+    let weekly = extract_opencode_go_window(html, "weeklyUsage");
+    let monthly = extract_opencode_go_window(html, "monthlyUsage");
+
+    if rolling.is_none() && weekly.is_none() && monthly.is_none() {
+        return None;
+    }
+
+    let mut windows = Vec::new();
+    if let Some(window) = &rolling {
+        windows.push(opencode_go_window(
+            "Rolling (5h)",
+            ProviderQuotaWindowKind::Rolling,
+            window,
+            now_epoch_seconds,
+        ));
+    }
+    if let Some(window) = &weekly {
+        windows.push(opencode_go_window(
+            "Weekly limit",
+            ProviderQuotaWindowKind::Weekly,
+            window,
+            now_epoch_seconds,
+        ));
+    }
+    if let Some(window) = &monthly {
+        windows.push(opencode_go_window(
+            "Monthly limit",
+            ProviderQuotaWindowKind::Monthly,
+            window,
+            now_epoch_seconds,
+        ));
+    }
+
+    let primary = rolling
+        .as_ref()
+        .or(weekly.as_ref())
+        .or(monthly.as_ref())
+        .map(|window| percent_to_u8(window.usage_percent));
+    let plan =
+        Some(extract_string_field(html, "subscriptionPlan").unwrap_or_else(|| "Go".to_string()));
+
+    Some(ProviderQuotaSnapshot {
+        provider_id: provider_id.to_string(),
+        status: ProviderQuotaStatus::Available,
+        plan,
+        primary,
+        windows,
+        credential: None,
+        error: None,
+    })
+}
+
 fn derive_claude_code_snapshot(
     credentials: ClaudeCodeCredentials,
     usage: Result<ClaudeCodeUsageResponse, ProviderQuotaPollError>,
@@ -628,6 +798,56 @@ fn derive_copilot_snapshot(
     }
 }
 
+fn derive_opencode_go_snapshot(
+    credentials: OpenCodeGoCredentials,
+    page: Result<String, ProviderQuotaPollError>,
+) -> ProviderQuotaSnapshot {
+    match page {
+        Ok(html) => {
+            let Some(mut snapshot) = opencode_go_quota_from_html(
+                OPENCODE_GO_PROVIDER_ID,
+                &html,
+                current_epoch_seconds(),
+            ) else {
+                return ProviderQuotaSnapshot {
+                    provider_id: OPENCODE_GO_PROVIDER_ID.to_string(),
+                    status: ProviderQuotaStatus::Failed,
+                    plan: Some("Go".to_string()),
+                    primary: None,
+                    windows: Vec::new(),
+                    credential: Some(credentials.source),
+                    error: Some(
+                        "OpenCode Go page did not contain recognizable usage data".to_string(),
+                    ),
+                };
+            };
+            snapshot.credential = Some(credentials.source);
+            snapshot
+        }
+        Err(ProviderQuotaPollError::AuthRequired) => ProviderQuotaSnapshot {
+            provider_id: OPENCODE_GO_PROVIDER_ID.to_string(),
+            status: ProviderQuotaStatus::Expired,
+            plan: Some("Go".to_string()),
+            primary: None,
+            windows: Vec::new(),
+            credential: Some(credentials.source),
+            error: Some(
+                "OpenCode Go auth cookie expired; copy a fresh auth cookie from opencode.ai"
+                    .to_string(),
+            ),
+        },
+        Err(error) => ProviderQuotaSnapshot {
+            provider_id: OPENCODE_GO_PROVIDER_ID.to_string(),
+            status: ProviderQuotaStatus::Failed,
+            plan: Some("Go".to_string()),
+            primary: None,
+            windows: Vec::new(),
+            credential: Some(credentials.source),
+            error: Some(error.to_string()),
+        },
+    }
+}
+
 fn copilot_window(
     label: &str,
     detail: &CopilotQuotaDetail,
@@ -659,6 +879,74 @@ fn copilot_remaining_percent(detail: &CopilotQuotaDetail) -> Option<f64> {
     } else {
         None
     }
+}
+
+struct OpenCodeGoWindow {
+    usage_percent: f64,
+    reset_in_sec: u64,
+}
+
+fn opencode_go_window(
+    label: &str,
+    kind: ProviderQuotaWindowKind,
+    window: &OpenCodeGoWindow,
+    now_epoch_seconds: i64,
+) -> ProviderQuotaWindow {
+    ProviderQuotaWindow {
+        label: label.to_string(),
+        kind,
+        used: percent_to_u8(window.usage_percent),
+        reset_at: reset_seconds_to_iso(now_epoch_seconds, window.reset_in_sec),
+        unlimited: false,
+    }
+}
+
+fn extract_opencode_go_window(html: &str, key: &str) -> Option<OpenCodeGoWindow> {
+    let obj = object_after_key(html, key)?;
+    let usage_percent = number_field(obj, "usagePercent")?;
+    let reset_in_sec = number_field(obj, "resetInSec").unwrap_or(0.0);
+    Some(OpenCodeGoWindow {
+        usage_percent,
+        reset_in_sec: reset_in_sec.max(0.0) as u64,
+    })
+}
+
+fn object_after_key<'a>(s: &'a str, key: &str) -> Option<&'a str> {
+    let needle = format!("{key}:");
+    let mut from = 0;
+    while let Some(rel) = s[from..].find(&needle) {
+        let after = from + rel + needle.len();
+        let rest = &s[after..];
+        match rest.chars().next() {
+            Some('{') | Some('$') => {
+                let open = rest.find('{')?;
+                let after_open = &rest[open + 1..];
+                let close = after_open.find('}')?;
+                return Some(&after_open[..close]);
+            }
+            _ => from = after,
+        }
+    }
+    None
+}
+
+fn number_field(obj: &str, field: &str) -> Option<f64> {
+    let needle = format!("{field}:");
+    let idx = obj.find(&needle)? + needle.len();
+    let token: String = obj[idx..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+        .collect();
+    token.parse().ok()
+}
+
+fn extract_string_field(s: &str, field: &str) -> Option<String> {
+    let needle = format!("{field}:");
+    let idx = s.find(&needle)? + needle.len();
+    let tail = &s[idx..];
+    let inner = tail.strip_prefix('"')?;
+    let end = inner.find('"')?;
+    Some(inner[..end].to_string())
 }
 
 fn copilot_plan_label(plan: &str) -> String {
@@ -762,6 +1050,21 @@ fn unix_seconds_to_iso(secs: i64) -> Option<String> {
     OffsetDateTime::from_unix_timestamp(secs)
         .ok()
         .and_then(|dt| dt.format(&Rfc3339).ok())
+}
+
+fn reset_seconds_to_iso(now_epoch_seconds: i64, reset_in_sec: u64) -> Option<String> {
+    if reset_in_sec == 0 {
+        return None;
+    }
+    let reset_in_sec = i64::try_from(reset_in_sec).ok()?;
+    unix_seconds_to_iso(now_epoch_seconds.checked_add(reset_in_sec)?)
+}
+
+fn current_epoch_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn quota_window(
@@ -1109,6 +1412,72 @@ fn copilot_status(status: ProviderQuotaStatus, message: &str) -> ProviderQuotaSn
         windows: Vec::new(),
         credential: Some(message.to_string()),
         error: None,
+    }
+}
+
+async fn fetch_opencode_go_page(
+    workspace_id: &str,
+    auth_cookie: &str,
+) -> Result<String, ProviderQuotaPollError> {
+    let id = normalize_opencode_go_workspace_id(workspace_id);
+    let url = format!("https://opencode.ai/workspace/{id}/go");
+    let response = reqwest::Client::new()
+        .get(url)
+        .header("Cookie", format!("auth={}", auth_cookie.trim()))
+        .header("User-Agent", OPENCODE_GO_BROWSER_UA)
+        .header(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .send()
+        .await
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+
+    let final_url = response.url().as_str().to_string();
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(ProviderQuotaPollError::AuthRequired);
+    }
+    if final_url.contains("auth.opencode.ai")
+        || final_url.contains("/authorize")
+        || final_url.contains("/login")
+    {
+        return Err(ProviderQuotaPollError::AuthRequired);
+    }
+    if !status.is_success() {
+        return Err(ProviderQuotaPollError::Request(format!(
+            "OpenCode Go workspace page returned {status}"
+        )));
+    }
+
+    response
+        .text()
+        .await
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
+}
+
+fn normalize_opencode_go_workspace_id(workspace_id: &str) -> String {
+    let workspace_id = workspace_id.trim();
+    if workspace_id.starts_with("wrk_") {
+        workspace_id.to_string()
+    } else {
+        format!("wrk_{workspace_id}")
+    }
+}
+
+fn opencode_go_status(
+    status: ProviderQuotaStatus,
+    credential: &str,
+    error: Option<String>,
+) -> ProviderQuotaSnapshot {
+    ProviderQuotaSnapshot {
+        provider_id: OPENCODE_GO_PROVIDER_ID.to_string(),
+        status,
+        plan: Some("Go".to_string()),
+        primary: None,
+        windows: Vec::new(),
+        credential: Some(credential.to_string()),
+        error,
     }
 }
 

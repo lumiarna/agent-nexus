@@ -148,6 +148,9 @@ export function ProviderPage() {
   const [configId, setConfigId] = useState<string | null>(null);
   const [copilotToken, setCopilotToken] = useState("");
   const [copilotTokenSaving, setCopilotTokenSaving] = useState(false);
+  const [opencodeGoWorkspaceId, setOpencodeGoWorkspaceId] = useState("");
+  const [opencodeGoAuthCookie, setOpencodeGoAuthCookie] = useState("");
+  const [opencodeGoSaving, setOpencodeGoSaving] = useState(false);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [trayMetric, setTrayMetric] = useState<TrayMetric>(() => nexus.settings().trayMetric);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -155,6 +158,7 @@ export function ProviderPage() {
   const claudeQuota = useProviderQuotaQuery("claude");
   const codexQuota = useProviderQuotaQuery("codex");
   const copilotQuota = useProviderQuotaQuery("copilot");
+  const opencodeGoQuota = useProviderQuotaQuery("opencode-go");
 
   const timers = useRef<Record<string, number>>({});
   useEffect(
@@ -206,6 +210,13 @@ export function ProviderPage() {
   }, [copilotQuota.data]);
 
   useEffect(() => {
+    if (!opencodeGoQuota.data) return;
+    setProviders((current) =>
+      current.map((provider) => mergeProviderQuota(provider, opencodeGoQuota.data)),
+    );
+  }, [opencodeGoQuota.data]);
+
+  useEffect(() => {
     if (configId !== "copilot" || !isTauriRuntime()) return;
     let active = true;
     providersApi
@@ -221,6 +232,26 @@ export function ProviderPage() {
     };
   }, [configId]);
 
+  useEffect(() => {
+    if (configId !== "opencode-go" || !isTauriRuntime()) return;
+    let active = true;
+    providersApi
+      .getOpenCodeGoConnectionParams()
+      .then((params) => {
+        if (!active) return;
+        setOpencodeGoWorkspaceId(params.workspaceId);
+        setOpencodeGoAuthCookie(params.authCookie);
+      })
+      .catch(() => {
+        if (!active) return;
+        setOpencodeGoWorkspaceId("");
+        setOpencodeGoAuthCookie("");
+      });
+    return () => {
+      active = false;
+    };
+  }, [configId]);
+
   function refreshProvider(id: string) {
     if (id === "claude") {
       void claudeQuota.refetch();
@@ -230,6 +261,9 @@ export function ProviderPage() {
     }
     if (id === "copilot") {
       void copilotQuota.refetch();
+    }
+    if (id === "opencode-go") {
+      void opencodeGoQuota.refetch();
     }
 
     setRefreshing((r) => ({ ...r, [id]: true }));
@@ -328,7 +362,8 @@ export function ProviderPage() {
                 !!refreshing[p.id] ||
                 (p.id === "claude" && claudeQuota.isFetching) ||
                 (p.id === "codex" && codexQuota.isFetching) ||
-                (p.id === "copilot" && copilotQuota.isFetching);
+                (p.id === "copilot" && copilotQuota.isFetching) ||
+                (p.id === "opencode-go" && opencodeGoQuota.isFetching);
               const st: ProviderUiStatus = loading ? "loading" : p.status;
               const si = statusInfo(st);
               const showQuota = st === "available" && !!p.windows;
@@ -536,7 +571,7 @@ export function ProviderPage() {
                     <Input
                       type="password"
                       className="font-mono"
-                      placeholder="gho_… or ghp_…"
+                      placeholder="gho_... or ghp_..."
                       value={copilotToken}
                       onChange={(e) => setCopilotToken(e.target.value)}
                     />
@@ -546,28 +581,37 @@ export function ProviderPage() {
                       (<span className="font-mono">github-copilot</span>).
                     </div>
                   </label>
-                ) : cfg.needsParams ? (
+                ) : cfg.id === "opencode-go" ? (
                   <div className="flex flex-col gap-[13px]">
-                    {[
-                      {
-                        label: "Workspace ID",
-                        placeholder: "ws_xxxxxxxxxxxx",
-                        hint: "Required to query the workspace quota endpoint",
-                      },
-                      {
-                        label: "Auth Cookie",
-                        placeholder: "session=…",
-                        hint: "Treated only as a quota-observation connection param — not a login",
-                      },
-                    ].map((f) => (
-                      <label key={f.label} className="block">
-                        <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">
-                          {f.label}
-                        </div>
-                        <Input className="font-mono" placeholder={f.placeholder} defaultValue="" />
-                        <div className="mt-[5px] text-[11px] text-[#b3a999]">{f.hint}</div>
-                      </label>
-                    ))}
+                    <label className="block">
+                      <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">
+                        Workspace ID
+                      </div>
+                      <Input
+                        className="font-mono"
+                        placeholder="wrk_xxxxxxxxxxxx"
+                        value={opencodeGoWorkspaceId}
+                        onChange={(e) => setOpencodeGoWorkspaceId(e.target.value)}
+                      />
+                      <div className="mt-[5px] text-[11px] text-[#b3a999]">
+                        Required to query the workspace quota endpoint.
+                      </div>
+                    </label>
+                    <label className="block">
+                      <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">
+                        Auth Cookie
+                      </div>
+                      <Input
+                        type="password"
+                        className="font-mono"
+                        placeholder="Fe26.2**..."
+                        value={opencodeGoAuthCookie}
+                        onChange={(e) => setOpencodeGoAuthCookie(e.target.value)}
+                      />
+                      <div className="mt-[5px] text-[11px] text-[#b3a999]">
+                        Paste only the auth cookie value from opencode.ai.
+                      </div>
+                    </label>
                   </div>
                 ) : (
                   <div className="rounded-[12px] border border-nexus-border bg-nexus-bg px-[14px] py-[13px] text-[12px] leading-[1.5] text-[#8a7a68]">
@@ -627,7 +671,7 @@ export function ProviderPage() {
               </Button>
               <Button
                 variant="primary"
-                disabled={copilotTokenSaving}
+                disabled={copilotTokenSaving || opencodeGoSaving}
                 onClick={async () => {
                   const n = cfg.name;
                   if (cfg.id === "copilot") {
@@ -644,11 +688,28 @@ export function ProviderPage() {
                     }
                     return;
                   }
+                  if (cfg.id === "opencode-go") {
+                    setOpencodeGoSaving(true);
+                    try {
+                      await providersApi.setOpenCodeGoConnectionParams({
+                        workspaceId: opencodeGoWorkspaceId.trim(),
+                        authCookie: opencodeGoAuthCookie.trim(),
+                      });
+                      setConfigId(null);
+                      toast("Saved OpenCode Go connection params");
+                      void opencodeGoQuota.refetch();
+                    } catch {
+                      toast.error("Failed to save OpenCode Go connection params");
+                    } finally {
+                      setOpencodeGoSaving(false);
+                    }
+                    return;
+                  }
                   setConfigId(null);
                   toast(`Saved preferences for ${n}`);
                 }}
               >
-                {copilotTokenSaving ? "Saving…" : "Save"}
+                {copilotTokenSaving || opencodeGoSaving ? "Saving..." : "Save"}
               </Button>
             </ModalFooter>
           </>

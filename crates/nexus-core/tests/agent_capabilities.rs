@@ -77,9 +77,9 @@ fn exposes_agent_backed_provider_surfaces_without_generic_agent() {
         [
             ("Claude Code", "claude"),
             ("CodeX", "codex"),
-            ("Copilot", "copilot"),
-            ("OpenCode", "opencode")
+            ("Copilot", "copilot")
         ]
     );
     assert!(!providers.iter().any(|(name, _)| *name == "Generic Agent"));
+    assert!(!providers.iter().any(|(name, _)| *name == "OpenCode"));
 }

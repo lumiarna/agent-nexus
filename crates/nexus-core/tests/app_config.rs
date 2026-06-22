@@ -2,7 +2,9 @@ use std::{path::PathBuf, sync::Arc};
 
 use nexus_core::{
     database::Database,
-    services::app_config::{AppConfigService, CLAUDE_CONFIG_DIR_KEY, CODEX_CONFIG_DIR_KEY},
+    services::app_config::{
+        AppConfigService, OpenCodeGoConnectionParams, CLAUDE_CONFIG_DIR_KEY, CODEX_CONFIG_DIR_KEY,
+    },
 };
 
 #[test]
@@ -26,6 +28,36 @@ fn copilot_github_token_round_trips_through_settings() {
             .get_copilot_github_token()
             .expect("read saved copilot token"),
         Some("gho_token".to_string()),
+    );
+}
+
+#[test]
+fn opencode_go_connection_params_round_trip_through_settings() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = AppConfigService::new(db);
+
+    assert_eq!(
+        service
+            .get_opencode_go_connection_params()
+            .expect("read default OpenCode Go params"),
+        OpenCodeGoConnectionParams::default(),
+    );
+
+    service
+        .set_opencode_go_connection_params(&OpenCodeGoConnectionParams {
+            workspace_id: "  wrk_abc  ".to_string(),
+            auth_cookie: "  Fe26.2**cookie  ".to_string(),
+        })
+        .expect("save OpenCode Go params");
+
+    assert_eq!(
+        service
+            .get_opencode_go_connection_params()
+            .expect("read saved OpenCode Go params"),
+        OpenCodeGoConnectionParams {
+            workspace_id: "wrk_abc".to_string(),
+            auth_cookie: "Fe26.2**cookie".to_string(),
+        },
     );
 }
 
