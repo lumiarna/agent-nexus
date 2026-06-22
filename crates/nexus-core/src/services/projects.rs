@@ -266,6 +266,17 @@ impl ProjectService {
         Ok(folder)
     }
 
+    pub fn delete_project(&self, id: String) -> AppResult<()> {
+        if id.trim().is_empty() {
+            return Err(AppError::Validation("project id is required".to_string()));
+        }
+
+        let conn = self.db.connection()?;
+        conn.execute("DELETE FROM projects WHERE id = ?1", params![id.trim()])?;
+
+        Ok(())
+    }
+
     pub fn remove_git_base_folder(&self, id: String) -> AppResult<()> {
         if id.trim().is_empty() {
             return Err(AppError::Validation(

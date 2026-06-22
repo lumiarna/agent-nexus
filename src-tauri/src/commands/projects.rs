@@ -18,6 +18,11 @@ pub fn record_project(state: State<'_, AppState>, path: String) -> AppResult<Pro
 }
 
 #[tauri::command]
+pub fn delete_project(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    state.projects.delete_project(id)
+}
+
+#[tauri::command]
 pub fn reorder_projects(
     state: State<'_, AppState>,
     project_ids: Vec<String>,

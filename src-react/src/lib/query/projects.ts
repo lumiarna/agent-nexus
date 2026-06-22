@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { projectsApi } from "@/lib/api/projects";
+import { createDeleteProjectMutationOptions } from "@/lib/query/projectDeletion";
 import { projectSymlinkKeys } from "@/lib/query/projectSymlinkInventory";
 import { sessionKeys } from "@/lib/query/sessions";
 import { skillKeys } from "@/lib/query/skills";
 import type { Project } from "@/types";
+
+export { createDeleteProjectMutationOptions };
 
 export const projectKeys = {
   all: ["projects"] as const,
@@ -38,6 +41,14 @@ export function useRecordProjectsMutation() {
       await queryClient.invalidateQueries({ queryKey: projectKeys.all });
     },
   });
+}
+
+export function useDeleteProjectMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation(
+    createDeleteProjectMutationOptions(queryClient, projectsApi.delete),
+  );
 }
 
 export function useReorderProjectsMutation() {

@@ -24,6 +24,7 @@ import { ScreenScroll } from "@/components/shell/screen";
 import { useNav } from "@/lib/nav";
 import { nexus } from "@/lib/mock";
 import {
+  useDeleteProjectMutation,
   useGitBaseFoldersQuery,
   useProjectsQuery,
   useRecordGitBaseFolderMutation,
@@ -133,6 +134,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const baseFoldersQuery = useGitBaseFoldersQuery();
   const recordProject = useRecordProjectMutation();
   const recordProjects = useRecordProjectsMutation();
+  const deleteProject = useDeleteProjectMutation();
   const reorderProjects = useReorderProjectsMutation();
   const recordBaseFolder = useRecordGitBaseFolderMutation();
   const removeBaseFolder = useRemoveGitBaseFolderMutation();
@@ -953,20 +955,24 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               </Button>
               <button
                 onClick={() => {
-                  if (!deleteAck) return;
+                  if (!deleteAck || deleteProject.isPending) return;
+                  const id = del.id;
                   const n = del.name;
                   setDeleteId(null);
                   setDeleteAck(false);
-                  toast(`${n} permanently deleted`);
+                  deleteProject.mutateAsync(id).then(
+                    () => toast(`${n} permanently deleted`),
+                    (error: unknown) => toast(getErrorMessage(error)),
+                  );
                 }}
                 className={cn(
                   "rounded-full px-[18px] py-[9px] text-[12.5px] font-bold text-white",
-                  deleteAck
+                  deleteAck && !deleteProject.isPending
                     ? "cursor-pointer bg-nexus-crit shadow-[0_2px_8px_rgba(181,84,64,.32)]"
                     : "cursor-not-allowed bg-[#d9b6ab]",
                 )}
               >
-                Delete permanently
+                {deleteProject.isPending ? "Deleting..." : "Delete permanently"}
               </button>
             </ModalFooter>
           </>

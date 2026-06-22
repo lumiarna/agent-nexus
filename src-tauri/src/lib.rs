@@ -32,6 +32,7 @@ pub fn run() {
             commands::prompts::reveal_prompt_path,
             commands::prompts::scan_prompts,
             commands::prompts::set_prompt_target,
+            commands::projects::delete_project,
             commands::projects::list_projects,
             commands::projects::record_git_base_folder,
             commands::projects::record_project,

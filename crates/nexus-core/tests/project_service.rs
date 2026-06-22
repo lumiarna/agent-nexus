@@ -267,3 +267,69 @@ fn removes_git_base_folder_without_deleting_projects() {
         .is_empty());
     assert_eq!(service.list_projects().expect("list projects").len(), 1);
 }
+
+#[test]
+fn deletes_project_and_removes_it_from_list() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let recorded = service
+        .record_project(git_repo(&root, "doomed"))
+        .expect("record project");
+
+    service.delete_project(recorded.id).expect("delete project");
+
+    assert!(service.list_projects().expect("list projects").is_empty());
+}
+
+#[test]
+fn deleting_project_cascades_to_skills_and_sessions() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = ProjectService::new(db.clone());
+    let root = TempDir::new().expect("create temp dir");
+    let recorded = service
+        .record_project(git_repo(&root, "cascaded"))
+        .expect("record project");
+
+    let conn = db.connection().expect("get connection");
+    conn.execute(
+        "INSERT INTO skills (id, name, scope, project_id, canonical_path, created_at, updated_at) \
+         VALUES ('s1', 'skill-a', 'project', ?1, '/fake/skill-a', 0, 0)",
+        params![recorded.id],
+    )
+    .expect("seed skill");
+    conn.execute(
+        "INSERT INTO session_index (id, project_id, title, file_path, source, updated_at) \
+         VALUES ('se1', ?1, 'Session A', '/fake/session-a', 'local', 0)",
+        params![recorded.id],
+    )
+    .expect("seed session");
+    drop(conn);
+
+    service.delete_project(recorded.id).expect("delete project");
+
+    let conn = db.connection().expect("get connection");
+    let skill_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM skills", [], |row| row.get(0))
+        .expect("count skills");
+    let session_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM session_index", [], |row| row.get(0))
+        .expect("count sessions");
+    assert_eq!(skill_count, 0);
+    assert_eq!(session_count, 0);
+}
+
+#[test]
+fn rejects_empty_project_id_on_delete() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+
+    let error = service
+        .delete_project(String::new())
+        .expect_err("empty id should fail");
+
+    assert!(
+        error.to_string().contains("project id is required"),
+        "unexpected error: {error}"
+    );
+}

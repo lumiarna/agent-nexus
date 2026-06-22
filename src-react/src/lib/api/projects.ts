@@ -10,6 +10,10 @@ export const projectsApi = {
     return invokeCommand<Project>("record_project", { path });
   },
 
+  delete(id: string): Promise<void> {
+    return invokeCommand<void>("delete_project", { id });
+  },
+
   reorder(projectIds: string[]): Promise<Project[]> {
     return invokeCommand<Project[]>("reorder_projects", { projectIds });
   },
