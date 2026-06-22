@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import type { AgentName, CellRole, Cells } from "@/types";
-import { AGENT_ORDER, agentAbbr, agentColor } from "@/lib/tokens";
+import { AGENT_ORDER, agentColor } from "@/lib/tokens";
+import { AgentLogo } from "@/components/ui/agent-logo";
 import { cn } from "@/lib/utils";
 
 interface AgentIconProps {
@@ -11,39 +12,50 @@ interface AgentIconProps {
 }
 
 const BASE =
-  "inline-flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[8px] text-[9px] font-extrabold tracking-[.02em] transition-all select-none";
+  "inline-flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[8px] bg-white transition-all select-none";
 
-/** One Agent Matrix cell: source (filled), target (tinted), none (dashed). */
-export function AgentIcon({ role, agent, onClick, title }: AgentIconProps) {
-  const col = agentColor(agent);
-  let style: CSSProperties = {};
-  let cls = "";
+/** Container style for a matrix cell by role. Logos keep their brand color;
+ *  state is carried by the chip — tinted ring (source), thin ring (target),
+ *  dashed + desaturated (none). */
+function cellStyle(col: string, role: CellRole): { style: CSSProperties; cls: string } {
   if (role === "source") {
-    style = { background: col, color: "#fff", boxShadow: `0 0 0 2px ${col}33` };
-    cls = "cursor-default";
-  } else if (role === "target") {
-    style = { background: col + "22", color: col, border: `1px solid ${col}55` };
-    cls = "cursor-pointer";
-  } else {
-    cls = "cursor-pointer border border-dashed border-[#ddccb6] text-[#cabfae]";
+    return {
+      style: { background: col + "1a", boxShadow: `inset 0 0 0 1.5px ${col}` },
+      cls: "cursor-default",
+    };
   }
+  if (role === "target") {
+    return {
+      style: { boxShadow: `inset 0 0 0 1px ${col}59` },
+      cls: "cursor-pointer hover:brightness-95",
+    };
+  }
+  return {
+    style: { border: "1px dashed #ddccb6" },
+    cls: "cursor-pointer opacity-50 grayscale hover:opacity-80",
+  };
+}
+
+/** One Agent Matrix cell: source (filled ring), target (thin ring), none (dashed). */
+export function AgentIcon({ role, agent, onClick, title }: AgentIconProps) {
+  const { style, cls } = cellStyle(agentColor(agent), role);
   return (
     <span onClick={onClick} title={title} className={cn(BASE, cls)} style={style}>
-      {agentAbbr(agent)}
+      <AgentLogo agent={agent} className="h-[15px] w-[15px]" />
     </span>
   );
 }
 
-/** Small colored abbr pill marking a row's source agent. */
+/** Small chip marking a row's source agent. */
 export function SourceBadge({ agent }: { agent: AgentName }) {
   const col = agentColor(agent);
   return (
     <span
       title="Source agent"
-      className="inline-flex items-center justify-center rounded-[5px] px-1.5 py-px text-[9px] font-extrabold tracking-[.04em]"
-      style={{ background: col + "1c", color: col }}
+      className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px]"
+      style={{ background: col + "1c", boxShadow: `inset 0 0 0 1px ${col}40` }}
     >
-      {agentAbbr(agent)}
+      <AgentLogo agent={agent} className="h-[11px] w-[11px]" />
     </span>
   );
 }
@@ -81,28 +93,32 @@ export function AgentMatrixCells({
   );
 }
 
+/** A single legend chip — a non-interactive cell in a given role. */
+function LegendChip({ agent, role, label }: { agent: AgentName; role: CellRole; label: string }) {
+  const { style } = cellStyle(agentColor(agent), role);
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className={cn(
+          "inline-flex h-[20px] w-[20px] items-center justify-center rounded-[6px] bg-white",
+          role === "none" && "opacity-50 grayscale",
+        )}
+        style={style}
+      >
+        <AgentLogo agent={agent} className="h-[12px] w-[12px]" />
+      </span>
+      {label}
+    </span>
+  );
+}
+
 /** Source / target / none legend shown in Skill & Prompt headers. */
 export function MatrixLegend() {
   return (
     <div className="flex items-center gap-3.5 text-[11.5px] text-[#9a8f80]">
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] bg-nexus-accent text-[8px] font-extrabold text-white">
-          CC
-        </span>
-        source
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] bg-[rgba(157,122,100,.18)] text-[8px] font-extrabold text-nexus-accent">
-          CX
-        </span>
-        target
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border border-dashed border-[#ddccb6] text-[8px] font-extrabold text-[#cabfae]">
-          OC
-        </span>
-        none
-      </span>
+      <LegendChip agent="Claude Code" role="source" label="source" />
+      <LegendChip agent="CodeX" role="target" label="target" />
+      <LegendChip agent="OpenCode" role="none" label="none" />
     </div>
   );
 }
