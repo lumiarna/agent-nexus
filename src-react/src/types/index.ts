@@ -6,7 +6,7 @@
 
 // ─── Agents / distribution ──────────────────────────────────────────────────
 
-import type { AgentName as CapabilityAgentName } from "@/config/agents";
+import type { AgentName as CapabilityAgentName } from "../config/agents.js";
 
 export type AgentName = CapabilityAgentName;
 

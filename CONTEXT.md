@@ -8,6 +8,10 @@
 一个围绕 `shared assets`、`Project` 和 `Sync` 组织的本地工作台。它把多个 agent 当作资产的消费端，而不是把产品本身建模成按 agent 切开的配置面板。
 _Avoid_: Multi-agent config app, agent launcher, sync client
 
+**Agent**:
+一种可消费 `Skill`、`Prompt` 或其他共享资产的 AI 编程工具消费端。领域与 UI 显示名使用完整工具名；MVP 中 canonical agent 名为 `Generic Agent`、`Claude Code`、`CodeX`、`Copilot`、`OpenCode`。短标识如 `claude`、`opencode` 只作为实现层 ID，不作为领域显示名。`OpenCode Go` 不是 `Agent`，而是 `Provider quota` 观测入口。
+_Avoid_: Model, provider, account, Claude, OpenCode Go as agent
+
 **Asset**:
 在本项目中，`Asset` 指被系统识别、展示、关联、传播或观测的领域对象，而不是任意文件副本。当前核心 `Asset` 包括 `Skill`、`Prompt`、`Session`、`Project` 和 `Provider`；但并非所有 `Asset` 都可传播。
 _Avoid_: File, record, resource
@@ -65,11 +69,11 @@ _Avoid_: Project prompt, prompt copy
 _Avoid_: Chat log only, backup artifact only
 
 **Provider**:
-一个提供 quota 信息与 credential source 的外部服务身份。`Provider` 在本项目中是全局资源，不做 project-level quota 归因。
-_Avoid_: Project provider, account manager
+一个提供 quota 信息与 credential source 的外部服务身份。`Provider` 在本项目中是全局资源，不做 project-level quota 归因。部分 `Provider` 与 `Agent` 共享展示事实，例如 `Claude Code`、`CodeX`、`Copilot`；部分 `Provider` 不是 `Agent`，例如 `OpenCode Go`。同一品牌下的 `Agent` 与 `Provider` 不自动等价：`OpenCode` 是 agent 消费端，`OpenCode Go` 是 quota provider。
+_Avoid_: Project provider, account manager, OpenCode as OpenCode Go, provider implies agent
 
 **Provider Connection Params**:
-为 `Provider` 的 quota 观测补充的连接参数，例如 workspace identifier 或请求所需材料。它服务于观测能力，不表示 Agent Nexus 接管第三方身份生命周期。
+为 `Provider` 的 quota 观测补充的连接参数，例如 `OpenCode Go` 的 workspace identifier 或请求所需材料。它服务于观测能力，不表示 Agent Nexus 接管第三方身份生命周期。
 _Avoid_: Account ownership, login manager, credential lifecycle
 
 **Provider Display Preferences**:
@@ -121,8 +125,8 @@ _Avoid_: Owner, primary target
 _Avoid_: Secondary source, duplicate source
 
 **Agent Capability Surface**:
-某个 `Agent` 在当前产品中实际参与的资产与页面范围。它集中描述 canonical order、配置根、`Skill` surface（global/project skill 目录）、`Prompt` surface（global prompt 文件）以及可选的 `Provider` 展示事实。`Agent` 的领域身份可以完整存在，但其可操作 surface 可以分阶段开放；当前已确认 `Copilot` 在 MVP 中同时参与 `Skill` 与 `Prompt`。
-_Avoid_: Partial agent identity, ad hoc special case
+某个 `Agent` 在当前产品中实际参与的资产与页面范围。它集中描述 canonical order、配置根、`Skill` surface（global/project skill 目录）、`Prompt` surface（global prompt 文件）以及可选的 `Provider` 展示事实。`Agent` 的领域身份可以完整存在，但其可操作 surface 可以分阶段开放；当前已确认 `Copilot` 在 MVP 中同时参与 `Skill` 与 `Prompt`。`Agent Capability Surface` 的展示名必须使用 canonical agent 名；内部 ID（如 `claude`、`opencode`）只能作为实现层标识，不能替代 `Claude Code`、`OpenCode` 等领域名。
+_Avoid_: Partial agent identity, ad hoc special case, short ID as display name, OpenCode Go as agent surface
 
 ## Sync
 

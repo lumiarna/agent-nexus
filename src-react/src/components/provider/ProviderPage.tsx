@@ -155,6 +155,7 @@ export function ProviderPage() {
   const codexQuota = useProviderQuotaQuery("codex");
   const copilotQuota = useProviderQuotaQuery("copilot");
   const opencodeGoQuota = useProviderQuotaQuery("opencode-go");
+  const minimaxTokenQuota = useProviderQuotaQuery("minimax-token");
 
   const gridRef = useRef<HTMLDivElement>(null);
   const timers = useRef<Record<string, number>>({});
@@ -225,6 +226,13 @@ export function ProviderPage() {
   }, [opencodeGoQuota.data]);
 
   useEffect(() => {
+    if (!minimaxTokenQuota.data) return;
+    setProviders((current) =>
+      current.map((provider) => mergeProviderQuota(provider, minimaxTokenQuota.data)),
+    );
+  }, [minimaxTokenQuota.data]);
+
+  useEffect(() => {
     if (configId !== "copilot" || !isTauriRuntime()) return;
     let active = true;
     providersApi
@@ -272,6 +280,9 @@ export function ProviderPage() {
     }
     if (id === "opencode-go") {
       void opencodeGoQuota.refetch();
+    }
+    if (id === "minimax-token") {
+      void minimaxTokenQuota.refetch();
     }
 
     setRefreshing((r) => ({ ...r, [id]: true }));
@@ -353,7 +364,8 @@ export function ProviderPage() {
                 (p.id === "claude" && claudeQuota.isFetching) ||
                 (p.id === "codex" && codexQuota.isFetching) ||
                 (p.id === "copilot" && copilotQuota.isFetching) ||
-                (p.id === "opencode-go" && opencodeGoQuota.isFetching);
+                (p.id === "opencode-go" && opencodeGoQuota.isFetching) ||
+                (p.id === "minimax-token" && minimaxTokenQuota.isFetching);
               const st: ProviderUiStatus = loading ? "loading" : p.status;
               const si = statusInfo(st);
               const showQuota = st === "available" && !!p.windows;

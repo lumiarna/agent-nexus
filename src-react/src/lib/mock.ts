@@ -17,7 +17,7 @@ import type {
   SystemSync,
   TaskGroup,
   Template,
-} from "@/types";
+} from "../types/index.js";
 
 const clone = <T>(x: T): T => structuredClone(x);
 
@@ -59,6 +59,10 @@ const PROVIDERS: Provider[] = [
     credential: "manual · workspace id + cookie", needsParams: true,
   },
   {
+    id: "minimax-token", name: "MiniMax Token Plan CN", plan: "Token plan",
+    status: "nocreds", credential: "not found",
+  },
+  {
     id: "minimax", name: "MiniMax CN", plan: "Pay-as-you-go", status: "available",
     credential: "~/.local/share/opencode/auth.json", primary: 12,
     windows: [{ label: "Daily tokens", used: 12, reset: "Resets 00:00 CST" }],
@@ -72,10 +76,6 @@ const PROVIDERS: Provider[] = [
     id: "openrouter", name: "OpenRouter", plan: "Credits", status: "available",
     credential: "~/.local/share/opencode/auth.json", primary: 34,
     windows: [{ label: "Credit balance", used: 34, reset: "$66.00 of $100.00 left" }],
-  },
-  {
-    id: "minimax-token", name: "MiniMax Token Plan CN", plan: "Token plan",
-    status: "nocreds", credential: "not found", hiddenCard: true,
   },
 ];
 

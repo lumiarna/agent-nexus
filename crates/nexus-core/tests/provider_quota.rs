@@ -6,14 +6,16 @@ use nexus_core::{
         app_config::{AppConfigService, CODEX_CONFIG_DIR_KEY},
         provider_quota::{
             claude_code_quota_from_usage_response, codex_quota_from_usage_response,
-            copilot_quota_from_usage_response, opencode_go_quota_from_html,
-            parse_opencode_copilot_token, ClaudeCodeUsageBucket, ClaudeCodeUsageResponse,
-            CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse, CopilotQuotaDetail,
-            CopilotQuotaSnapshots, CopilotUsageResponse, ProviderQuotaService, ProviderQuotaStatus,
-            ProviderQuotaWindowKind,
+            copilot_quota_from_usage_response, minimax_token_plan_cn_quota_from_usage_response,
+            opencode_go_quota_from_html, parse_opencode_copilot_token, ClaudeCodeUsageBucket,
+            ClaudeCodeUsageResponse, CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse,
+            CopilotQuotaDetail, CopilotQuotaSnapshots, CopilotUsageResponse,
+            MiniMaxTokenPlanCnModelRemain, MiniMaxTokenPlanCnUsageResponse, ProviderQuotaService,
+            ProviderQuotaStatus, ProviderQuotaWindowKind,
         },
     },
 };
+use serial_test::serial;
 
 fn copilot_detail(percent_remaining: Option<f64>) -> CopilotQuotaDetail {
     CopilotQuotaDetail {
@@ -67,6 +69,33 @@ async fn provider_quota_service_dispatches_opencode_go_adapter_without_connectio
         snapshot.credential.as_deref(),
         Some("manual workspace id + auth cookie"),
     );
+    assert!(snapshot.windows.is_empty());
+    assert_eq!(snapshot.error, None);
+}
+
+#[tokio::test]
+#[serial]
+async fn provider_quota_service_dispatches_minimax_token_plan_cn_adapter_without_credentials() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let missing_auth_file = temp_dir.path().join("missing-opencode-auth.json");
+    let previous_auth_file = std::env::var_os("OPENCODE_AUTH_FILE");
+    std::env::set_var("OPENCODE_AUTH_FILE", &missing_auth_file);
+
+    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let snapshot = service
+        .get_provider_quota("minimax-token")
+        .await
+        .expect("dispatch MiniMax Token Plan CN adapter");
+
+    match previous_auth_file {
+        Some(value) => std::env::set_var("OPENCODE_AUTH_FILE", value),
+        None => std::env::remove_var("OPENCODE_AUTH_FILE"),
+    }
+
+    assert_eq!(snapshot.provider_id, "minimax-token");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
+    assert_eq!(snapshot.credential.as_deref(), Some("not found"));
     assert!(snapshot.windows.is_empty());
     assert_eq!(snapshot.error, None);
 }
@@ -308,6 +337,55 @@ fn opencode_go_html_maps_to_provider_quota_snapshot() {
     assert_eq!(
         snapshot.windows[2].reset_at.as_deref(),
         Some("2026-07-12T13:03:20Z"),
+    );
+}
+
+#[test]
+fn minimax_token_plan_cn_usage_maps_remaining_percent_to_used_windows() {
+    let snapshot = minimax_token_plan_cn_quota_from_usage_response(
+        "minimax-token",
+        MiniMaxTokenPlanCnUsageResponse {
+            model_remains: vec![
+                MiniMaxTokenPlanCnModelRemain {
+                    model_name: "video".to_string(),
+                    end_time: None,
+                    weekly_end_time: None,
+                    current_interval_remaining_percent: Some(100.0),
+                    current_weekly_remaining_percent: Some(100.0),
+                    current_weekly_status: Some(3),
+                },
+                MiniMaxTokenPlanCnModelRemain {
+                    model_name: "general".to_string(),
+                    end_time: Some(1_781_269_400_000),
+                    weekly_end_time: Some(1_781_787_800_000),
+                    current_interval_remaining_percent: Some(98.0),
+                    current_weekly_remaining_percent: Some(95.0),
+                    current_weekly_status: Some(1),
+                },
+            ],
+            base_resp: None,
+        },
+    )
+    .expect("map MiniMax Token Plan CN usage");
+
+    assert_eq!(snapshot.provider_id, "minimax-token");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::Available);
+    assert_eq!(snapshot.plan.as_deref(), Some("Token plan"));
+    assert_eq!(snapshot.primary, Some(5));
+    assert_eq!(snapshot.windows.len(), 2);
+    assert_eq!(snapshot.windows[0].label, "5-hour limit");
+    assert_eq!(snapshot.windows[0].kind, ProviderQuotaWindowKind::Rolling);
+    assert_eq!(snapshot.windows[0].used, 2);
+    assert_eq!(
+        snapshot.windows[0].reset_at.as_deref(),
+        Some("2026-06-12T13:03:20Z"),
+    );
+    assert_eq!(snapshot.windows[1].label, "Weekly limit");
+    assert_eq!(snapshot.windows[1].kind, ProviderQuotaWindowKind::Weekly);
+    assert_eq!(snapshot.windows[1].used, 5);
+    assert_eq!(
+        snapshot.windows[1].reset_at.as_deref(),
+        Some("2026-06-18T13:03:20Z"),
     );
 }
 

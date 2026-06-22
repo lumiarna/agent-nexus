@@ -32,6 +32,11 @@ const OPENCODE_GO_BROWSER_UA: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+const MINIMAX_TOKEN_PLAN_CN_PROVIDER_ID: &str = "minimax-token";
+const MINIMAX_TOKEN_PLAN_CN_OPENCODE_KEY: &str = "minimax-cn-coding-plan";
+const MINIMAX_TOKEN_PLAN_CN_USAGE_URL: &str =
+    "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderQuotaStatus {
@@ -124,6 +129,30 @@ pub struct CopilotQuotaDetail {
     pub unlimited: Option<bool>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct MiniMaxTokenPlanCnUsageResponse {
+    #[serde(default)]
+    pub model_remains: Vec<MiniMaxTokenPlanCnModelRemain>,
+    pub base_resp: Option<MiniMaxTokenPlanCnBaseResp>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct MiniMaxTokenPlanCnBaseResp {
+    pub status_code: i64,
+    #[serde(default)]
+    pub status_msg: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct MiniMaxTokenPlanCnModelRemain {
+    pub model_name: String,
+    pub end_time: Option<i64>,
+    pub weekly_end_time: Option<i64>,
+    pub current_interval_remaining_percent: Option<f64>,
+    pub current_weekly_remaining_percent: Option<f64>,
+    pub current_weekly_status: Option<i64>,
+}
+
 #[derive(Clone, Debug)]
 struct ClaudeCodeCredentials {
     access_token: String,
@@ -148,6 +177,13 @@ type CopilotUsageFuture<'a> =
     Pin<Box<dyn Future<Output = Result<CopilotUsageResponse, ProviderQuotaPollError>> + Send + 'a>>;
 type OpenCodeGoPageFuture<'a> =
     Pin<Box<dyn Future<Output = Result<String, ProviderQuotaPollError>> + Send + 'a>>;
+type MiniMaxTokenPlanCnUsageFuture<'a> = Pin<
+    Box<
+        dyn Future<Output = Result<MiniMaxTokenPlanCnUsageResponse, ProviderQuotaPollError>>
+            + Send
+            + 'a,
+    >,
+>;
 
 trait ProviderCredentialSource: Send + Sync {
     fn claude_code_credentials(
@@ -163,6 +199,7 @@ trait ProviderCredentialSource: Send + Sync {
         &self,
         app_config: &AppConfigService,
     ) -> AppResult<Option<OpenCodeGoCredentials>>;
+    fn minimax_token_plan_cn_token(&self) -> AppResult<Option<String>>;
 }
 
 trait ProviderUsageTransport: Send + Sync {
@@ -178,6 +215,10 @@ trait ProviderUsageTransport: Send + Sync {
         workspace_id: &'a str,
         auth_cookie: &'a str,
     ) -> OpenCodeGoPageFuture<'a>;
+    fn minimax_token_plan_cn_usage<'a>(
+        &'a self,
+        api_key: &'a str,
+    ) -> MiniMaxTokenPlanCnUsageFuture<'a>;
 }
 
 #[derive(Clone)]
@@ -211,6 +252,8 @@ static CLAUDE_CODE_QUOTA_ADAPTER: ClaudeCodeQuotaAdapter = ClaudeCodeQuotaAdapte
 static CODEX_QUOTA_ADAPTER: CodexQuotaAdapter = CodexQuotaAdapter;
 static COPILOT_QUOTA_ADAPTER: CopilotQuotaAdapter = CopilotQuotaAdapter;
 static OPENCODE_GO_QUOTA_ADAPTER: OpenCodeGoQuotaAdapter = OpenCodeGoQuotaAdapter;
+static MINIMAX_TOKEN_PLAN_CN_QUOTA_ADAPTER: MiniMaxTokenPlanCnQuotaAdapter =
+    MiniMaxTokenPlanCnQuotaAdapter;
 
 #[derive(Clone)]
 pub struct ProviderQuotaService {
@@ -244,12 +287,13 @@ impl ProviderQuotaService {
     }
 }
 
-fn provider_quota_adapters() -> [&'static dyn ProviderQuotaAdapter; 4] {
+fn provider_quota_adapters() -> [&'static dyn ProviderQuotaAdapter; 5] {
     [
         &CLAUDE_CODE_QUOTA_ADAPTER,
         &CODEX_QUOTA_ADAPTER,
         &COPILOT_QUOTA_ADAPTER,
         &OPENCODE_GO_QUOTA_ADAPTER,
+        &MINIMAX_TOKEN_PLAN_CN_QUOTA_ADAPTER,
     ]
 }
 
@@ -312,6 +356,10 @@ impl ProviderCredentialSource for LocalCredentialSource {
             source: "manual workspace id + auth cookie".to_string(),
         }))
     }
+
+    fn minimax_token_plan_cn_token(&self) -> AppResult<Option<String>> {
+        Ok(read_opencode_auth_token(MINIMAX_TOKEN_PLAN_CN_OPENCODE_KEY))
+    }
 }
 
 impl ProviderUsageTransport for HttpUsageTransport {
@@ -337,6 +385,13 @@ impl ProviderUsageTransport for HttpUsageTransport {
         auth_cookie: &'a str,
     ) -> OpenCodeGoPageFuture<'a> {
         Box::pin(fetch_opencode_go_page(workspace_id, auth_cookie))
+    }
+
+    fn minimax_token_plan_cn_usage<'a>(
+        &'a self,
+        api_key: &'a str,
+    ) -> MiniMaxTokenPlanCnUsageFuture<'a> {
+        Box::pin(fetch_minimax_token_plan_cn_usage(api_key))
     }
 }
 
@@ -532,6 +587,44 @@ impl OpenCodeGoQuotaAdapter {
     }
 }
 
+struct MiniMaxTokenPlanCnQuotaAdapter;
+
+impl ProviderQuotaAdapter for MiniMaxTokenPlanCnQuotaAdapter {
+    fn provider_id(&self) -> &'static str {
+        MINIMAX_TOKEN_PLAN_CN_PROVIDER_ID
+    }
+
+    fn quota<'a>(
+        &'a self,
+        _app_config: &'a AppConfigService,
+        credential_source: &'a dyn ProviderCredentialSource,
+        usage_transport: &'a dyn ProviderUsageTransport,
+    ) -> ProviderQuotaFuture<'a> {
+        Box::pin(async move {
+            let token = match credential_source.minimax_token_plan_cn_token() {
+                Ok(Some(token)) => token,
+                Ok(None) => {
+                    return minimax_token_plan_cn_status(
+                        ProviderQuotaStatus::NoCreds,
+                        "not found",
+                        None,
+                    );
+                }
+                Err(error) => {
+                    return minimax_token_plan_cn_status(
+                        ProviderQuotaStatus::Failed,
+                        "not found",
+                        Some(error.to_string()),
+                    );
+                }
+            };
+
+            let usage = usage_transport.minimax_token_plan_cn_usage(&token).await;
+            derive_minimax_token_plan_cn_snapshot(usage)
+        })
+    }
+}
+
 pub fn claude_code_quota_from_usage_response(
     provider_id: &str,
     plan: Option<String>,
@@ -700,6 +793,69 @@ pub fn opencode_go_quota_from_html(
     })
 }
 
+pub fn minimax_token_plan_cn_quota_from_usage_response(
+    provider_id: &str,
+    response: MiniMaxTokenPlanCnUsageResponse,
+) -> Option<ProviderQuotaSnapshot> {
+    let model = response
+        .model_remains
+        .into_iter()
+        .find(|model| model.model_name == "general")?;
+
+    let mut windows = Vec::new();
+    if let Some(remaining) = model.current_interval_remaining_percent {
+        windows.push(ProviderQuotaWindow {
+            label: "5-hour limit".to_string(),
+            kind: ProviderQuotaWindowKind::Rolling,
+            used: percent_to_u8(100.0 - remaining),
+            reset_at: model.end_time.and_then(unix_millis_to_iso),
+            unlimited: false,
+        });
+    }
+    if model.current_weekly_status == Some(1) {
+        if let Some(remaining) = model.current_weekly_remaining_percent {
+            windows.push(ProviderQuotaWindow {
+                label: "Weekly limit".to_string(),
+                kind: ProviderQuotaWindowKind::Weekly,
+                used: percent_to_u8(100.0 - remaining),
+                reset_at: model.weekly_end_time.and_then(unix_millis_to_iso),
+                unlimited: false,
+            });
+        }
+    }
+
+    if windows.is_empty() {
+        return None;
+    }
+
+    let primary = windows.iter().map(|window| window.used).max();
+    Some(ProviderQuotaSnapshot {
+        provider_id: provider_id.to_string(),
+        status: ProviderQuotaStatus::Available,
+        plan: Some("Token plan".to_string()),
+        primary,
+        windows,
+        credential: None,
+        error: None,
+    })
+}
+
+fn minimax_token_plan_cn_status(
+    status: ProviderQuotaStatus,
+    credential: &str,
+    error: Option<String>,
+) -> ProviderQuotaSnapshot {
+    ProviderQuotaSnapshot {
+        provider_id: MINIMAX_TOKEN_PLAN_CN_PROVIDER_ID.to_string(),
+        status,
+        plan: Some("Token plan".to_string()),
+        primary: None,
+        windows: Vec::new(),
+        credential: Some(credential.to_string()),
+        error,
+    }
+}
+
 fn derive_claude_code_snapshot(
     credentials: ClaudeCodeCredentials,
     usage: Result<ClaudeCodeUsageResponse, ProviderQuotaPollError>,
@@ -845,6 +1001,41 @@ fn derive_opencode_go_snapshot(
             credential: Some(credentials.source),
             error: Some(error.to_string()),
         },
+    }
+}
+
+fn derive_minimax_token_plan_cn_snapshot(
+    usage: Result<MiniMaxTokenPlanCnUsageResponse, ProviderQuotaPollError>,
+) -> ProviderQuotaSnapshot {
+    let credential = "opencode auth.json · minimax-cn-coding-plan";
+    match usage {
+        Ok(response) => {
+            let Some(mut snapshot) = minimax_token_plan_cn_quota_from_usage_response(
+                MINIMAX_TOKEN_PLAN_CN_PROVIDER_ID,
+                response,
+            ) else {
+                return minimax_token_plan_cn_status(
+                    ProviderQuotaStatus::Failed,
+                    credential,
+                    Some(
+                        "MiniMax Token Plan CN response did not contain coding-plan usage"
+                            .to_string(),
+                    ),
+                );
+            };
+            snapshot.credential = Some(credential.to_string());
+            snapshot
+        }
+        Err(ProviderQuotaPollError::AuthRequired) => minimax_token_plan_cn_status(
+            ProviderQuotaStatus::Expired,
+            credential,
+            Some("MiniMax Token Plan CN API key was rejected".to_string()),
+        ),
+        Err(error) => minimax_token_plan_cn_status(
+            ProviderQuotaStatus::Failed,
+            credential,
+            Some(error.to_string()),
+        ),
     }
 }
 
@@ -996,6 +1187,22 @@ fn is_iso_calendar_date(value: &str) -> bool {
 /// Resolve the GitHub token from opencode's `auth.json`. The location honours
 /// `OPENCODE_AUTH_FILE`, defaulting to `~/.local/share/opencode/auth.json`.
 fn read_opencode_copilot_token() -> Option<String> {
+    let content = read_opencode_auth_content()?;
+    parse_opencode_copilot_token(&content)
+}
+
+/// Extract the `github-copilot` GitHub token from opencode `auth.json` content.
+/// OAuth providers store it under `access`; API providers under `key`.
+pub fn parse_opencode_copilot_token(content: &str) -> Option<String> {
+    parse_opencode_auth_token(content, "github-copilot", &["access", "key"])
+}
+
+fn read_opencode_auth_token(provider_key: &str) -> Option<String> {
+    let content = read_opencode_auth_content()?;
+    parse_opencode_auth_token(&content, provider_key, &["key", "access"])
+}
+
+fn read_opencode_auth_content() -> Option<String> {
     let path = match env::var_os("OPENCODE_AUTH_FILE") {
         Some(value) if !value.is_empty() => PathBuf::from(value),
         _ => crate::services::paths::home_dir()?
@@ -1004,17 +1211,14 @@ fn read_opencode_copilot_token() -> Option<String> {
             .join("opencode")
             .join("auth.json"),
     };
-    let content = fs::read_to_string(path).ok()?;
-    parse_opencode_copilot_token(&content)
+    fs::read_to_string(path).ok()
 }
 
-/// Extract the `github-copilot` GitHub token from opencode `auth.json` content.
-/// OAuth providers store it under `access`; API providers under `key`.
-pub fn parse_opencode_copilot_token(content: &str) -> Option<String> {
+fn parse_opencode_auth_token(content: &str, provider_key: &str, fields: &[&str]) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(content).ok()?;
-    let entry = json.get("github-copilot")?;
-    for field in ["access", "key"] {
-        if let Some(token) = entry.get(field).and_then(|value| value.as_str()) {
+    let entry = json.get(provider_key)?;
+    for field in fields {
+        if let Some(token) = entry.get(*field).and_then(|value| value.as_str()) {
             let token = token.trim();
             if !token.is_empty() {
                 return Some(token.to_string());
@@ -1050,6 +1254,13 @@ fn unix_seconds_to_iso(secs: i64) -> Option<String> {
     OffsetDateTime::from_unix_timestamp(secs)
         .ok()
         .and_then(|dt| dt.format(&Rfc3339).ok())
+}
+
+fn unix_millis_to_iso(ms: i64) -> Option<String> {
+    if ms <= 0 {
+        return None;
+    }
+    unix_seconds_to_iso(ms / 1000)
 }
 
 fn reset_seconds_to_iso(now_epoch_seconds: i64, reset_in_sec: u64) -> Option<String> {
@@ -1370,6 +1581,42 @@ fn codex_status(status: ProviderQuotaStatus, message: &str) -> ProviderQuotaSnap
         credential: Some(message.to_string()),
         error: None,
     }
+}
+
+async fn fetch_minimax_token_plan_cn_usage(
+    api_key: &str,
+) -> Result<MiniMaxTokenPlanCnUsageResponse, ProviderQuotaPollError> {
+    let response = reqwest::Client::new()
+        .get(MINIMAX_TOKEN_PLAN_CN_USAGE_URL)
+        .bearer_auth(api_key)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(ProviderQuotaPollError::AuthRequired);
+    }
+    if !status.is_success() {
+        return Err(ProviderQuotaPollError::Request(format!(
+            "MiniMax Token Plan CN usage endpoint returned {status}"
+        )));
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+    let parsed = serde_json::from_str::<MiniMaxTokenPlanCnUsageResponse>(&body)
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+    if let Some(base_resp) = &parsed.base_resp {
+        if base_resp.status_code != 0 {
+            return Err(ProviderQuotaPollError::AuthRequired);
+        }
+    }
+    Ok(parsed)
 }
 
 async fn fetch_copilot_usage(token: &str) -> Result<CopilotUsageResponse, ProviderQuotaPollError> {
