@@ -33,7 +33,7 @@ import {
 import { isTauriRuntime } from "@/lib/runtime";
 import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
 import { useProviderQuotaQuery } from "@/lib/query/providers";
-import { quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/tokens";
+import { palette, quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type { Provider, TrayMetric } from "@/types";
 import type { ProviderQuotaSnapshot } from "@/lib/api/providers";
@@ -70,6 +70,10 @@ const API_KEY_PROVIDER_HINTS: Record<
     savedLabel: "OpenRouter API key",
   },
 };
+
+/** Used − pace gap (in percentage points) above which a window is burning ahead
+ *  of schedule, turning its pace marker critical. */
+const PACE_ALERT_THRESHOLD = 15;
 
 function isApiKeyProvider(providerId: string): boolean {
   return providerId in API_KEY_PROVIDER_HINTS;
@@ -512,11 +516,25 @@ export function ProviderPage() {
                                     </span>
                                   </div>
                                   {w.valueOnly ? null : (
-                                    <div className="h-2 overflow-hidden rounded-full bg-[#ece2d6]">
-                                      <div
-                                        className="h-full rounded-full"
-                                        style={{ width: `${barWidth}%`, background: barColor }}
-                                      />
+                                    <div className="relative">
+                                      <div className="h-2 overflow-hidden rounded-full bg-[#ece2d6]">
+                                        <div
+                                          className="h-full rounded-full"
+                                          style={{ width: `${barWidth}%`, background: barColor }}
+                                        />
+                                      </div>
+                                      {w.pace != null ? (
+                                        <div
+                                          className="absolute -top-0.5 h-3 w-0.5 rounded-full"
+                                          style={{
+                                            left: `calc(${w.pace}% - 1px)`,
+                                            background:
+                                              w.used - w.pace > PACE_ALERT_THRESHOLD
+                                                ? palette.crit
+                                                : "#6a6055",
+                                          }}
+                                        />
+                                      ) : null}
                                     </div>
                                   )}
                                   {w.reset ? (

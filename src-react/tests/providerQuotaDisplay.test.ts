@@ -51,14 +51,20 @@ test("Copilot monthly windows render the calendar reset date", () => {
     ],
   };
 
-  assert.deepEqual(formatProviderQuotaDisplay(provider, { timeZone: "Asia/Shanghai" }), {
-    primaryLabel: "77%",
-    primaryCaption: "shortest window used",
-    windows: [
-      { label: "Premium Interactions", usedLabel: "77%", used: 77, reset: "Resets Jul 1", unlimited: false },
-      { label: "Chat Quota", usedLabel: "20%", used: 20, reset: "Resets Jul 1", unlimited: false },
-    ],
-  });
+  assert.deepEqual(
+    formatProviderQuotaDisplay(provider, {
+      timeZone: "Asia/Shanghai",
+      now: new Date("2026-06-16T00:00:00Z"),
+    }),
+    {
+      primaryLabel: "77%",
+      primaryCaption: "shortest window used",
+      windows: [
+        { label: "Premium Interactions", usedLabel: "77%", used: 77, reset: "Resets Jul 1", unlimited: false, pace: 50 },
+        { label: "Chat Quota", usedLabel: "20%", used: 20, reset: "Resets Jul 1", unlimited: false, pace: 50 },
+      ],
+    },
+  );
 });
 
 test("Copilot unlimited window renders an Unlimited label", () => {
@@ -81,11 +87,11 @@ test("Copilot unlimited window renders an Unlimited label", () => {
     ],
   };
 
-  assert.deepEqual(formatProviderQuotaDisplay(provider), {
+  assert.deepEqual(formatProviderQuotaDisplay(provider, { now: new Date("2026-06-16T00:00:00Z") }), {
     primaryLabel: "100%",
     primaryCaption: "shortest window used",
     windows: [
-      { label: "Premium Interactions", usedLabel: "100%", used: 100, reset: "Resets Jul 1", unlimited: false },
+      { label: "Premium Interactions", usedLabel: "100%", used: 100, reset: "Resets Jul 1", unlimited: false, pace: 50 },
       { label: "Chat Quota", usedLabel: "Unlimited", used: 0, reset: "Resets Jul 1", unlimited: true },
     ],
   });
@@ -119,4 +125,26 @@ test("balance-only windows render the backend value label without a primary perc
       },
     ],
   });
+});
+
+test("pace is derived only for weekly/monthly windows that carry a resetAt", () => {
+  const provider = {
+    primary: null,
+    windows: [
+      // 3.5 days into a 7-day window → marker at the midpoint.
+      { label: "Weekly limit", used: 80, kind: "weekly", resetAt: "2026-06-21T07:00:00Z" },
+      // Short rolling window: excluded even with a resetAt (uniform burn doesn't hold).
+      { label: "5-hour limit", used: 80, kind: "rolling", resetAt: "2026-06-17T22:00:00Z" },
+      // Monthly without a resetAt: no interval to place a marker on.
+      { label: "Monthly limit", used: 10, kind: "monthly" },
+    ],
+  };
+
+  const display = formatProviderQuotaDisplay(provider, {
+    now: new Date("2026-06-17T19:00:00Z"),
+  });
+
+  assert.equal(display.windows[0].pace, 50);
+  assert.equal(display.windows[1].pace, undefined);
+  assert.equal(display.windows[2].pace, undefined);
 });

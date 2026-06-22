@@ -21,6 +21,9 @@ export interface ProviderQuotaDisplayWindow {
   reset: string;
   unlimited: boolean;
   valueOnly?: boolean;
+  /** Time-elapsed share of the window as a 0–100 percent, for placing the pace
+   *  marker. Only present for weekly/monthly windows with a usable resetAt. */
+  pace?: number;
 }
 
 export interface ProviderQuotaDisplay {
@@ -43,6 +46,7 @@ export function formatProviderQuotaDisplay(
     primaryCaption: provider.primary != null ? "shortest window used" : "",
     windows: (provider.windows ?? []).map((window) => {
       const valueOnly = window.valueOnly ?? false;
+      const pace = computePace(window, options.now ?? new Date());
       return {
         label: window.label,
         usedLabel: window.valueLabel ?? (window.unlimited ? "Unlimited" : `${window.used}%`),
@@ -50,9 +54,44 @@ export function formatProviderQuotaDisplay(
         reset: formatWindowReset(window, options),
         unlimited: window.unlimited ?? false,
         ...(valueOnly ? { valueOnly } : {}),
+        ...(pace != null ? { pace } : {}),
       };
     }),
   };
+}
+
+const WEEKLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Share of the window already elapsed, as a 0–100 percent, for placing the pace
+ *  marker. Only weekly/monthly windows qualify: their length is a protocol fact
+ *  (7 days / one calendar month) derivable exactly from resetAt. Short rolling
+ *  windows are excluded — uniform burn doesn't hold over a few hours, so a marker
+ *  there is noise rather than signal. */
+function computePace(window: ProviderQuotaWindowInput, now: Date): number | undefined {
+  if (window.valueOnly || window.unlimited) return undefined;
+  if (window.kind !== "weekly" && window.kind !== "monthly") return undefined;
+  if (!window.resetAt) return undefined;
+
+  const reset = new Date(window.resetAt);
+  if (Number.isNaN(reset.getTime())) return undefined;
+
+  const start =
+    window.kind === "weekly"
+      ? new Date(reset.getTime() - WEEKLY_WINDOW_MS)
+      : startOfPreviousMonth(reset);
+
+  const total = reset.getTime() - start.getTime();
+  if (total <= 0) return undefined;
+
+  const fraction = (now.getTime() - start.getTime()) / total;
+  return Math.min(1, Math.max(0, fraction)) * 100;
+}
+
+/** The calendar-month window's start: the same instant one month before reset. */
+function startOfPreviousMonth(reset: Date): Date {
+  const start = new Date(reset.getTime());
+  start.setUTCMonth(start.getUTCMonth() - 1);
+  return start;
 }
 
 function formatWindowReset(
