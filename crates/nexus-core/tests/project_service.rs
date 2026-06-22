@@ -1,9 +1,10 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, sync::Arc};
 
 use nexus_core::{
     database::Database,
     services::{paths, projects::ProjectService},
 };
+use rusqlite::params;
 use tempfile::TempDir;
 
 fn git_repo(parent: &TempDir, name: &str) -> String {
@@ -58,6 +59,34 @@ fn recording_same_project_key_updates_path_without_duplicate() {
 }
 
 #[test]
+fn re_recording_moved_project_restores_active_status() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let old_root = TempDir::new().expect("create old temp dir");
+    let old_repo = git_repo(&old_root, "relocated");
+    let first = service.record_project(old_repo).expect("record old path");
+
+    drop(old_root);
+
+    let stale = service.list_projects().expect("list projects");
+    assert_eq!(
+        stale.iter().find(|p| p.id == first.id).unwrap().status,
+        "stale"
+    );
+
+    let new_root = TempDir::new().expect("create new temp dir");
+    let new_repo = git_repo(&new_root, "relocated");
+    let re_recorded = service.record_project(new_repo).expect("re-record new path");
+
+    assert_eq!(re_recorded.id, first.id);
+    assert_eq!(re_recorded.status, "active");
+
+    let projects = service.list_projects().expect("list projects");
+    let restored = projects.iter().find(|p| p.id == first.id).unwrap();
+    assert_eq!(restored.status, "active");
+}
+
+#[test]
 fn reorders_projects_and_persists_display_order() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -109,6 +138,59 @@ fn rejects_incomplete_project_display_order() {
             .contains("project order must include every project exactly once"),
         "unexpected error: {error}"
     );
+}
+
+#[test]
+fn lists_project_as_stale_when_its_path_no_longer_exists() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "ghost");
+    let recorded = service
+        .record_project(repo.clone())
+        .expect("record project");
+    let recorded_path = recorded.path.clone();
+
+    drop(root);
+
+    let projects = service.list_projects().expect("list projects");
+    let stale = projects
+        .iter()
+        .find(|p| p.id == recorded.id)
+        .expect("project still listed");
+
+    assert_eq!(stale.status, "stale");
+    assert_eq!(stale.path, recorded_path);
+}
+
+#[test]
+fn hidden_status_survives_even_when_path_no_longer_exists() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = ProjectService::new(db.clone());
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "buried");
+    let recorded = service
+        .record_project(repo.clone())
+        .expect("record project");
+
+    {
+        let conn = db.connection().expect("get connection");
+        conn.execute(
+            "UPDATE projects SET status = 'hidden' WHERE id = ?1",
+            params![recorded.id],
+        )
+        .expect("mark hidden");
+    }
+
+    drop(root);
+
+    let projects = service.list_projects().expect("list projects");
+    let hidden = projects
+        .iter()
+        .find(|p| p.id == recorded.id)
+        .expect("project still listed");
+
+    assert_eq!(hidden.status, "hidden");
 }
 
 #[test]

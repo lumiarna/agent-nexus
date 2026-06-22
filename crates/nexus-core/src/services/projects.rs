@@ -79,7 +79,15 @@ impl ProjectService {
         )?;
 
         let rows = stmt.query_map([], project_from_row)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        let mut projects = rows.collect::<Result<Vec<_>, _>>()?;
+
+        for project in &mut projects {
+            if project.status == "active" && !Path::new(&project.path).exists() {
+                project.status = "stale".to_string();
+            }
+        }
+
+        Ok(projects)
     }
 
     pub fn reorder_projects(&self, project_ids: Vec<String>) -> AppResult<Vec<Project>> {
