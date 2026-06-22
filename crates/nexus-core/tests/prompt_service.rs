@@ -1,13 +1,12 @@
 use std::{env, fs, path::Path, sync::Arc};
 
+#[cfg(unix)]
+use nexus_core::services::{
+    agent_capabilities::agent_capability_surfaces, paths, symlink::create_symlink_placement,
+};
 use nexus_core::{
     database::Database,
-    services::{
-        agent_capabilities::agent_capability_surfaces,
-        paths,
-        prompts::{PromptService, SetPromptTargetInput},
-        symlink::create_symlink_placement,
-    },
+    services::prompts::{PromptService, SetPromptTargetInput},
 };
 use serial_test::serial;
 use tempfile::TempDir;
@@ -42,6 +41,7 @@ fn write_prompt(path: &Path, body: &str) {
     fs::write(path, body).expect("write prompt");
 }
 
+#[cfg(unix)]
 fn canonical_display_path(path: impl AsRef<Path>) -> String {
     let path = fs::canonicalize(path).expect("canonicalize path");
     paths::path_to_string(&path, "path").expect("display path")
@@ -62,6 +62,20 @@ fn assert_link_points_to(source: &Path, target: &Path) {
     assert_eq!(
         fs::canonicalize(resolved).expect("canonicalize resolved link"),
         fs::canonicalize(source).expect("canonicalize source")
+    );
+}
+
+fn assert_file_distribution_tracks_source_writes(source: &Path, target: &Path) {
+    assert_eq!(
+        fs::read_to_string(target).expect("read target prompt"),
+        fs::read_to_string(source).expect("read source prompt")
+    );
+
+    fs::write(source, "# Updated instructions\n").expect("update source prompt");
+
+    assert_eq!(
+        fs::read_to_string(target).expect("read updated target prompt"),
+        "# Updated instructions\n"
     );
 }
 
@@ -100,7 +114,6 @@ fn scans_global_prompt_sources_and_derives_distribution_from_capability_surface(
 
 #[test]
 #[serial]
-#[cfg(unix)]
 fn toggles_global_prompt_distribution_target_link() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let prompts = PromptService::new(db);
@@ -120,7 +133,7 @@ fn toggles_global_prompt_distribution_target_link() {
             .expect("enable CodeX target");
 
         assert_eq!(enabled.cells["CodeX"], "target");
-        assert_link_points_to(&source_file, &target_file);
+        assert_file_distribution_tracks_source_writes(&source_file, &target_file);
 
         let disabled = prompts
             .set_prompt_target(SetPromptTargetInput {

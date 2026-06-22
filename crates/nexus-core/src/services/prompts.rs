@@ -15,7 +15,7 @@ use crate::{
     services::agent_capabilities::{agent_capability_surfaces, AgentCapabilitySurface},
     services::distribution::{self, MatrixSource},
     services::paths::{self, path_to_string},
-    services::symlink::create_symlink_placement,
+    services::symlink::{create_managed_file_link, remove_managed_file_link_if_present},
     services::system_open::{open_path, reveal_path},
     services::util::{now_epoch_seconds, require_agent, required_trimmed},
 };
@@ -155,7 +155,8 @@ impl PromptService {
             &context.canonical_path,
             &target_path,
             "prompt target path",
-            create_symlink_placement,
+            create_managed_file_link,
+            remove_managed_file_link_if_present,
         )?;
 
         self.get_prompt(prompt_id)

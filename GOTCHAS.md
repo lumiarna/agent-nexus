@@ -2,3 +2,5 @@
 - UI 允许超前，后端如果还未实现，交互时只提示/无反应均可，但不要删除或隐藏相关 UI 元素
 - 由于产品还未上线，数据库迁移请尽量以最小成本实现
 - 遇到问题时优先参考 `${ROOT}/Sample/cc-switch` 中的成熟实现
+- Windows 下跑 Rust 测试不要直接 `cargo test -p nexus-core`，要用 `pnpm rust:test` 或 `node scripts/with-sqlite.mjs cargo test -p nexus-core`，否则可能因未设置 SQLite import library/DLL 路径而报 `LINK : fatal error LNK1181: cannot open input file 'sqlite3.lib'`
+- 如果 `with-sqlite` 复制 `target/debug/sqlite3.dll` 时报文件被占用，先确认没有残留的 `cargo` / `rustc` / `link` / 测试进程，等其退出后再重跑

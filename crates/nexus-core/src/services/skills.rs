@@ -15,7 +15,7 @@ use crate::{
     services::agent_capabilities::{agent_capability_surfaces, AgentCapabilitySurface},
     services::distribution::{self, MatrixSource},
     services::paths::{self, path_to_string},
-    services::symlink::create_managed_directory_link,
+    services::symlink::{create_managed_directory_link, remove_managed_directory_link_if_present},
     services::system_open::{open_path, reveal_path},
     services::util::{now_epoch_seconds, require_agent, required_trimmed},
 };
@@ -184,6 +184,7 @@ impl SkillService {
             &target_path,
             "skill target path",
             create_managed_directory_link,
+            remove_managed_directory_link_if_present,
         )?;
 
         self.get_skill(skill_id)

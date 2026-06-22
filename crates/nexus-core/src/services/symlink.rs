@@ -67,6 +67,46 @@ fn map_create_symlink_error(error: io::Error, source: &Path, target: &Path) -> A
     }
 }
 
+/// Place a file link for managed asset distribution (prompts), where the user has no explicit
+/// action choice. Prefers a symlink; on Windows lacking symlink privilege it falls back to a
+/// hard link so file distribution still works without elevation when both files are on one volume.
+#[cfg(windows)]
+pub fn create_managed_file_link(source: &Path, target: &Path) -> AppResult<()> {
+    ensure_placeable(source, target)?;
+    if !source.is_file() {
+        return Err(AppError::Validation(format!(
+            "managed file link source must be a file: {}",
+            source.display()
+        )));
+    }
+
+    match std::os::windows::fs::symlink_file(source, target) {
+        Ok(()) => Ok(()),
+        Err(error) if error.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD) => {
+            fs::hard_link(source, target).map_err(|error| {
+                AppError::Validation(format!(
+                    "Creating a symbolic link requires elevated privileges, and the hard-link \
+                     fallback failed: {error}. Hard links only work for files on the same volume. \
+                     Enable Windows Developer Mode, run as Administrator, or place both prompt \
+                     files on the same drive."
+                ))
+            })
+        }
+        Err(error) => Err(map_create_symlink_error(error, source, target)),
+    }
+}
+
+#[cfg(not(windows))]
+pub fn create_managed_file_link(source: &Path, target: &Path) -> AppResult<()> {
+    if !source.is_file() {
+        return Err(AppError::Validation(format!(
+            "managed file link source must be a file: {}",
+            source.display()
+        )));
+    }
+    create_symlink_placement(source, target)
+}
+
 /// Place a directory junction at `target` pointing to `source`. Windows-only; junctions
 /// require no special privilege but only work for directories.
 #[cfg(windows)]
@@ -116,6 +156,28 @@ pub fn create_managed_directory_link(source: &Path, target: &Path) -> AppResult<
 #[cfg(not(windows))]
 pub fn create_managed_directory_link(source: &Path, target: &Path) -> AppResult<()> {
     create_symlink_placement(source, target)
+}
+
+pub fn remove_managed_directory_link_if_present(_source: &Path, target: &Path) -> AppResult<()> {
+    remove_symlink_if_present(target)
+}
+
+pub fn remove_managed_file_link_if_present(source: &Path, target: &Path) -> AppResult<()> {
+    let metadata = match fs::symlink_metadata(target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+
+    if metadata.file_type().is_symlink() || is_junction(target) {
+        return remove_symlink(target);
+    }
+
+    if metadata.is_file() && same_file_entry(source, target)? {
+        fs::remove_file(target)?;
+    }
+
+    Ok(())
 }
 
 pub fn remove_symlink(path: &Path) -> AppResult<()> {
@@ -168,6 +230,93 @@ pub fn remove_symlink_if_present(path: &Path) -> AppResult<()> {
         }
         Ok(_) | Err(_) => Ok(()),
     }
+}
+
+#[cfg(unix)]
+fn same_file_entry(source: &Path, target: &Path) -> AppResult<bool> {
+    use std::os::unix::fs::MetadataExt;
+
+    let source = match fs::metadata(source) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let target = match fs::metadata(target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+
+    Ok(source.dev() == target.dev() && source.ino() == target.ino())
+}
+
+#[cfg(windows)]
+fn same_file_entry(source: &Path, target: &Path) -> AppResult<bool> {
+    let source = match windows_file_identity(source) {
+        Ok(identity) => identity,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let target = match windows_file_identity(target) {
+        Ok(identity) => identity,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+
+    Ok(source == target)
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WindowsFileIdentity {
+    volume_serial_number: u32,
+    file_index: u64,
+}
+
+#[cfg(windows)]
+fn windows_file_identity(path: &Path) -> io::Result<WindowsFileIdentity> {
+    use std::{mem::MaybeUninit, os::windows::io::AsRawHandle};
+
+    #[repr(C)]
+    struct FileTime {
+        low_date_time: u32,
+        high_date_time: u32,
+    }
+
+    #[repr(C)]
+    struct ByHandleFileInformation {
+        file_attributes: u32,
+        creation_time: FileTime,
+        last_access_time: FileTime,
+        last_write_time: FileTime,
+        volume_serial_number: u32,
+        file_size_high: u32,
+        file_size_low: u32,
+        number_of_links: u32,
+        file_index_high: u32,
+        file_index_low: u32,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetFileInformationByHandle(
+            file: std::os::windows::io::RawHandle,
+            file_information: *mut ByHandleFileInformation,
+        ) -> i32;
+    }
+
+    let file = fs::File::open(path)?;
+    let mut info = MaybeUninit::<ByHandleFileInformation>::uninit();
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle(), info.as_mut_ptr()) };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let info = unsafe { info.assume_init() };
+    Ok(WindowsFileIdentity {
+        volume_serial_number: info.volume_serial_number,
+        file_index: ((info.file_index_high as u64) << 32) | info.file_index_low as u64,
+    })
 }
 
 #[cfg(test)]
@@ -231,5 +380,37 @@ mod tests {
 
         assert!(error.to_string().contains("must be a directory"));
         assert!(!target.exists());
+    }
+
+    #[test]
+    fn removes_managed_hard_link_target_without_deleting_source() {
+        let root = tempfile::TempDir::new().expect("create temp dir");
+        let source = root.path().join("source.txt");
+        let target = root.path().join("target.txt");
+        fs::write(&source, "x").expect("write source file");
+        fs::hard_link(&source, &target).expect("create hard link");
+
+        remove_managed_file_link_if_present(&source, &target)
+            .expect("remove managed hard link target");
+
+        assert!(source.exists());
+        assert!(!target.exists());
+        assert_eq!(fs::read_to_string(&source).expect("read source"), "x");
+    }
+
+    #[test]
+    fn does_not_remove_unrelated_regular_file_target() {
+        let root = tempfile::TempDir::new().expect("create temp dir");
+        let source = root.path().join("source.txt");
+        let target = root.path().join("target.txt");
+        fs::write(&source, "source").expect("write source file");
+        fs::write(&target, "target").expect("write target file");
+
+        remove_managed_file_link_if_present(&source, &target)
+            .expect("ignore unrelated regular file");
+
+        assert!(source.exists());
+        assert!(target.exists());
+        assert_eq!(fs::read_to_string(&target).expect("read target"), "target");
     }
 }

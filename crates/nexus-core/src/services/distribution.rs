@@ -11,7 +11,7 @@ use crate::{
     error::AppResult,
     services::agent_capabilities::{agent_capability_surfaces, AgentCapabilitySurface},
     services::paths::path_to_string,
-    services::symlink::{is_junction, remove_symlink_if_present},
+    services::symlink::is_junction,
 };
 
 /// A distributable asset's scanned source, viewed as an Agent Matrix row generator. Skill
@@ -90,12 +90,13 @@ pub fn write_target(
     target_path: &Path,
     target_path_label: &str,
     place: fn(&Path, &Path) -> AppResult<()>,
+    remove: fn(&Path, &Path) -> AppResult<()>,
 ) -> AppResult<()> {
     let created_placement = if enabled {
         place(canonical_path, target_path)?;
         true
     } else {
-        remove_symlink_if_present(target_path)?;
+        remove(canonical_path, target_path)?;
         false
     };
 
@@ -127,7 +128,7 @@ pub fn write_target(
     })();
 
     if result.is_err() && created_placement {
-        let _ = remove_symlink_if_present(target_path);
+        let _ = remove(canonical_path, target_path);
     }
 
     result
