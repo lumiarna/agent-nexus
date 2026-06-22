@@ -60,12 +60,13 @@ import type {
   LocationType,
 } from "@/types";
 
-// Both tables use a 16fr grid and must keep their Action column aligned. A column's x is
-// `sum(fr before it) + sum(gaps before it)`, so alignment needs BOTH the leading fr (7) AND
-// the leading cell-count (→ gap-count) to match. Each table therefore has exactly 2 cells
-// before Action: Task folds its drag handle into the Direction cell so it isn't a 3rd column.
-const TASK_COLS = "1fr 6fr 0.8fr 6fr 2.2fr";
-const LINK_COLS = "1.4fr 5.6fr 1fr 1.4fr 5.6fr 1fr";
+// Both tables share a real 16-column grid so their Action column lands on the same physical
+// column (col 8) regardless of how many logical columns each table has: Action is pinned with
+// `col-start-8`, the others use `col-span-*` summing to 16. A fr-based "16fr" template does
+// NOT work here -- fr divides (container width - total gaps), and the two tables have
+// different column counts -> different gap totals -> different px-per-fr, so an equal
+// "fr-before-Action" sum still misaligns.
+const GRID16 = "repeat(16, minmax(0, 1fr))";
 
 function actionColors(a: TaskAction): { fg: string; bg: string } {
   if (a === "Junction") return { fg: "#6f5b92", bg: "#ebe5f2" };
@@ -591,13 +592,13 @@ export function SyncPage() {
 
                         <div
                           className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
-                          style={{ gridTemplateColumns: TASK_COLS }}
+                          style={{ gridTemplateColumns: GRID16 }}
                         >
                           <div>Direction</div>
-                          <div>Source</div>
-                          <div>Action</div>
-                          <div>Target</div>
-                          <div className="text-right">Manage</div>
+                          <div className="col-span-6">Source</div>
+                          <div className="col-start-8">Action</div>
+                          <div className="col-span-6">Target</div>
+                          <div className="col-span-2 text-right">Manage</div>
                         </div>
 
                         <SortableContext
@@ -628,7 +629,7 @@ export function SyncPage() {
                                       linkMissing && "bg-[#fbf3f0]",
                                     )}
                                     style={{
-                                      gridTemplateColumns: TASK_COLS,
+                                      gridTemplateColumns: GRID16,
                                       transform: CSS.Transform.toString(transform),
                                       transition,
                                     }}
@@ -651,16 +652,16 @@ export function SyncPage() {
                                         {t.direction}
                                       </span>
                                     </div>
-                                    <div className="flex min-w-0 items-center gap-1.5">
+                                    <div className="col-span-6 flex min-w-0 items-center gap-1.5">
                                       <LocationTag type={t.sourceType} />
                                       <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
                                         {t.source}
                                       </span>
                                     </div>
-                                    <div className="flex items-center" title={t.action}>
+                                    <div className="col-start-8 flex items-center" title={t.action}>
                                       <ActionBadge action={t.action} />
                                     </div>
-                                    <div className="flex min-w-0 items-center gap-1.5">
+                                    <div className="col-span-6 flex min-w-0 items-center gap-1.5">
                                       <LocationTag type={t.targetType} />
                                       <span className={cn(
                                         "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px]",
@@ -669,7 +670,7 @@ export function SyncPage() {
                                         {targetLabel}
                                       </span>
                                     </div>
-                                    <div className="flex items-center justify-end gap-[9px]">
+                                    <div className="col-span-2 flex items-center justify-end gap-[9px]">
                                       {st && (
                                         <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: st.fg }}>
                                           <Dot color={st.dot} /> {st.label}
@@ -756,13 +757,13 @@ export function SyncPage() {
         <div className="mt-3 overflow-hidden rounded-[18px] border border-nexus-border bg-nexus-card shadow-[0_1px_14px_rgba(50,40,25,.05)]">
           <div
             className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
-            style={{ gridTemplateColumns: LINK_COLS }}
+            style={{ gridTemplateColumns: GRID16 }}
           >
-            <div>Source Project</div>
-            <div>Source Path</div>
-            <div>Action</div>
-            <div>Target Project</div>
-            <div>Target Path</div>
+            <div className="col-span-2">Source Project</div>
+            <div className="col-span-5">Source Path</div>
+            <div className="col-start-8">Action</div>
+            <div className="col-span-2">Target Project</div>
+            <div className="col-span-5">Target Path</div>
             <div className="text-right">Manage</div>
           </div>
           {projectSymlinksQuery.isLoading ? (
@@ -786,26 +787,26 @@ export function SyncPage() {
                 <div
                   key={link.id}
                   className="grid items-center gap-3 border-t border-[#f3eee5] px-5 py-3"
-                  style={{ gridTemplateColumns: LINK_COLS }}
+                  style={{ gridTemplateColumns: GRID16 }}
                 >
-                  <div className="min-w-0">
+                  <div className="col-span-2 min-w-0">
                     <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">
                       {link.sourceProjectName ?? "External"}
                     </div>
                   </div>
-                  <div className="flex min-w-0 items-center gap-1.5">
+                  <div className="col-span-5 flex min-w-0 items-center gap-1.5">
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]" title={link.sourcePath}>
                       {formatProjectSymlinkDisplayPath(link.sourcePath, link.sourceProjectName)}
                     </span>
                     <CopyPathButton path={link.sourcePath} />
                   </div>
-                  <div title={link.linkType}>
+                  <div className="col-start-8" title={link.linkType}>
                     <ActionBadge action={link.linkType} />
                   </div>
-                  <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">
+                  <div className="col-span-2 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">
                     {link.targetProjectName ?? "External"}
                   </div>
-                  <div className="flex min-w-0 items-center gap-1.5">
+                  <div className="col-span-5 flex min-w-0 items-center gap-1.5">
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a8073]" title={link.targetPath}>
                       {formatProjectSymlinkDisplayPath(link.targetPath, link.targetProjectName)}
                     </span>
