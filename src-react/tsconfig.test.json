@@ -13,6 +13,7 @@
     "src/components/sync/pathDisplay.ts",
     "src/components/sync/schedule.ts",
     "src/components/sync/taskRules.ts",
+    "src/lib/query/client.ts",
     "src/lib/query/projectSymlinkInventory.ts",
     "tests/**/*.test.ts"
   ],

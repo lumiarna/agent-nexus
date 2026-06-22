@@ -18,7 +18,6 @@ export function useSkillsQuery() {
     queryKey: skillKeys.all,
     queryFn: skillsApi.scan,
     enabled: isTauriRuntime(),
-    staleTime: 30 * 1000,
   });
 }
 

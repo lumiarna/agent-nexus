@@ -18,7 +18,6 @@ export function usePromptsQuery() {
     queryKey: promptKeys.all,
     queryFn: promptsApi.scan,
     enabled: isTauriRuntime(),
-    staleTime: 30 * 1000,
   });
 }
 
