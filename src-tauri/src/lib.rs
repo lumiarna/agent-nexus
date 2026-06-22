@@ -35,6 +35,7 @@ pub fn run() {
             commands::projects::list_projects,
             commands::projects::record_git_base_folder,
             commands::projects::record_project,
+            commands::projects::reorder_projects,
             commands::projects::remove_git_base_folder,
             commands::projects::scan_git_base_folder,
             commands::projects::scan_git_base_folders,

@@ -18,6 +18,14 @@ pub fn record_project(state: State<'_, AppState>, path: String) -> AppResult<Pro
 }
 
 #[tauri::command]
+pub fn reorder_projects(
+    state: State<'_, AppState>,
+    project_ids: Vec<String>,
+) -> AppResult<Vec<Project>> {
+    state.projects.reorder_projects(project_ids)
+}
+
+#[tauri::command]
 pub fn list_git_base_folders(state: State<'_, AppState>) -> AppResult<Vec<GitBaseFolder>> {
     state.projects.list_git_base_folders()
 }

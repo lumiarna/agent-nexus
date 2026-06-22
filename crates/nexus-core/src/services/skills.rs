@@ -104,9 +104,24 @@ impl SkillService {
         let conn = self.db.connection()?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, name, scope, project_id, COALESCE(description, ''), canonical_path, disabled
-            FROM skills
-            ORDER BY scope, project_id IS NULL, project_id, name, canonical_path
+            SELECT
+                s.id,
+                s.name,
+                s.scope,
+                s.project_id,
+                COALESCE(s.description, ''),
+                s.canonical_path,
+                s.disabled
+            FROM skills s
+            LEFT JOIN projects p ON p.id = s.project_id
+            ORDER BY
+                s.scope,
+                p.sort_index IS NULL,
+                p.sort_index,
+                p.created_at,
+                p.name,
+                s.name,
+                s.canonical_path
             "#,
         )?;
         let rows = stmt.query_map([], |row| skill_from_row(row, &conn))?;

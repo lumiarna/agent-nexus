@@ -98,6 +98,62 @@ disable-model-invocation: true
 }
 
 #[test]
+fn lists_project_skills_by_project_display_order() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let skills = SkillService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create isolated home");
+    env::set_var("HOME", &home);
+    env::set_var("USERPROFILE", &home);
+    let alpha_repo = git_repo(&root, "alpha");
+    let beta_repo = git_repo(&root, "beta");
+    let alpha = projects
+        .record_project(alpha_repo.clone())
+        .expect("record alpha project");
+    let beta = projects
+        .record_project(beta_repo.clone())
+        .expect("record beta project");
+    projects
+        .reorder_projects(vec![beta.id.clone(), alpha.id.clone()])
+        .expect("reorder projects");
+
+    write_skill(
+        &Path::new(&alpha_repo).join(".codex/skills/alpha-skill"),
+        r#"---
+name: alpha-skill
+description: Alpha project skill
+---
+
+# Alpha Skill
+"#,
+    );
+    write_skill(
+        &Path::new(&beta_repo).join(".codex/skills/zeta-skill"),
+        r#"---
+name: zeta-skill
+description: Beta project skill
+---
+
+# Zeta Skill
+"#,
+    );
+
+    let rows = skills.scan_skills().expect("scan skills");
+    let project_ids = rows
+        .iter()
+        .filter(|skill| skill.scope == "project")
+        .map(|skill| skill.project_id.as_deref())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        project_ids,
+        vec![Some(beta.id.as_str()), Some(alpha.id.as_str())]
+    );
+}
+
+#[test]
 fn toggles_project_distribution_target_link() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());

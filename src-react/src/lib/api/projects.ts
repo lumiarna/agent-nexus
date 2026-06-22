@@ -10,6 +10,10 @@ export const projectsApi = {
     return invokeCommand<Project>("record_project", { path });
   },
 
+  reorder(projectIds: string[]): Promise<Project[]> {
+    return invokeCommand<Project[]>("reorder_projects", { projectIds });
+  },
+
   listGitBaseFolders(): Promise<GitBaseFolder[]> {
     return invokeCommand<GitBaseFolder[]>("list_git_base_folders");
   },

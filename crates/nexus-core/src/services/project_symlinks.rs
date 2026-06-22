@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -117,9 +117,21 @@ impl ProjectSymlinkInventory {
         }
         let mut links = unmanaged_links;
 
+        let project_order = projects
+            .iter()
+            .enumerate()
+            .map(|(index, project)| (project.id.as_str(), index))
+            .collect::<HashMap<_, _>>();
+
         links.sort_by(|left, right| {
-            left.source_path
-                .cmp(&right.source_path)
+            project_display_index(left, &project_order)
+                .cmp(&project_display_index(right, &project_order))
+                .then_with(|| {
+                    project_index(left.target_project_id.as_deref(), &project_order).cmp(
+                        &project_index(right.target_project_id.as_deref(), &project_order),
+                    )
+                })
+                .then_with(|| left.source_path.cmp(&right.source_path))
                 .then_with(|| left.target_path.cmp(&right.target_path))
         });
         Ok(links)
@@ -318,6 +330,20 @@ fn parse_ignored_dirs(value: &str) -> HashSet<String> {
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn project_display_index(link: &ProjectSymlink, project_order: &HashMap<&str, usize>) -> usize {
+    link.source_project_id
+        .as_deref()
+        .or(link.target_project_id.as_deref())
+        .map(|id| project_index(Some(id), project_order))
+        .unwrap_or(usize::MAX)
+}
+
+fn project_index(project_id: Option<&str>, project_order: &HashMap<&str, usize>) -> usize {
+    project_id
+        .and_then(|id| project_order.get(id).copied())
+        .unwrap_or(usize::MAX)
 }
 
 fn project_symlink_from_path(

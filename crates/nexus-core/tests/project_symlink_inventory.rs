@@ -69,3 +69,52 @@ fn lists_and_deletes_registered_project_symlinks() {
         .is_empty());
     assert!(!target_link.exists());
 }
+
+#[test]
+fn lists_project_symlinks_by_project_display_order() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let inventory = ProjectSymlinkInventory::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source_alpha_repo = git_repo(&root, "source-alpha");
+    let source_beta_repo = git_repo(&root, "source-beta");
+    let target_repo = git_repo(&root, "target-project");
+    let source_alpha_dir = Path::new(&source_alpha_repo).join("shared");
+    let source_beta_dir = Path::new(&source_beta_repo).join("shared");
+    let target_alpha_link = Path::new(&target_repo).join("from-alpha");
+    let target_beta_link = Path::new(&target_repo).join("from-beta");
+    fs::create_dir_all(&source_alpha_dir).expect("create alpha source dir");
+    fs::create_dir_all(&source_beta_dir).expect("create beta source dir");
+    create_directory_link(&source_alpha_dir, &target_alpha_link);
+    create_directory_link(&source_beta_dir, &target_beta_link);
+
+    let source_alpha = projects
+        .record_project(source_alpha_repo)
+        .expect("record alpha source project");
+    let source_beta = projects
+        .record_project(source_beta_repo)
+        .expect("record beta source project");
+    let target = projects
+        .record_project(target_repo)
+        .expect("record target project");
+    projects
+        .reorder_projects(vec![
+            source_beta.id.clone(),
+            source_alpha.id.clone(),
+            target.id.clone(),
+        ])
+        .expect("reorder projects");
+
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
+
+    assert_eq!(links.len(), 2);
+    assert_eq!(
+        links
+            .iter()
+            .map(|link| link.source_project_name.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("source-beta"), Some("source-alpha")]
+    );
+}

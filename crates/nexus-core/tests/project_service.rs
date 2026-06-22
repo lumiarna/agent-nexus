@@ -58,6 +58,60 @@ fn recording_same_project_key_updates_path_without_duplicate() {
 }
 
 #[test]
+fn reorders_projects_and_persists_display_order() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let alpha = service
+        .record_project(git_repo(&root, "alpha"))
+        .expect("record alpha");
+    let beta = service
+        .record_project(git_repo(&root, "beta"))
+        .expect("record beta");
+    let gamma = service
+        .record_project(git_repo(&root, "gamma"))
+        .expect("record gamma");
+
+    let reordered = service
+        .reorder_projects(vec![gamma.id.clone(), alpha.id.clone(), beta.id.clone()])
+        .expect("reorder projects");
+    let relisted = service.list_projects().expect("list projects");
+
+    assert_eq!(
+        reordered.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        vec![gamma.id.as_str(), alpha.id.as_str(), beta.id.as_str()]
+    );
+    assert_eq!(
+        relisted.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        vec![gamma.id.as_str(), alpha.id.as_str(), beta.id.as_str()]
+    );
+}
+
+#[test]
+fn rejects_incomplete_project_display_order() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let alpha = service
+        .record_project(git_repo(&root, "alpha"))
+        .expect("record alpha");
+    service
+        .record_project(git_repo(&root, "beta"))
+        .expect("record beta");
+
+    let error = service
+        .reorder_projects(vec![alpha.id])
+        .expect_err("incomplete order should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("project order must include every project exactly once"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn records_git_base_folder_and_lists_canonical_path() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());

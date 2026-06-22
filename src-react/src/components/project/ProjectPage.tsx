@@ -29,6 +29,7 @@ import {
   useRecordGitBaseFolderMutation,
   useRecordProjectMutation,
   useRecordProjectsMutation,
+  useReorderProjectsMutation,
   useRemoveGitBaseFolderMutation,
   useScanGitBaseFoldersMutation,
 } from "@/lib/query/projects";
@@ -66,6 +67,14 @@ function deriveProjectKey(path: string): string {
     .split(/[\\/]/)
     .filter(Boolean);
   return parts[parts.length - 1] ?? "";
+}
+
+function moveProjectOrder(order: string[], fromId: string, toId: string): string[] | null {
+  if (!fromId || fromId === toId) return null;
+  const fromIndex = order.indexOf(fromId);
+  const toIndex = order.indexOf(toId);
+  if (fromIndex < 0 || toIndex < 0) return null;
+  return arrayMove(order, fromIndex, toIndex);
 }
 
 interface SortableProjectRowProps {
@@ -124,6 +133,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const baseFoldersQuery = useGitBaseFoldersQuery();
   const recordProject = useRecordProjectMutation();
   const recordProjects = useRecordProjectsMutation();
+  const reorderProjects = useReorderProjectsMutation();
   const recordBaseFolder = useRecordGitBaseFolderMutation();
   const removeBaseFolder = useRemoveGitBaseFolderMutation();
   const scanBaseFolders = useScanGitBaseFoldersMutation();
@@ -164,8 +174,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const hidden = (id: string) => hiddenIds.includes(id);
   const byId = Object.fromEntries(projects.map((p) => [p.id, p]));
   const ordered = order.map((id) => byId[id]).filter(Boolean) as Project[];
-  const active = ordered.filter((p) => p.status === "active" && !hidden(p.id));
-  const stale = ordered.filter((p) => p.status === "stale" && !hidden(p.id));
+  const visibleProjects = ordered.filter((p) => p.status !== "hidden" && !hidden(p.id));
   const hiddenP = ordered.filter((p) => p.status === "hidden" || hidden(p.id));
 
   const menuProject = menu ? projects.find((p) => p.id === menu.id) : null;
@@ -177,24 +186,25 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
     setMenu({ id, y: r.bottom + 4, right: Math.max(16, window.innerWidth - r.right) });
   }
 
-  function reorder(fromId: string, toId: string) {
-    if (!fromId || fromId === toId) return;
-    setOrder((o) => {
-      const fi = o.indexOf(fromId);
-      const ti = o.indexOf(toId);
-      if (fi < 0 || ti < 0) return o;
-      return arrayMove(o, fi, ti);
-    });
-  }
-
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
 
-  function handleDragEnd(e: DragEndEvent) {
+  async function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
-    reorder(String(active.id), String(over.id));
+    const previousOrder = order;
+    const nextOrder = moveProjectOrder(previousOrder, String(active.id), String(over.id));
+    if (!nextOrder) return;
+
+    setOrder(nextOrder);
+    try {
+      await reorderProjects.mutateAsync(nextOrder);
+      toast("Project order saved");
+    } catch (error) {
+      setOrder(previousOrder);
+      toast(getErrorMessage(error));
+    }
   }
 
   // Scan modal derived state
@@ -369,80 +379,79 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
+              onDragEnd={(event) => void handleDragEnd(event)}
             >
               <SortableContext
-                items={ordered.map((p) => p.id)}
+                items={visibleProjects.map((p) => p.id)}
                 strategy={verticalListSortingStrategy}
               >
-                {active.map((p) => (
-                  <SortableProjectRow
-                    key={p.id}
-                    id={p.id}
-                    onClick={() => { setDetailId(p.id); setScreen("detail"); }}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[14px] font-bold text-nexus-ink">{p.name}</span>
-                        <span className="rounded-[5px] bg-[#e9eed8] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#5f7a3e]">
-                          Active
-                        </span>
-                      </div>
-                      <div className="mt-[3px] font-mono text-[11px] text-[#b3a999]">
-                        {p.sessionsDir}
-                        {p.sessionsNote ?? ""}
-                      </div>
-                    </div>
-                    <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-[#8a8073]">
-                      {p.path}
-                    </div>
-                    <div className="flex justify-end gap-[6px]">
-                      {[
-                        { label: "SKILL", n: p.skills },
-                        { label: "SESSION", n: p.sessions },
-                        { label: "SYNC", n: p.sync },
-                      ].map((c) => (
-                        <div
-                          key={c.label}
-                          className="flex items-center gap-[5px] rounded-[7px] bg-nexus-bg px-[9px] py-[5px]"
-                        >
-                          <span className="text-[12px] font-extrabold text-nexus-body">{c.n}</span>
-                          <span className="text-[9px] tracking-[.03em] text-[#b3a999]">{c.label}</span>
+                {visibleProjects.map((p) => {
+                  const isStale = p.status === "stale";
+                  return (
+                    <SortableProjectRow
+                      key={p.id}
+                      id={p.id}
+                      stale={isStale}
+                      onClick={isStale ? undefined : () => { setDetailId(p.id); setScreen("detail"); }}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={cn("text-[14px] font-bold", isStale ? "text-[#6a6055]" : "text-nexus-ink")}>{p.name}</span>
+                          {isStale ? (
+                            <span className="rounded-[5px] bg-[#f7eccb] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#9a6f0a]">
+                              Stale
+                            </span>
+                          ) : (
+                            <span className="rounded-[5px] bg-[#e9eed8] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#5f7a3e]">
+                              Active
+                            </span>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                    <div
-                      onClick={(e) => openMenu(e, p.id)}
-                      className="flex h-[30px] w-[30px] cursor-pointer items-center justify-center rounded-[8px] text-[16px] tracking-[2px] text-[#a99a89] hover:bg-nexus-panel hover:text-[#7a6f60]"
-                    >
-                      ⋯
-                    </div>
-                  </SortableProjectRow>
-                ))}
-
-                {stale.map((p) => (
-                  <SortableProjectRow key={p.id} id={p.id} stale>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[14px] font-bold text-[#6a6055]">{p.name}</span>
-                        <span className="rounded-[5px] bg-[#f7eccb] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#9a6f0a]">
-                          Stale
-                        </span>
+                        {isStale ? (
+                          <div className="mt-[3px] text-[11px] text-[#bca37a]">
+                            Repo path no longer resolves
+                          </div>
+                        ) : (
+                          <div className="mt-[3px] font-mono text-[11px] text-[#b3a999]">
+                            {p.sessionsDir}
+                            {p.sessionsNote ?? ""}
+                          </div>
+                        )}
                       </div>
-                      <div className="mt-[3px] text-[11px] text-[#bca37a]">Repo path no longer resolves</div>
-                    </div>
-                    <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-[#bca37a] line-through">
-                      {p.path}
-                    </div>
-                    <div />
-                    <div
-                      onClick={(e) => openMenu(e, p.id)}
-                      className="flex h-[30px] w-[30px] cursor-pointer items-center justify-center rounded-[8px] text-[16px] tracking-[2px] text-[#a99a89] hover:bg-nexus-panel hover:text-[#7a6f60]"
-                    >
-                      ⋯
-                    </div>
-                  </SortableProjectRow>
-                ))}
+                      <div className={cn(
+                        "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px]",
+                        isStale ? "text-[#bca37a] line-through" : "text-[#8a8073]",
+                      )}>
+                        {p.path}
+                      </div>
+                      {isStale ? (
+                        <div />
+                      ) : (
+                        <div className="flex justify-end gap-[6px]">
+                          {[
+                            { label: "SKILL", n: p.skills },
+                            { label: "SESSION", n: p.sessions },
+                            { label: "SYNC", n: p.sync },
+                          ].map((c) => (
+                            <div
+                              key={c.label}
+                              className="flex items-center gap-[5px] rounded-[7px] bg-nexus-bg px-[9px] py-[5px]"
+                            >
+                              <span className="text-[12px] font-extrabold text-nexus-body">{c.n}</span>
+                              <span className="text-[9px] tracking-[.03em] text-[#b3a999]">{c.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div
+                        onClick={(e) => openMenu(e, p.id)}
+                        className="flex h-[30px] w-[30px] cursor-pointer items-center justify-center rounded-[8px] text-[16px] tracking-[2px] text-[#a99a89] hover:bg-nexus-panel hover:text-[#7a6f60]"
+                      >
+                        ⋯
+                      </div>
+                    </SortableProjectRow>
+                  );
+                })}
               </SortableContext>
             </DndContext>
           </Card>

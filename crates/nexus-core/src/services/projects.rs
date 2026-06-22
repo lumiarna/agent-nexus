@@ -82,6 +82,43 @@ impl ProjectService {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    pub fn reorder_projects(&self, project_ids: Vec<String>) -> AppResult<Vec<Project>> {
+        let project_ids = normalize_project_order(project_ids)?;
+        let mut conn = self.db.connection()?;
+        let tx = conn.transaction()?;
+
+        let mut stmt = tx.prepare("SELECT id FROM projects")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let existing_ids = rows.collect::<Result<HashSet<_>, _>>()?;
+        drop(stmt);
+
+        if project_ids.len() != existing_ids.len() {
+            return Err(AppError::Validation(
+                "project order must include every project exactly once".to_string(),
+            ));
+        }
+
+        for id in &project_ids {
+            if !existing_ids.contains(id) {
+                return Err(AppError::Validation(format!(
+                    "project order contains unknown project id: {id}"
+                )));
+            }
+        }
+
+        let now = now_epoch_seconds()?;
+        for (index, id) in project_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE projects SET sort_index = ?2, updated_at = ?3 WHERE id = ?1",
+                params![id, index as i64, now],
+            )?;
+        }
+
+        tx.commit()?;
+        drop(conn);
+        self.list_projects()
+    }
+
     pub fn list_git_base_folders(&self) -> AppResult<Vec<GitBaseFolder>> {
         let conn = self.db.connection()?;
         let mut stmt = conn.prepare(
@@ -287,6 +324,28 @@ fn validate_git_project_root(path: &str) -> AppResult<PathBuf> {
     }
 
     Ok(raw_path.canonicalize()?)
+}
+
+fn normalize_project_order(project_ids: Vec<String>) -> AppResult<Vec<String>> {
+    let mut normalized = Vec::with_capacity(project_ids.len());
+    let mut seen = HashSet::with_capacity(project_ids.len());
+
+    for id in project_ids {
+        let id = id.trim().to_string();
+        if id.is_empty() {
+            return Err(AppError::Validation(
+                "project order contains an empty project id".to_string(),
+            ));
+        }
+        if !seen.insert(id.clone()) {
+            return Err(AppError::Validation(format!(
+                "project order contains duplicate project id: {id}"
+            )));
+        }
+        normalized.push(id);
+    }
+
+    Ok(normalized)
 }
 
 fn validate_directory_path(path: &str, label: &str) -> AppResult<PathBuf> {
