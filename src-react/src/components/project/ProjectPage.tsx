@@ -14,6 +14,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, Dot } from "@/components/ui/primitives";
@@ -23,6 +24,7 @@ import { SkillRow } from "@/components/skill/SkillRow";
 import { ScreenScroll } from "@/components/shell/screen";
 import { useNav } from "@/lib/nav";
 import { nexus } from "@/lib/mock";
+import { isTauriRuntime } from "@/lib/runtime";
 import {
   useDeleteProjectMutation,
   useGitBaseFoldersQuery,
@@ -130,6 +132,7 @@ function SortableProjectRow({ id, onClick, stale, children }: SortableProjectRow
 
 export function ProjectPage({ initialProjectId }: { initialProjectId?: string }) {
   const { go } = useNav();
+  const desktop = isTauriRuntime();
   const projectsQuery = useProjectsQuery();
   const baseFoldersQuery = useGitBaseFoldersQuery();
   const recordProject = useRecordProjectMutation();
@@ -191,6 +194,25 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
+
+  const isRefreshing = projectsQuery.isFetching || baseFoldersQuery.isFetching;
+
+  async function handleRefresh() {
+    if (!desktop) {
+      toast("Desktop runtime required for refreshing");
+      return;
+    }
+    try {
+      const [projectsResult] = await Promise.all([
+        projectsQuery.refetch(),
+        baseFoldersQuery.refetch(),
+      ]);
+      const count = projectsResult.data?.length ?? 0;
+      toast(`Refreshed ${count} ${count === 1 ? "project" : "projects"}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
 
   async function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e;
@@ -331,6 +353,15 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               </p>
             </div>
             <div className="flex gap-[9px]">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => void handleRefresh()}
+                disabled={isRefreshing}
+              >
+                <RefreshCw size={14} className={cn(isRefreshing && "animate-spin")} />
+                {isRefreshing ? "Refreshing..." : "Refresh"}
+              </Button>
               <Button
                 variant="secondary"
                 onClick={() => {

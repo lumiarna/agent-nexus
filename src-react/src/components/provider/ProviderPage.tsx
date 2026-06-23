@@ -14,7 +14,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Settings } from "lucide-react";
+import { RefreshCw, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { Button, IconButton } from "@/components/ui/button";
 import { Dot, Input } from "@/components/ui/primitives";
@@ -333,6 +333,49 @@ export function ProviderPage() {
     };
   }, [configId]);
 
+  const quotaQueries = {
+    claude: claudeQuota,
+    codex: codexQuota,
+    copilot: copilotQuota,
+    "opencode-go": opencodeGoQuota,
+    "minimax-token": minimaxTokenQuota,
+    deepseek: deepseekQuota,
+    openrouter: openrouterQuota,
+  } as const;
+
+  const isAnyRefreshing =
+    Object.values(quotaQueries).some((q) => q.isFetching) ||
+    Object.values(refreshing).some(Boolean);
+
+  async function handleRefreshAll() {
+    if (!isTauriRuntime()) {
+      toast("Desktop runtime required for refreshing");
+      return;
+    }
+    try {
+      await Promise.all(
+        Object.entries(quotaQueries).map(([id, q]) => {
+          setRefreshing((r) => ({ ...r, [id]: true }));
+          window.clearTimeout(timers.current[id]);
+          timers.current[id] = window.setTimeout(
+            () =>
+              setRefreshing((r) => {
+                const n = { ...r };
+                delete n[id];
+                return n;
+              }),
+            1200,
+          );
+          return q.refetch();
+        }),
+      );
+      const n = Object.keys(quotaQueries).length;
+      toast(`Refreshed ${n} ${n === 1 ? "provider" : "providers"}`);
+    } catch {
+      /* quota errors surface in-card via ProviderUiStatus */
+    }
+  }
+
   function refreshProvider(id: string) {
     if (id === "claude") {
       void claudeQuota.refetch();
@@ -410,13 +453,13 @@ export function ProviderPage() {
           </p>
         </div>
         <Button
-          variant="secondary"
-          onClick={() => {
-            providers.forEach((p) => refreshProvider(p.id));
-            toast("Refreshing all providers…");
-          }}
+          variant="subtle"
+          size="sm"
+          onClick={() => void handleRefreshAll()}
+          disabled={isAnyRefreshing}
         >
-          Refresh all
+          <RefreshCw size={14} className={cn(isAnyRefreshing && "animate-spin")} />
+          {isAnyRefreshing ? "Refreshing..." : "Refresh all"}
         </Button>
       </div>
 
