@@ -1,5 +1,0 @@
-# Single-package repo. This file hosts the pnpm setting that lets esbuild
-# (pulled in by Vite) run its install script and link its platform binary —
-# pnpm 11 moved build-script approval here from package.json.
-allowBuilds:
-  esbuild: true
