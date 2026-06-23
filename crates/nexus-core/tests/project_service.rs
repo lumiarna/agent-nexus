@@ -76,7 +76,9 @@ fn re_recording_moved_project_restores_active_status() {
 
     let new_root = TempDir::new().expect("create new temp dir");
     let new_repo = git_repo(&new_root, "relocated");
-    let re_recorded = service.record_project(new_repo).expect("re-record new path");
+    let re_recorded = service
+        .record_project(new_repo)
+        .expect("re-record new path");
 
     assert_eq!(re_recorded.id, first.id);
     assert_eq!(re_recorded.status, "active");

@@ -1641,3 +1641,179 @@ fn continues_scan_when_subdirectory_is_inaccessible() {
         "accessible symlink should still be listed when a sibling directory is inaccessible, got {links:?}"
     );
 }
+
+#[tokio::test]
+async fn runs_local_to_local_file_copy_to_nonexistent_target() {
+    let root = TempDir::new().expect("create temp dir");
+    let source_file = root.path().join("source.txt");
+    fs::write(&source_file, "hello").expect("write source file");
+    let target_file = root.path().join("target.txt");
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Local copy".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: source_file.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: target_file.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create local copy task");
+
+    let task = sync
+        .run_task(created.tasks[0].id.clone())
+        .await
+        .expect("run local copy task");
+
+    assert_eq!(task.status, "ok");
+    assert_eq!(
+        fs::read_to_string(&target_file).expect("read copied target"),
+        "hello"
+    );
+}
+
+#[tokio::test]
+async fn runs_local_to_local_directory_copy_to_nonexistent_target() {
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("source");
+    fs::create_dir_all(source_dir.join("sub")).expect("create nested dirs");
+    fs::write(source_dir.join("a.txt"), "alpha").expect("write a.txt");
+    fs::write(source_dir.join("sub").join("b.txt"), "beta").expect("write sub/b.txt");
+    let target_dir = root.path().join("target");
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Local dir copy".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: source_dir.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: target_dir.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create local dir copy task");
+
+    let task = sync
+        .run_task(created.tasks[0].id.clone())
+        .await
+        .expect("run local dir copy task");
+
+    assert_eq!(task.status, "ok");
+    assert!(target_dir.is_dir());
+    assert_eq!(
+        fs::read_to_string(target_dir.join("a.txt")).expect("read copied a.txt"),
+        "alpha"
+    );
+    assert_eq!(
+        fs::read_to_string(target_dir.join("sub").join("b.txt")).expect("read copied sub/b.txt"),
+        "beta"
+    );
+}
+
+#[tokio::test]
+async fn runs_local_to_local_directory_copy_embeds_into_existing_directory_target() {
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("source");
+    fs::create_dir_all(source_dir.join("sub")).expect("create nested dirs");
+    fs::write(source_dir.join("a.txt"), "alpha").expect("write a.txt");
+    fs::write(source_dir.join("sub").join("b.txt"), "beta").expect("write sub/b.txt");
+
+    let target_dir = root.path().join("target");
+    fs::create_dir_all(&target_dir).expect("create existing target dir");
+    fs::write(target_dir.join("c.txt"), "gamma").expect("write pre-existing sibling");
+    let embedded = target_dir.join("source");
+    fs::create_dir_all(&embedded).expect("create pre-existing embedded dir");
+    fs::write(embedded.join("stale.txt"), "stale").expect("write stale embedded file");
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Local dir copy".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: source_dir.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: target_dir.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create local dir copy task");
+
+    let task = sync
+        .run_task(created.tasks[0].id.clone())
+        .await
+        .expect("run local dir copy task");
+
+    assert_eq!(task.status, "ok");
+    // cp -r 嵌入式语义：源目录嵌入为 target/source/...
+    assert_eq!(
+        fs::read_to_string(target_dir.join("source").join("a.txt")).expect("read embedded a.txt"),
+        "alpha"
+    );
+    assert_eq!(
+        fs::read_to_string(target_dir.join("source").join("sub").join("b.txt"))
+            .expect("read embedded sub/b.txt"),
+        "beta"
+    );
+    // 已有 sibling 不受影响
+    assert_eq!(
+        fs::read_to_string(target_dir.join("c.txt")).expect("read c.txt unchanged"),
+        "gamma"
+    );
+    // 已存在的嵌入目录先送回收站再复制 —— stale.txt 应消失
+    assert!(
+        !target_dir.join("source").join("stale.txt").exists(),
+        "stale embedded file should be removed before copy"
+    );
+}
+
+#[tokio::test]
+async fn runs_local_to_local_copy_rejects_missing_source_with_validation() {
+    let root = TempDir::new().expect("create temp dir");
+    let missing_source = root.path().join("nope.txt");
+    let target_file = root.path().join("target.txt");
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Missing source".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: missing_source.to_string_lossy().into_owned(),
+                target_type: "Local".to_string(),
+                target: target_file.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task with missing source");
+
+    let err = sync
+        .run_task(created.tasks[0].id.clone())
+        .await
+        .expect_err("missing source should fail");
+
+    match err {
+        nexus_core::error::AppError::Validation(msg) => assert!(
+            msg.contains("source does not exist"),
+            "unexpected validation message: {msg}"
+        ),
+        other => panic!("expected Validation, got {other:?}"),
+    }
+    assert!(
+        !target_file.exists(),
+        "target must not be created on failure"
+    );
+}

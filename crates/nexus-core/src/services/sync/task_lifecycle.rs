@@ -370,9 +370,7 @@ impl TaskLifecycle {
             ("Cloud", "Local") => Err(AppError::Validation(
                 "Cloud to Local copy is not implemented yet".to_string(),
             )),
-            ("Local", "Local") => Err(AppError::Validation(
-                "Local to Local copy is not implemented yet".to_string(),
-            )),
+            ("Local", "Local") => copy_local_to_local(task),
             _ => Err(AppError::Validation(
                 "Cloud to Cloud copy is not supported".to_string(),
             )),
@@ -579,6 +577,62 @@ fn remote_segments(settings: &WebdavSettings, cloud_path: &str) -> AppResult<Vec
     } else {
         Ok(segments)
     }
+}
+
+fn copy_local_to_local(task: &Task) -> AppResult<()> {
+    let source = resolve_local_path(&task.source)?;
+    let target = resolve_local_path(&task.target)?;
+
+    if !source.exists() {
+        return Err(AppError::Validation(format!(
+            "local source does not exist: {}",
+            task.source
+        )));
+    }
+
+    if fs::metadata(&source)?.is_file() {
+        copy_local_file(&source, &target)?;
+    } else {
+        copy_local_directory(&source, &target)?;
+    }
+    Ok(())
+}
+
+fn copy_local_directory(source: &Path, target: &Path) -> AppResult<()> {
+    let effective_target = if target.exists() && target.is_dir() {
+        let name = required_file_name(source)?;
+        target.join(name)
+    } else {
+        target.to_path_buf()
+    };
+    if effective_target.exists() {
+        fs::remove_dir_all(&effective_target)?;
+    }
+    copy_directory_tree(source, &effective_target)?;
+    Ok(())
+}
+
+fn copy_local_file(source: &Path, target: &Path) -> AppResult<()> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(source, target)?;
+    Ok(())
+}
+
+fn copy_directory_tree(source: &Path, target: &Path) -> AppResult<()> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let path = entry.path();
+        let dest = target.join(entry.file_name());
+        if fs::metadata(&path)?.is_dir() {
+            copy_directory_tree(&path, &dest)?;
+        } else {
+            copy_local_file(&path, &dest)?;
+        }
+    }
+    Ok(())
 }
 
 fn required_file_name(path: &Path) -> AppResult<String> {

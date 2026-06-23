@@ -39,8 +39,7 @@ const MINIMAX_TOKEN_PLAN_CN_USAGE_URL: &str =
 
 const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
 const DEEPSEEK_OPENCODE_KEY: &str = "deepseek";
-const DEEPSEEK_BALANCE_URL: &str =
-    "https://d3bbv8sr76az5s.cloudfront.net/user/balance";
+const DEEPSEEK_BALANCE_URL: &str = "https://d3bbv8sr76az5s.cloudfront.net/user/balance";
 // 为什么不直接用 api.deepseek.com？
 // 部分企业 DNS 会将该域名解析到被阻断的腾讯 EdgeOne CDN IP（58.49.197.113、
 // 183.131.191.171），导致 TLS 443 端口不通。公网 DNS（8.8.8.8）解析到 AWS
