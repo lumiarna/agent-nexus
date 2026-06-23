@@ -36,8 +36,6 @@
     { id: "copilot", name: "Copilot", plan: "Business", status: "available", credential: "$GITHUB_TOKEN", primary: 77, isAgent: true,
       windows: [ { label: "Premium requests (monthly)", used: 77, reset: "Resets Jul 1" } ] },
     { id: "opencode-go", name: "OpenCode Go", plan: "Workspace", status: "expired", credential: "manual · workspace id + cookie", needsParams: true },
-    { id: "minimax", name: "MiniMax CN", plan: "Pay-as-you-go", status: "available", credential: "~/.local/share/opencode/auth.json", primary: 12,
-      windows: [ { label: "Daily tokens", used: 12, reset: "Resets 00:00 CST" } ] },
     { id: "deepseek", name: "DeepSeek", plan: "—", status: "failed", credential: "~/.local/share/opencode/auth.json", error: "HTTP 503 from quota endpoint. Last success 41m ago." },
     { id: "openrouter", name: "OpenRouter", plan: "Credits", status: "available", credential: "~/.local/share/opencode/auth.json", primary: 34,
       windows: [ { label: "Credit balance", used: 34, reset: "$66.00 of $100.00 left" } ] },

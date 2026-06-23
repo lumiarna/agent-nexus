@@ -49,8 +49,6 @@
 	- Quota 数据来源：`${OPENCODE_AUTH_FILE}`/`${GITHUB_TOKEN}`/`${GH_TOKEN}`
 - OpenCode Go
 	- Quota 数据来源：手动填写 `opencode_workspace_id` & `opencode_auth_cookie`
-- MiniMax CN
-	- Quota 数据来源：`${OPENCODE_AUTH_FILE}`
 - MiniMax Token Plan CN
 	- Quota 数据来源：`${OPENCODE_AUTH_FILE}`
 - DeepSeek

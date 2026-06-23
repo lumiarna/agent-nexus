@@ -63,11 +63,6 @@ const PROVIDERS: Provider[] = [
     status: "nocreds", credential: "not found",
   },
   {
-    id: "minimax", name: "MiniMax CN", plan: "Pay-as-you-go", status: "available",
-    credential: "~/.local/share/opencode/auth.json", primary: 12,
-    windows: [{ label: "Daily tokens", used: 12, reset: "Resets 00:00 CST" }],
-  },
-  {
     id: "deepseek", name: "DeepSeek", plan: "—", status: "failed",
     credential: "~/.local/share/opencode/auth.json",
     error: "HTTP 503 from quota endpoint. Last success 41m ago.",
