@@ -138,7 +138,12 @@
 
 ### Session
 
-- 对于每个 Project，扫描 `${project_dir}/__sessions`，通过 WebDAV 同步
+- 对于每个 Project，生成系统托管的 Session Backup Copy Task
+  - Source：`Local {{project_dir}}/__sessions/`
+  - Target：`Cloud Session/{{project_key}}/`
+  - Schedule 默认值：`0 * * * *`，允许逐 Task 调整
+- Session Backup 在 System-managed records 中复用 Task Group UI，支持 Run、Run Group、Schedule；不支持修改 Source/Target/Action、新增、删除或拖拽排序
+- `{{project_dir}}` 展开为当前设备的 Project Path；`{{project_key}}` 展开为跨设备稳定的 Project Key
 - 设置 Session 目录，一般是设置 WebDAV 的本地目录
 - 支持汇总展示和搜索 WebDAV 同步后的 Session
 

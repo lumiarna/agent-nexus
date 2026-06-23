@@ -162,6 +162,131 @@ fn find_header_end(data: &[u8]) -> Option<usize> {
 }
 
 #[test]
+fn lists_session_backup_copy_task_from_project_template() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let project = projects
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+
+    let backups = sync.list_session_backups().expect("list session backups");
+
+    assert_eq!(backups.len(), 1);
+    let backup = &backups[0];
+    assert_eq!(backup.project_key, "agent-nexus");
+    assert_eq!(backup.task.direction, "Push");
+    assert_eq!(backup.task.action, "Copy");
+    assert_eq!(backup.task.source_type, "Local");
+    assert_eq!(
+        backup.task.source,
+        format!("{}/__sessions/", project.path.trim_end_matches('/'))
+    );
+    assert_eq!(backup.task.target_type, "Cloud");
+    assert_eq!(backup.task.target, "Session/agent-nexus/");
+    assert_eq!(backup.task.schedule, "0 * * * *");
+    assert_eq!(backup.task.status, "never");
+}
+
+#[test]
+fn project_template_does_not_reinterpret_variable_values() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let project = projects
+        .record_project(git_repo(&root, "prefix-{{project_key}}"))
+        .expect("record project");
+
+    let backups = sync.list_session_backups().expect("list session backups");
+
+    assert_eq!(
+        backups[0].task.source,
+        format!("{}/__sessions/", project.path.trim_end_matches('/'))
+    );
+}
+
+#[test]
+fn session_backup_schedule_survives_template_reconciliation() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    projects
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+    let backup = sync
+        .list_session_backups()
+        .expect("list session backups")
+        .remove(0);
+
+    sync.update_task_schedule(backup.task.id, "30 * * * *".to_string())
+        .expect("update session backup schedule");
+
+    let reloaded = sync.list_session_backups().expect("reload session backups");
+    assert_eq!(reloaded[0].task.schedule, "30 * * * *");
+}
+
+#[tokio::test]
+async fn automatically_pushes_due_session_backup_and_records_status() {
+    let (url, requests, server) = spawn_webdav_server(vec![
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+    ]);
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "agent-nexus");
+    fs::create_dir_all(Path::new(&repo).join("__sessions")).expect("create sessions dir");
+    fs::write(
+        Path::new(&repo)
+            .join("__sessions")
+            .join("260623-session.md"),
+        "# Session\n",
+    )
+    .expect("write session");
+    projects.record_project(repo).expect("record project");
+    sync.save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
+        url,
+        user: "alice".to_string(),
+        pass: "secret".to_string(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+
+    let ran = sync
+        .run_due_scheduled_tasks(3_600)
+        .await
+        .expect("run due session backup");
+
+    assert_eq!(ran.len(), 1);
+    assert_eq!(ran[0].status, "ok");
+    assert!(sync
+        .list_task_groups()
+        .expect("list custom groups")
+        .is_empty());
+    let backups = sync.list_session_backups().expect("list session backups");
+    assert_eq!(backups[0].task.status, "ok");
+    assert_ne!(backups[0].task.last_run, "—");
+    assert!(sync
+        .run_due_scheduled_tasks(3_620)
+        .await
+        .expect("repeat scheduler check")
+        .is_empty());
+
+    server.join().expect("join webdav server");
+    let requests = requests.lock().expect("lock request log");
+    assert!(requests[3].starts_with(
+        "PUT /webdav/agent-nexus-sync/Session/agent-nexus/260623-session.md HTTP/1.1"
+    ));
+    assert!(requests[3].contains("# Session"));
+}
+
+#[test]
 fn saves_and_reads_webdav_settings() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db);

@@ -2,11 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { syncApi } from "@/lib/api/sync";
 import type { AddTaskInput, CreateTaskGroupInput } from "@/lib/api/sync";
-import type { Task, TaskGroup } from "@/types";
+import type { SessionBackup, Task, TaskGroup } from "@/types";
 
 export const syncKeys = {
   webdavSettings: ["sync", "webdavSettings"] as const,
   taskGroups: ["sync", "taskGroups"] as const,
+  sessionBackups: ["sync", "sessionBackups"] as const,
 };
 
 export function useWebdavSettingsQuery() {
@@ -36,6 +37,14 @@ export function useTaskGroupsQuery() {
   return useQuery({
     queryKey: syncKeys.taskGroups,
     queryFn: syncApi.listTaskGroups,
+  });
+}
+
+export function useSessionBackupsQuery() {
+  return useQuery({
+    queryKey: syncKeys.sessionBackups,
+    queryFn: syncApi.listSessionBackups,
+    refetchOnMount: "always",
   });
 }
 
@@ -81,6 +90,9 @@ export function useUpdateTaskScheduleMutation() {
       queryClient.setQueryData<TaskGroup[]>(syncKeys.taskGroups, (groups) =>
         replaceTask(groups, updated),
       );
+      queryClient.setQueryData<SessionBackup[]>(syncKeys.sessionBackups, (backups) =>
+        replaceSessionBackupTask(backups, updated),
+      );
     },
   });
 }
@@ -89,7 +101,14 @@ export function useRunTaskMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => syncApi.runTask(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: syncKeys.taskGroups }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<TaskGroup[]>(syncKeys.taskGroups, (groups) =>
+        replaceTask(groups, updated),
+      );
+      queryClient.setQueryData<SessionBackup[]>(syncKeys.sessionBackups, (backups) =>
+        replaceSessionBackupTask(backups, updated),
+      );
+    },
   });
 }
 
@@ -98,4 +117,13 @@ function replaceTask(groups: TaskGroup[] | undefined, updated: Task): TaskGroup[
     ...group,
     tasks: group.tasks.map((task) => (task.id === updated.id ? updated : task)),
   }));
+}
+
+function replaceSessionBackupTask(
+  backups: SessionBackup[] | undefined,
+  updated: Task,
+): SessionBackup[] | undefined {
+  return backups?.map((backup) =>
+    backup.task.id === updated.id ? { ...backup, task: updated } : backup,
+  );
 }

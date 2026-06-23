@@ -24,6 +24,7 @@ import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
 import { formatProjectSymlinkDisplayPath } from "@/components/sync/pathDisplay";
 import { DEFAULT_CRON_SCHEDULE, SCHEDULE_PRESETS, cronHuman } from "@/components/sync/schedule";
+import { sessionBackupsToTaskGroup } from "@/components/sync/systemRecords";
 import {
   actionOptions,
   expandFormTask,
@@ -39,6 +40,7 @@ import {
   useDeleteTaskGroupMutation,
   useDeleteTaskMutation,
   useRunTaskMutation,
+  useSessionBackupsQuery,
   useTaskGroupsQuery,
   useUpdateTaskScheduleMutation,
   syncKeys,
@@ -222,6 +224,242 @@ function SortableTask({ groupId, taskId, children }: {
   return <>{children(sortable)}</>;
 }
 
+interface TaskGroupCardProps {
+  group: TaskGroup;
+  sortable?: SortableRender;
+  onRunGroup: (group: TaskGroup) => void;
+  onEditSchedule: (group: TaskGroup, task: Task) => void;
+  onRunTask: (group: TaskGroup, task: Task) => void;
+  onAddTask?: (group: TaskGroup) => void;
+  onDeleteGroup?: (group: TaskGroup) => void;
+  onDeleteTask?: (group: TaskGroup, task: Task) => void;
+}
+
+function TaskGroupCard({
+  group,
+  sortable,
+  onRunGroup,
+  onEditSchedule,
+  onRunTask,
+  onAddTask,
+  onDeleteGroup,
+  onDeleteTask,
+}: TaskGroupCardProps) {
+  const renderTask = (task: Task, taskSortable?: SortableRender) => (
+    <TaskGroupRow
+      key={task.id}
+      group={group}
+      task={task}
+      sortable={taskSortable}
+      onEditSchedule={onEditSchedule}
+      onRunTask={onRunTask}
+      onDeleteTask={onDeleteTask}
+    />
+  );
+
+  return (
+    <div
+      ref={sortable?.setNodeRef}
+      className={cn(
+        "overflow-hidden rounded-[18px] border bg-nexus-card transition-[box-shadow,opacity]",
+        sortable?.isDragging
+          ? "border-nexus-accent opacity-60 shadow-[0_8px_28px_rgba(50,40,25,.16)]"
+          : "border-nexus-border shadow-[0_1px_14px_rgba(50,40,25,.05)]",
+      )}
+      style={{
+        transform: sortable ? CSS.Transform.toString(sortable.transform) : undefined,
+        transition: sortable?.transition,
+      }}
+      {...(sortable?.attributes ?? {})}
+    >
+      <div className="flex flex-wrap items-center gap-[11px] border-b border-[#f3eee5] px-5 py-[15px]">
+        {sortable ? (
+          <span
+            ref={sortable.setActivatorNodeRef}
+            {...sortable.listeners}
+            title="Drag to reorder group"
+            className="cursor-grab text-[13px] leading-none tracking-[-1px] text-[#cabfae]"
+          >
+            ⠿
+          </span>
+        ) : null}
+        <div className="text-[14.5px] font-extrabold text-nexus-ink">{group.name}</div>
+        <span className="text-[11px] text-[#b3a999]">
+          {group.tasks.length} {group.tasks.length === 1 ? "task" : "tasks"}
+        </span>
+        <div className="ml-auto flex gap-[7px]">
+          {group.tasks.some((task) => task.action === "Copy") ? (
+            <button
+              onClick={() => onRunGroup(group)}
+              className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
+            >
+              Run group
+            </button>
+          ) : null}
+          {onAddTask ? (
+            <button
+              onClick={() => onAddTask(group)}
+              className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-[#7a6f60] hover:bg-[#ece2d5]"
+            >
+              Add task
+            </button>
+          ) : null}
+          {onDeleteGroup ? (
+            <button
+              onClick={() => onDeleteGroup(group)}
+              className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-nexus-crit hover:bg-[#f6e3e0]"
+            >
+              Delete group
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
+        style={{ gridTemplateColumns: GRID16 }}
+      >
+        <div>Direction</div>
+        <div className="col-span-6">Source</div>
+        <div className="col-start-8">Action</div>
+        <div className="col-span-6">Target</div>
+        <div className="col-span-2 text-right">Manage</div>
+      </div>
+
+      {sortable ? (
+        <SortableContext
+          items={group.tasks.map((task) => taskKey(group.id, task.id))}
+          strategy={verticalListSortingStrategy}
+        >
+          {group.tasks.map((task) => (
+            <SortableTask key={task.id} groupId={group.id} taskId={task.id}>
+              {(taskSortable) => renderTask(task, taskSortable)}
+            </SortableTask>
+          ))}
+        </SortableContext>
+      ) : (
+        group.tasks.map((task) => renderTask(task))
+      )}
+    </div>
+  );
+}
+
+interface TaskGroupRowProps {
+  group: TaskGroup;
+  task: Task;
+  sortable?: SortableRender;
+  onEditSchedule: (group: TaskGroup, task: Task) => void;
+  onRunTask: (group: TaskGroup, task: Task) => void;
+  onDeleteTask?: (group: TaskGroup, task: Task) => void;
+}
+
+function TaskGroupRow({
+  group,
+  task,
+  sortable,
+  onEditSchedule,
+  onRunTask,
+  onDeleteTask,
+}: TaskGroupRowProps) {
+  const isCopy = task.action === "Copy";
+  const status = isCopy ? statusOf(task.status) : null;
+  const linkMissing = !isCopy && task.linkState === "missing";
+
+  return (
+    <div
+      ref={sortable?.setNodeRef}
+      className={cn(
+        "grid items-center gap-3 border-t border-[#f3eee5] px-5 py-3",
+        sortable?.isDragging && "bg-[#fbf6ef] opacity-50",
+        linkMissing && "bg-[#fbf3f0]",
+      )}
+      style={{
+        gridTemplateColumns: GRID16,
+        transform: sortable ? CSS.Transform.toString(sortable.transform) : undefined,
+        transition: sortable?.transition,
+      }}
+      {...(sortable?.attributes ?? {})}
+    >
+      <div className="flex items-center gap-2">
+        {sortable ? (
+          <span
+            ref={sortable.setActivatorNodeRef}
+            {...sortable.listeners}
+            title="Drag to reorder task"
+            className="cursor-grab text-[12px] leading-none tracking-[-1px] text-[#d4c9b6]"
+          >
+            ⠿
+          </span>
+        ) : null}
+        <span
+          className="text-[9.5px] font-bold uppercase tracking-[.03em]"
+          style={{ color: directionColor(task.direction) }}
+          title={task.direction}
+        >
+          {task.direction}
+        </span>
+      </div>
+      <div className="col-span-6 flex min-w-0 items-center gap-1.5">
+        <LocationTag type={task.sourceType} />
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
+          {task.source}
+        </span>
+      </div>
+      <div className="col-start-8 flex items-center" title={task.action}>
+        <ActionBadge action={task.action} />
+      </div>
+      <div className="col-span-6 flex min-w-0 items-center gap-1.5">
+        <LocationTag type={task.targetType} />
+        <span
+          className={cn(
+            "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px]",
+            linkMissing ? "text-[#b55440] line-through" : "text-[#8a8073]",
+          )}
+          title={linkMissing ? "Placement missing — symlink/junction was removed out-of-band" : undefined}
+        >
+          {task.target || "—"}
+        </span>
+      </div>
+      <div className="col-span-2 flex items-center justify-end gap-[9px]">
+        {status ? (
+          <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: status.fg }}>
+            <Dot color={status.dot} /> {status.label}
+          </span>
+        ) : null}
+        {linkMissing ? (
+          <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: palette.crit }}>
+            <Dot color={palette.crit} /> Missing
+          </span>
+        ) : null}
+        {isCopy ? (
+          <>
+            <span
+              onClick={() => onEditSchedule(group, task)}
+              className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
+            >
+              Schedule
+            </span>
+            <span
+              onClick={() => onRunTask(group, task)}
+              className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
+            >
+              Run
+            </span>
+          </>
+        ) : null}
+        {onDeleteTask ? (
+          <span
+            onClick={() => onDeleteTask(group, task)}
+            className="cursor-pointer text-[11px] font-bold text-nexus-crit hover:underline"
+          >
+            Delete
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function SyncPage() {
   const queryClient = useQueryClient();
   const taskGroupsQuery = useTaskGroupsQuery();
@@ -232,9 +470,10 @@ export function SyncPage() {
   const runTaskMutation = useRunTaskMutation();
   const updateTaskScheduleMutation = useUpdateTaskScheduleMutation();
   const projectSymlinksQuery = useProjectSymlinksQuery();
+  const sessionBackupsQuery = useSessionBackupsQuery();
   const deleteProjectSymlinkMutation = useDeleteProjectSymlinkMutation();
   const [templates] = useState(() => nexus.templates());
-  const [system] = useState(() => nexus.systemSync());
+  const [systemDefaults] = useState(() => nexus.systemSync());
   const [openSec, setOpenSec] = useState({ skill: false, prompt: false, backup: false });
   const [createOpen, setCreateOpen] = useState(false);
   const [tpl, setTpl] = useState("blank");
@@ -403,6 +642,16 @@ export function SyncPage() {
     }
   }
 
+  function openSchedule(group: TaskGroup, task: Task) {
+    setSched({
+      groupId: group.id,
+      taskId: task.id,
+      taskName: `${task.direction} · ${task.source || "task"}`,
+      mode: task.schedule !== "manual" ? "cron" : "manual",
+      cronExpr: task.schedule !== "manual" ? task.schedule : DEFAULT_CRON_SCHEDULE,
+    });
+  }
+
   async function saveSchedule() {
     if (!sched) return;
     const isCron = sched.mode === "cron";
@@ -475,6 +724,7 @@ export function SyncPage() {
     }
   }
 
+  const sessionBackupGroup = sessionBackupsToTaskGroup(sessionBackupsQuery.data ?? []);
   const sysSections: {
     key: keyof typeof openSec;
     title: string;
@@ -482,9 +732,8 @@ export function SyncPage() {
     count: string;
     rows: SystemSyncRow[];
   }[] = [
-    { key: "skill", title: "Skill Distribution", managedBy: "Managed by Skill", count: `${system.skill.length} records`, rows: system.skill },
-    { key: "prompt", title: "Prompt Distribution", managedBy: "Managed by Prompt", count: `${system.prompt.length} records`, rows: system.prompt },
-    { key: "backup", title: "Session Backup", managedBy: "Managed by Session", count: `${system.backup.length} projects`, rows: system.backup },
+    { key: "skill", title: "Skill Distribution", managedBy: "Managed by Skill", count: `${systemDefaults.skill.length} records`, rows: systemDefaults.skill },
+    { key: "prompt", title: "Prompt Distribution", managedBy: "Managed by Prompt", count: `${systemDefaults.prompt.length} records`, rows: systemDefaults.prompt },
   ];
 
   return (
@@ -530,195 +779,17 @@ export function SyncPage() {
               >
                 {groups.map((g) => (
                   <SortableTaskGroup key={g.id} id={g.id}>
-                    {({
-                      setNodeRef,
-                      setActivatorNodeRef,
-                      listeners,
-                      attributes,
-                      transform,
-                      transition,
-                      isDragging,
-                    }) => (
-                      <div
-                        ref={setNodeRef}
-                        className={cn(
-                          "overflow-hidden rounded-[18px] border bg-nexus-card transition-[box-shadow,opacity]",
-                          isDragging
-                            ? "border-nexus-accent opacity-60 shadow-[0_8px_28px_rgba(50,40,25,.16)]"
-                            : "border-nexus-border shadow-[0_1px_14px_rgba(50,40,25,.05)]",
-                        )}
-                        style={{
-                          transform: CSS.Transform.toString(transform),
-                          transition,
-                        }}
-                        {...attributes}
-                      >
-                        <div className="flex flex-wrap items-center gap-[11px] border-b border-[#f3eee5] px-5 py-[15px]">
-                          <span
-                            ref={setActivatorNodeRef}
-                            {...listeners}
-                            title="Drag to reorder group"
-                            className="cursor-grab text-[13px] leading-none tracking-[-1px] text-[#cabfae]"
-                          >
-                            ⠿
-                          </span>
-                          <div className="text-[14.5px] font-extrabold text-nexus-ink">{g.name}</div>
-                          <span className="text-[11px] text-[#b3a999]">
-                            {g.tasks.length} {g.tasks.length === 1 ? "task" : "tasks"}
-                          </span>
-                          <div className="ml-auto flex gap-[7px]">
-                            {g.tasks.some((t) => t.action === "Copy") && (
-                              <button
-                                onClick={() => void runGroup(g)}
-                                className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
-                              >
-                                Run group
-                              </button>
-                            )}
-                            <button
-                              onClick={() => openAddTask(g)}
-                              className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-[#7a6f60] hover:bg-[#ece2d5]"
-                            >
-                              Add task
-                            </button>
-                            <button
-                              onClick={() => setDeleteTarget(g)}
-                              className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-nexus-crit hover:bg-[#f6e3e0]"
-                            >
-                              Delete group
-                            </button>
-                          </div>
-                        </div>
-
-                        <div
-                          className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
-                          style={{ gridTemplateColumns: GRID16 }}
-                        >
-                          <div>Direction</div>
-                          <div className="col-span-6">Source</div>
-                          <div className="col-start-8">Action</div>
-                          <div className="col-span-6">Target</div>
-                          <div className="col-span-2 text-right">Manage</div>
-                        </div>
-
-                        <SortableContext
-                          items={g.tasks.map((t) => taskKey(g.id, t.id))}
-                          strategy={verticalListSortingStrategy}
-                        >
-                          {g.tasks.map((t) => {
-                            const isCopy = t.action === "Copy";
-                            const st = isCopy ? statusOf(t.status) : null;
-                            const linkMissing = !isCopy && t.linkState === "missing";
-                            const targetLabel = t.target || "—";
-                            return (
-                              <SortableTask key={t.id} groupId={g.id} taskId={t.id}>
-                                {({
-                                  setNodeRef,
-                                  setActivatorNodeRef,
-                                  listeners,
-                                  attributes,
-                                  transform,
-                                  transition,
-                                  isDragging,
-                                }) => (
-                                  <div
-                                    ref={setNodeRef}
-                                    className={cn(
-                                      "grid items-center gap-3 border-t border-[#f3eee5] px-5 py-3",
-                                      isDragging && "bg-[#fbf6ef] opacity-50",
-                                      linkMissing && "bg-[#fbf3f0]",
-                                    )}
-                                    style={{
-                                      gridTemplateColumns: GRID16,
-                                      transform: CSS.Transform.toString(transform),
-                                      transition,
-                                    }}
-                                    {...attributes}
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <span
-                                        ref={setActivatorNodeRef}
-                                        {...listeners}
-                                        title="Drag to reorder task"
-                                        className="cursor-grab text-[12px] leading-none tracking-[-1px] text-[#d4c9b6]"
-                                      >
-                                        ⠿
-                                      </span>
-                                      <span
-                                        className="text-[9.5px] font-bold uppercase tracking-[.03em]"
-                                        style={{ color: directionColor(t.direction) }}
-                                        title={t.direction}
-                                      >
-                                        {t.direction}
-                                      </span>
-                                    </div>
-                                    <div className="col-span-6 flex min-w-0 items-center gap-1.5">
-                                      <LocationTag type={t.sourceType} />
-                                      <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
-                                        {t.source}
-                                      </span>
-                                    </div>
-                                    <div className="col-start-8 flex items-center" title={t.action}>
-                                      <ActionBadge action={t.action} />
-                                    </div>
-                                    <div className="col-span-6 flex min-w-0 items-center gap-1.5">
-                                      <LocationTag type={t.targetType} />
-                                      <span className={cn(
-                                        "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px]",
-                                        linkMissing ? "text-[#b55440] line-through" : "text-[#8a8073]",
-                                      )} title={linkMissing ? "Placement missing — symlink/junction was removed out-of-band" : undefined}>
-                                        {targetLabel}
-                                      </span>
-                                    </div>
-                                    <div className="col-span-2 flex items-center justify-end gap-[9px]">
-                                      {st && (
-                                        <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: st.fg }}>
-                                          <Dot color={st.dot} /> {st.label}
-                                        </span>
-                                      )}
-                                      {linkMissing && (
-                                        <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: palette.crit }}>
-                                          <Dot color={palette.crit} /> Missing
-                                        </span>
-                                      )}
-                                      {isCopy && (
-                                        <>
-                                          <span
-                                            onClick={() =>
-                                              setSched({
-                                                groupId: g.id,
-                                                taskId: t.id,
-                                                taskName: `${t.direction} · ${t.source || "task"}`,
-                                                mode: t.schedule !== "manual" ? "cron" : "manual",
-                                                cronExpr: t.schedule !== "manual" ? t.schedule : DEFAULT_CRON_SCHEDULE,
-                                              })
-                                            }
-                                            className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
-                                          >
-                                            Schedule
-                                          </span>
-                                          <span
-                                            onClick={() => void runTask(g.id, t)}
-                                            className="cursor-pointer text-[11px] font-bold text-nexus-accent hover:underline"
-                                          >
-                                            Run
-                                          </span>
-                                        </>
-                                      )}
-                                      <span
-                                        onClick={() => setDeleteTaskTarget({ group: g, task: t })}
-                                        className="cursor-pointer text-[11px] font-bold text-nexus-crit hover:underline"
-                                      >
-                                        Delete
-                                      </span>
-                                    </div>
-                                  </div>
-                                )}
-                              </SortableTask>
-                            );
-                          })}
-                        </SortableContext>
-                      </div>
+                    {(sortable) => (
+                      <TaskGroupCard
+                        group={g}
+                        sortable={sortable}
+                        onRunGroup={(group) => void runGroup(group)}
+                        onEditSchedule={openSchedule}
+                        onRunTask={(group, task) => void runTask(group.id, task)}
+                        onAddTask={openAddTask}
+                        onDeleteGroup={setDeleteTarget}
+                        onDeleteTask={(group, task) => setDeleteTaskTarget({ group, task })}
+                      />
                     )}
                   </SortableTaskGroup>
                 ))}
@@ -891,6 +962,46 @@ export function SyncPage() {
               </div>
             );
           })}
+          <div className="overflow-hidden rounded-[14px] border border-nexus-border bg-nexus-sand2">
+            <div
+              onClick={() => setOpenSec((state) => ({ ...state, backup: !state.backup }))}
+              className="flex cursor-pointer items-center gap-[11px] px-[18px] py-[13px] hover:bg-[#f4ede1]"
+            >
+              <span
+                className="inline-block text-[10px] text-[#a99a89] transition-transform"
+                style={{ transform: openSec.backup ? "rotate(90deg)" : "rotate(0deg)" }}
+              >
+                ▸
+              </span>
+              <span className="text-[13.5px] font-bold text-[#6a6055]">Session Backup</span>
+              <span className="rounded-[6px] bg-[rgba(157,122,100,.12)] px-2 py-0.5 text-[10px] font-bold text-nexus-accent">
+                Managed by Session
+              </span>
+              <span className="ml-auto text-[11.5px] text-[#b3a999]">
+                {sessionBackupGroup.tasks.length} projects
+              </span>
+            </div>
+            {openSec.backup ? (
+              <div className="border-t border-nexus-border bg-nexus-card p-3.5">
+                {sessionBackupsQuery.isLoading ? (
+                  <div className="flex items-center gap-2 px-2 py-5 text-[12.5px] text-[#9a8f80]">
+                    <Spinner /> Loading Session Backup...
+                  </div>
+                ) : sessionBackupsQuery.error ? (
+                  <div className="px-2 py-5 text-[12.5px] font-semibold text-nexus-crit">
+                    {getErrorMessage(sessionBackupsQuery.error)}
+                  </div>
+                ) : (
+                  <TaskGroupCard
+                    group={sessionBackupGroup}
+                    onRunGroup={(group) => void runGroup(group)}
+                    onEditSchedule={openSchedule}
+                    onRunTask={(group, task) => void runTask(group.id, task)}
+                  />
+                )}
+              </div>
+            ) : null}
+          </div>
         </div>
       </ScreenScroll>
 
@@ -1101,7 +1212,7 @@ export function SyncPage() {
             <ModalHeader
               title={`Schedule · ${sched.taskName}`}
               titleClassName="text-[16px]"
-              subtitle="Per-task trigger. Scheduled runs are not implemented yet."
+              subtitle="Per-task trigger using a five-field CRON schedule."
             />
             <div className="flex flex-col gap-3.5 px-[22px] py-5">
               <Segmented<"manual" | "cron">

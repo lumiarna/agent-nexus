@@ -176,6 +176,7 @@ CREATE VIRTUAL TABLE session_fts USING fts5(
 CREATE TABLE task_groups (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    system_kind TEXT,                                 -- NULL = 用户组；session_backup = 系统组
     sort_index INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -188,7 +189,7 @@ CREATE TABLE tasks (
     group_id TEXT NOT NULL,
     direction TEXT NOT NULL                           -- Distribution | Push | Pull
         CHECK (direction IN ('Distribution', 'Push', 'Pull')),
-    action TEXT NOT NULL CHECK (action IN ('Symlink', 'Copy')),
+    action TEXT NOT NULL CHECK (action IN ('Symlink', 'Junction', 'Copy')),
     source_type TEXT NOT NULL CHECK (source_type IN ('Local', 'Cloud')),
     source TEXT NOT NULL,
     target_type TEXT NOT NULL CHECK (target_type IN ('Local', 'Cloud')),
@@ -197,10 +198,17 @@ CREATE TABLE tasks (
     sort_index INTEGER,
     last_run_at INTEGER,
     last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+    project_id TEXT,                                  -- project-bound 系统 Task；用户 Task 为 NULL
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
+    FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
+
+CREATE UNIQUE INDEX idx_task_groups_system_kind
+    ON task_groups(system_kind) WHERE system_kind IS NOT NULL;
+CREATE UNIQUE INDEX idx_tasks_system_project
+    ON tasks(group_id, project_id) WHERE project_id IS NOT NULL;
 
 -- (task_targets 表已移除：Task 模型变为 1 source → 1 target，target 直接存于 tasks 表)
 

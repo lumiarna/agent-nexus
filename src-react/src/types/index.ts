@@ -147,6 +147,11 @@ export interface TaskGroup {
   tasks: Task[];
 }
 
+export interface SessionBackup {
+  projectKey: string;
+  task: Task;
+}
+
 export type TemplateTask = Pick<
   Task,
   "action" | "sourceType" | "source" | "targetType" | "target" | "schedule"

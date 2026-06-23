@@ -155,7 +155,7 @@ _Avoid_: Template, relationship only, background daemon, task group as execution
 _Avoid_: Execution type, workflow engine, task type
 
 **Template**:
-用于快速创建 `Task Group` 的预设定义。它是创建加速器，实例化后不回流控制既有任务。
+用于快速创建 `Task Group` 的预设定义。Project-bound 模板可使用 `{{project_dir}}`（当前本地 Project Path）与 `{{project_key}}`（跨设备稳定 Project Key）；模板物化为 `Task` 后复用相同执行器。自定义模板实例化后不回流控制既有任务，系统托管模板可在 Project Path 变化后重新物化路径并保留运行状态。
 _Avoid_: Task, live config, inherited instance
 
 **Instance**:
@@ -175,7 +175,7 @@ _Avoid_: Generic symlink task, manual sync relation
 _Avoid_: Prompt sync config editor
 
 **Session Backup**:
-围绕 `Session` 归档建立的 `Sync` 类型。它负责把 `Project` 的本地 `Session` 目录归档到 Cloud，而不是管理会话内容本身。
+围绕 `Session` 归档建立的系统托管 `Sync` 类型。每个 `Project` 默认物化一个 Copy Task：Source `Local {{project_dir}}/__sessions/`、Target `Cloud Session/{{project_key}}/`、Schedule `0 * * * *`。Source、Target 与 Action 由系统维护；Schedule 首次采用默认值，之后允许用户逐 Task 调整。UI 复用 Task Group，可运行单 Task 或 Run Group，但不允许新增、删除或排序系统 Task。它负责把本地 `Session` 目录归档到 Cloud，而不是管理会话内容本身。
 _Avoid_: Session viewer, session search
 
 **Push**:
@@ -197,7 +197,7 @@ _Avoid_: Cloud cache, merged archive
 _Avoid_: Local session, mixed source view
 
 **Session Directory**:
-一个 `Project` 的本地会话目录。默认模板是 `${project_dir}/__sessions`，但可被 project-level override 覆写；MVP 中每个 `Project` 只允许一个 `Session Directory`。
+一个 `Project` 的本地会话目录。默认模板是 `{{project_dir}}/__sessions/`，但可被 project-level override 覆写；MVP 中每个 `Project` 只允许一个 `Session Directory`。
 _Avoid_: Multi-root session source, fixed hardcoded path
 
 ## Boundaries

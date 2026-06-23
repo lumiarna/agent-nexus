@@ -174,6 +174,7 @@ pub async fn run_task(state: State<'_, AppState>, id: String) -> AppResult<Task>
 ### 6. Sync — 任务存储 + 纯 cron + Transfer seam
 
 - **任务存储 / 校验**：`sync.rs`、`sync/task_lifecycle.rs`（Task / Task Group CRUD、`prepare_task` 不变量、`derive_direction`）。
+- **Project 模板物化**：系统托管的 Session Backup 使用 `{{project_dir}}` / `{{project_key}}` 展开为每项目 Copy Task；幂等 upsert 更新移动后的本地路径并保留运行状态和用户 Schedule，自定义 Task Group 查询排除系统组。前端与自定义任务共享 `TaskGroupCard` / Task Row，只通过缺省结构管理回调锁定系统组的新增、删除与排序。
 - **cron**：纯 `services/cron.rs`（校验 + 是否命中某分钟），可直测。
 - **Transfer seam**：Local→Cloud 传输抽象为 `Transfer` 端口，`webdav` adapter 用于生产，`RecordingTransfer` 用于测试；`run_task` 收薄为编排（状态记录、调度门控、回滚）。
 - **编排位置**：当前跨领域复杂度只涉及 Sync 自身、WebDAV 与 Placement，`sync/task_lifecycle.rs` 仍足够 deep；等执行器开始组合 Project / Session / Provider 等多个领域时，再抽独立 `orchestration/` 目录。

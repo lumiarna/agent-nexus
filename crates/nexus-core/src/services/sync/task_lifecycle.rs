@@ -25,8 +25,10 @@ use crate::{
 };
 
 use super::{
-    normalize_webdav_settings, read_webdav_settings, CreateTaskGroupInput, CreateTaskInput, Task,
-    TaskGroup, WebdavSettings, WebdavSettingsInput,
+    normalize_webdav_settings, read_webdav_settings, render_project_template, CreateTaskGroupInput,
+    CreateTaskInput, SessionBackup, Task, TaskGroup, WebdavSettings, WebdavSettingsInput,
+    SESSION_BACKUP_GROUP_ID, SESSION_BACKUP_SCHEDULE, SESSION_BACKUP_SOURCE_TEMPLATE,
+    SESSION_BACKUP_SYSTEM_KIND, SESSION_BACKUP_TARGET_TEMPLATE,
 };
 
 #[derive(Clone)]
@@ -86,6 +88,7 @@ impl TaskLifecycle {
             r#"
             SELECT id, name
             FROM task_groups
+            WHERE system_kind IS NULL
             ORDER BY sort_index IS NULL, sort_index, created_at, name
             "#,
         )?;
@@ -104,6 +107,130 @@ impl TaskLifecycle {
         }
 
         Ok(groups)
+    }
+
+    pub(super) fn list_session_backups(&self) -> AppResult<Vec<SessionBackup>> {
+        self.reconcile_session_backups()?;
+        let conn = self.db.connection()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT
+                p.key,
+                t.id,
+                t.direction,
+                t.action,
+                t.source_type,
+                t.source,
+                t.target_type,
+                t.target,
+                t.schedule,
+                COALESCE(strftime('%m-%d %H:%M', t.last_run_at, 'unixepoch'), '—'),
+                COALESCE(t.last_status, 'never')
+            FROM tasks t
+            JOIN projects p ON p.id = t.project_id
+            WHERE t.group_id = ?1
+            ORDER BY p.sort_index IS NULL, p.sort_index, p.created_at, p.name
+            "#,
+        )?;
+        let rows = stmt.query_map([SESSION_BACKUP_GROUP_ID], |row| {
+            Ok(SessionBackup {
+                project_key: row.get(0)?,
+                task: Task {
+                    id: row.get(1)?,
+                    direction: row.get(2)?,
+                    action: row.get(3)?,
+                    source_type: row.get(4)?,
+                    source: row.get(5)?,
+                    target_type: row.get(6)?,
+                    target: row.get(7)?,
+                    schedule: row.get(8)?,
+                    last_run: row.get(9)?,
+                    status: row.get(10)?,
+                    link_state: "present".to_string(),
+                },
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn reconcile_session_backups(&self) -> AppResult<()> {
+        let now = now_epoch_seconds()?;
+        let mut conn = self.db.connection()?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            r#"
+            INSERT INTO task_groups (id, name, system_kind, created_at, updated_at)
+            VALUES (?1, 'Session Backup', ?2, ?3, ?3)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                system_kind = excluded.system_kind,
+                updated_at = excluded.updated_at
+            "#,
+            params![SESSION_BACKUP_GROUP_ID, SESSION_BACKUP_SYSTEM_KIND, now],
+        )?;
+
+        let projects = {
+            let mut stmt = tx.prepare("SELECT id, path, key FROM projects")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        for (project_id, project_dir, project_key) in projects {
+            let project_dir = project_dir.trim_end_matches('/');
+            let source =
+                render_project_template(SESSION_BACKUP_SOURCE_TEMPLATE, project_dir, &project_key)?;
+            let target =
+                render_project_template(SESSION_BACKUP_TARGET_TEMPLATE, project_dir, &project_key)?;
+            tx.execute(
+                r#"
+                INSERT INTO tasks (
+                    id, group_id, direction, action, source_type, source, target_type, target,
+                    schedule, sort_index, last_status, project_id, created_at, updated_at
+                )
+                VALUES (?1, ?2, 'Push', 'Copy', 'Local', ?3, 'Cloud', ?4,
+                        ?5, 0, 'never', ?6, ?7, ?7)
+                ON CONFLICT(id) DO UPDATE SET
+                    group_id = excluded.group_id,
+                    direction = excluded.direction,
+                    action = excluded.action,
+                    source_type = excluded.source_type,
+                    source = excluded.source,
+                    target_type = excluded.target_type,
+                    target = excluded.target,
+                    project_id = excluded.project_id,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    format!("session-backup:{project_id}"),
+                    SESSION_BACKUP_GROUP_ID,
+                    source,
+                    target,
+                    SESSION_BACKUP_SCHEDULE,
+                    project_id,
+                    now,
+                ],
+            )?;
+        }
+
+        tx.execute(
+            r#"
+            DELETE FROM tasks
+            WHERE group_id = ?1
+              AND (project_id IS NULL OR NOT EXISTS (
+                  SELECT 1 FROM projects WHERE projects.id = tasks.project_id
+              ))
+            "#,
+            [SESSION_BACKUP_GROUP_ID],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub(super) fn create_task_group(&self, input: CreateTaskGroupInput) -> AppResult<TaskGroup> {
@@ -324,6 +451,7 @@ impl TaskLifecycle {
         &self,
         now_epoch_seconds: i64,
     ) -> AppResult<Vec<Task>> {
+        self.reconcile_session_backups()?;
         let minute_start = now_epoch_seconds - now_epoch_seconds.rem_euclid(60);
         let scheduled_tasks = {
             let conn = self.db.connection()?;

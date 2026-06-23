@@ -1,4 +1,4 @@
-import type { TaskAction, TaskGroup, LocationType, WebdavSettings } from "@/types";
+import type { LocationType, SessionBackup, TaskAction, TaskGroup, WebdavSettings } from "@/types";
 import { invokeCommand } from "@/lib/api/tauri";
 
 export interface CreateTaskInput {
@@ -43,6 +43,9 @@ export const syncApi = {
   },
   listTaskGroups(): Promise<TaskGroup[]> {
     return invokeCommand<TaskGroup[]>("list_task_groups");
+  },
+  listSessionBackups(): Promise<SessionBackup[]> {
+    return invokeCommand<SessionBackup[]>("list_session_backups");
   },
   createTaskGroup(input: CreateTaskGroupInput): Promise<TaskGroup> {
     return invokeCommand<TaskGroup>("create_task_group", { input });

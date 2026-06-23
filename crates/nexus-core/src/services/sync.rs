@@ -20,6 +20,11 @@ const WEBDAV_USER_SETTING: &str = "webdav_user";
 const WEBDAV_PASS_SETTING: &str = "webdav_pass";
 const WEBDAV_REMOTE_ROOT_SETTING: &str = "webdav_remote_root";
 const DEFAULT_WEBDAV_REMOTE_ROOT: &str = "agent-nexus-sync";
+const SESSION_BACKUP_SOURCE_TEMPLATE: &str = "{{project_dir}}/__sessions/";
+const SESSION_BACKUP_TARGET_TEMPLATE: &str = "Session/{{project_key}}/";
+const SESSION_BACKUP_SCHEDULE: &str = "0 * * * *";
+const SESSION_BACKUP_GROUP_ID: &str = "system:session-backup";
+const SESSION_BACKUP_SYSTEM_KIND: &str = "session_backup";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +48,13 @@ pub struct TaskGroup {
     pub id: String,
     pub name: String,
     pub tasks: Vec<Task>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionBackup {
+    pub project_key: String,
+    pub task: Task,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -138,6 +150,10 @@ impl SyncService {
         self.task_lifecycle.list_task_groups()
     }
 
+    pub fn list_session_backups(&self) -> AppResult<Vec<SessionBackup>> {
+        self.task_lifecycle.list_session_backups()
+    }
+
     pub fn create_task_group(&self, input: CreateTaskGroupInput) -> AppResult<TaskGroup> {
         self.task_lifecycle.create_task_group(input)
     }
@@ -157,6 +173,42 @@ impl SyncService {
     pub fn update_task_schedule(&self, id: String, schedule: String) -> AppResult<Task> {
         self.task_lifecycle.update_task_schedule(id, schedule)
     }
+}
+
+fn render_project_template(
+    template: &str,
+    project_dir: &str,
+    project_key: &str,
+) -> AppResult<String> {
+    let mut rendered = String::with_capacity(template.len());
+    let mut remaining = template;
+
+    while let Some(start) = remaining.find("{{") {
+        rendered.push_str(&remaining[..start]);
+        let variable_and_rest = &remaining[start + 2..];
+        let end = variable_and_rest.find("}}").ok_or_else(|| {
+            AppError::Validation("sync template variable is not closed".to_string())
+        })?;
+        let variable = &variable_and_rest[..end];
+        rendered.push_str(match variable {
+            "project_dir" => project_dir,
+            "project_key" => project_key,
+            _ => {
+                return Err(AppError::Validation(format!(
+                    "unknown sync template variable: {variable}"
+                )))
+            }
+        });
+        remaining = &variable_and_rest[end + 2..];
+    }
+
+    if remaining.contains("}}") {
+        return Err(AppError::Validation(
+            "sync template variable has no opening delimiter".to_string(),
+        ));
+    }
+    rendered.push_str(remaining);
+    Ok(rendered)
 }
 
 fn normalize_webdav_url(raw: &str) -> AppResult<String> {

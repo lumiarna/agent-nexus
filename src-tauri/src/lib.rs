@@ -64,6 +64,7 @@ pub fn run() {
             commands::sync::get_webdav_settings,
             commands::project_symlinks::list_project_symlinks,
             commands::sync::list_task_groups,
+            commands::sync::list_session_backups,
             commands::sync::run_task,
             commands::sync::save_webdav_settings,
             commands::sync::test_webdav_connection,

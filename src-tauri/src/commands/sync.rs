@@ -3,7 +3,8 @@ use tauri::State;
 use nexus_core::{
     error::AppResult,
     services::sync::{
-        CreateTaskGroupInput, CreateTaskInput, Task, TaskGroup, WebdavSettings, WebdavSettingsInput,
+        CreateTaskGroupInput, CreateTaskInput, SessionBackup, Task, TaskGroup, WebdavSettings,
+        WebdavSettingsInput,
     },
 };
 
@@ -33,6 +34,11 @@ pub async fn test_webdav_connection(
 #[tauri::command]
 pub fn list_task_groups(state: State<'_, AppState>) -> AppResult<Vec<TaskGroup>> {
     state.sync.list_task_groups()
+}
+
+#[tauri::command]
+pub fn list_session_backups(state: State<'_, AppState>) -> AppResult<Vec<SessionBackup>> {
+    state.sync.list_session_backups()
 }
 
 #[tauri::command]

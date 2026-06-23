@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 11;
+const CURRENT_SCHEMA_VERSION: i64 = 12;
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
 const NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
@@ -60,6 +60,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 11 {
             migrate_to_v11(conn)?;
         }
+        if current < 12 {
+            migrate_to_v12(conn)?;
+        }
     }
 
     Ok(())
@@ -91,7 +94,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (11);
+        INSERT INTO schema_version (version) VALUES (12);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -209,6 +212,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE task_groups (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            system_kind TEXT,
             sort_index INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
@@ -228,9 +232,11 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             sort_index INTEGER,
             last_run_at INTEGER,
             last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+            project_id TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
-            FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
+            FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
         CREATE TABLE settings (
@@ -251,6 +257,12 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE INDEX idx_session_index_project ON session_index(project_id);
         CREATE INDEX idx_session_index_source ON session_index(source);
         CREATE INDEX idx_tasks_group ON tasks(group_id);
+        CREATE UNIQUE INDEX idx_task_groups_system_kind
+            ON task_groups(system_kind)
+            WHERE system_kind IS NOT NULL;
+        CREATE UNIQUE INDEX idx_tasks_system_project
+            ON tasks(group_id, project_id)
+            WHERE project_id IS NOT NULL;
         CREATE INDEX idx_provider_windows_provider ON provider_windows(provider_id);
 
         INSERT INTO settings (key, value) VALUES ('tray_metric_mode', 'Remaining');
@@ -630,6 +642,31 @@ fn migrate_to_v11(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
+fn migrate_to_v12(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        ALTER TABLE task_groups ADD COLUMN system_kind TEXT;
+        ALTER TABLE tasks
+            ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE CASCADE;
+        CREATE UNIQUE INDEX idx_task_groups_system_kind
+            ON task_groups(system_kind)
+            WHERE system_kind IS NOT NULL;
+        CREATE UNIQUE INDEX idx_tasks_system_project
+            ON tasks(group_id, project_id)
+            WHERE project_id IS NOT NULL;
+        UPDATE schema_version SET version = 12;
+        COMMIT;
+        "#,
+    )
+    .or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    Ok(())
+}
+
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
     if task_column_exists(conn, column)? {
         return Ok(());
@@ -700,6 +737,30 @@ mod tests {
                 canonical_path TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE task_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                sort_index INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY,
+                group_id TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                action TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target TEXT NOT NULL,
+                schedule TEXT NOT NULL,
+                sort_index INTEGER,
+                last_run_at INTEGER,
+                last_status TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
             );
             "#,
         )
