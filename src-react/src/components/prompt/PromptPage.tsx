@@ -129,6 +129,11 @@ export function PromptPage() {
 
   const isProj = scope === "project";
   const q = search.trim().toLowerCase();
+  const projectCounts = new Map<string, number>();
+  for (const prompt of prompts) {
+    if (prompt.scope !== "project" || !prompt.projectId) continue;
+    projectCounts.set(prompt.projectId, (projectCounts.get(prompt.projectId) ?? 0) + 1);
+  }
   let set = prompts.filter((p) =>
     isProj
       ? p.scope === "project" && (projectId === null || p.projectId === projectId)
@@ -204,7 +209,10 @@ export function PromptPage() {
               active={projectId === p.id}
               onClick={() => setProjectId(p.id)}
             >
-              {p.name}
+              <span>{p.name}</span>
+              {projectCounts.get(p.id) ? (
+                <span className="ml-1 opacity-80">{projectCounts.get(p.id)}</span>
+              ) : null}
             </Chip>
           ))}
         </div>

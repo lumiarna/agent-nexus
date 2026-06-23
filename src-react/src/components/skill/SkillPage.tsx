@@ -139,6 +139,11 @@ export function SkillPage() {
 
   const isProj = scope === "project";
   const q = search.trim().toLowerCase();
+  const projectCounts = new Map<string, number>();
+  for (const skill of skills) {
+    if (skill.scope !== "project" || !skill.projectId) continue;
+    projectCounts.set(skill.projectId, (projectCounts.get(skill.projectId) ?? 0) + 1);
+  }
   let set = skills.filter((k) =>
     isProj
       ? k.scope === "project" && (projectId === null || k.projectId === projectId)
@@ -214,7 +219,10 @@ export function SkillPage() {
               active={projectId === p.id}
               onClick={() => setProjectId(p.id)}
             >
-              {p.name}
+              <span>{p.name}</span>
+              {projectCounts.get(p.id) ? (
+                <span className="ml-1 opacity-80">{projectCounts.get(p.id)}</span>
+              ) : null}
             </Chip>
           ))}
         </div>

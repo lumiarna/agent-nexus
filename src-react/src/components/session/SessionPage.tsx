@@ -84,6 +84,11 @@ export function SessionPage() {
 
   const cloudDown = source === "cloud" && !cloudAvailable;
   const q = search.trim().toLowerCase();
+  const projectCounts = new Map<string, number>();
+  for (const session of sessions) {
+    if (session.source !== source && session.source !== "both") continue;
+    projectCounts.set(session.project, (projectCounts.get(session.project) ?? 0) + 1);
+  }
   let sess = sessions.filter((se) => se.source === source || se.source === "both");
   if (projectId) sess = sess.filter((se) => se.project === projectId);
   if (q)
@@ -203,7 +208,10 @@ export function SessionPage() {
                 setSelectedId(null);
               }}
             >
-              {p.name}
+              <span>{p.name}</span>
+              {projectCounts.get(p.id) ? (
+                <span className="ml-1 opacity-80">{projectCounts.get(p.id)}</span>
+              ) : null}
             </Chip>
           ))}
         </div>
