@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(target_os = "macos")]
@@ -39,7 +39,14 @@ const MINIMAX_TOKEN_PLAN_CN_USAGE_URL: &str =
 
 const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
 const DEEPSEEK_OPENCODE_KEY: &str = "deepseek";
-const DEEPSEEK_BALANCE_URL: &str = "https://api.deepseek.com/user/balance";
+const DEEPSEEK_BALANCE_URL: &str =
+    "https://d3bbv8sr76az5s.cloudfront.net/user/balance";
+// 为什么不直接用 api.deepseek.com？
+// 部分企业 DNS 会将该域名解析到被阻断的腾讯 EdgeOne CDN IP（58.49.197.113、
+// 183.131.191.171），导致 TLS 443 端口不通。公网 DNS（8.8.8.8）解析到 AWS
+// CloudFront（d3bbv8sr76az5s.cloudfront.net），该域名直连和代理均可达。通过
+// CloudFront 域名 + Host: api.deepseek.com 请求头可绕过 DNS 污染。
+// 详见 docs/adr/0002-deepseek-cloudfront-endpoint.md
 
 const OPENROUTER_PROVIDER_ID: &str = "openrouter";
 const OPENROUTER_OPENCODE_KEY: &str = "openrouter";
@@ -1594,6 +1601,13 @@ fn quota_window_kind_rank(kind: &ProviderQuotaWindowKind) -> u8 {
     }
 }
 
+fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("Failed to build HTTP client")
+}
+
 fn format_credit_value(value: f64) -> String {
     format!("{value:.2}")
 }
@@ -1601,7 +1615,7 @@ fn format_credit_value(value: f64) -> String {
 async fn fetch_claude_code_usage(
     access_token: &str,
 ) -> Result<ClaudeCodeUsageResponse, ProviderQuotaPollError> {
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(CLAUDE_CODE_USAGE_URL)
         .bearer_auth(access_token)
         .header("anthropic-beta", "oauth-2025-04-20")
@@ -1838,7 +1852,7 @@ async fn fetch_codex_usage(
     access_token: &str,
     account_id: Option<&str>,
 ) -> Result<CodexUsageResponse, ProviderQuotaPollError> {
-    let mut request = reqwest::Client::new()
+    let mut request = http_client()
         .get(CODEX_USAGE_URL)
         .bearer_auth(access_token)
         .header("User-Agent", "codex-cli")
@@ -1885,7 +1899,7 @@ fn codex_status(status: ProviderQuotaStatus, message: &str) -> ProviderQuotaSnap
 async fn fetch_minimax_token_plan_cn_usage(
     api_key: &str,
 ) -> Result<MiniMaxTokenPlanCnUsageResponse, ProviderQuotaPollError> {
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(MINIMAX_TOKEN_PLAN_CN_USAGE_URL)
         .bearer_auth(api_key)
         .header("Content-Type", "application/json")
@@ -1940,9 +1954,10 @@ async fn fetch_configured_provider_usage(
 async fn fetch_deepseek_balance(
     api_key: &str,
 ) -> Result<DeepSeekBalanceResponse, ProviderQuotaPollError> {
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(DEEPSEEK_BALANCE_URL)
         .bearer_auth(api_key)
+        .header("Host", "api.deepseek.com")
         .header("Accept", "application/json")
         .send()
         .await
@@ -1969,7 +1984,7 @@ async fn fetch_deepseek_balance(
 async fn fetch_openrouter_credits(
     api_key: &str,
 ) -> Result<OpenRouterCreditsResponse, ProviderQuotaPollError> {
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(OPENROUTER_CREDITS_URL)
         .bearer_auth(api_key)
         .header("Accept", "application/json")
@@ -1996,7 +2011,7 @@ async fn fetch_openrouter_credits(
 }
 
 async fn fetch_copilot_usage(token: &str) -> Result<CopilotUsageResponse, ProviderQuotaPollError> {
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(COPILOT_USAGE_URL)
         .header("Authorization", format!("token {token}"))
         .header("Accept", "application/json")
@@ -2044,7 +2059,7 @@ async fn fetch_opencode_go_page(
 ) -> Result<String, ProviderQuotaPollError> {
     let id = normalize_opencode_go_workspace_id(workspace_id);
     let url = format!("https://opencode.ai/workspace/{id}/go");
-    let response = reqwest::Client::new()
+    let response = http_client()
         .get(url)
         .header("Cookie", format!("auth={}", auth_cookie.trim()))
         .header("User-Agent", OPENCODE_GO_BROWSER_UA)
