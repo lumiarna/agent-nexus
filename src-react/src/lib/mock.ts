@@ -116,11 +116,15 @@ const SKILLS: Skill[] = [
   { id: "sk10", name: "context-doctor", scope: "project", projectId: "agent-nexus", desc: "Maintain CONTEXT.md domain docs", path: ".claude/skills/context-doctor", disabled: false, cells: { "Generic Agent": "none", "Claude Code": "source", CodeX: "target", Copilot: "none", OpenCode: "none" } },
 ];
 
-// ─── Prompts (global single-file assets) ────────────────────────────────────
+// ─── Prompts (global = per-agent files; project = AGENTS.md / CLAUDE.md) ─────
 
 const PROMPTS: Prompt[] = [
-  { id: "pr1", name: "Global Instructions", path: "~/.claude/CLAUDE.md", cells: { "Generic Agent": "target", "Claude Code": "source", CodeX: "target", Copilot: "target", OpenCode: "target" } },
-  { id: "pr2", name: "Agent Conventions", path: "~/.codex/AGENTS.md", cells: { "Generic Agent": "target", "Claude Code": "none", CodeX: "source", Copilot: "none", OpenCode: "target" } },
+  { id: "pr1", name: "CLAUDE.md", scope: "global", path: "~/.claude/CLAUDE.md", content: "Always respond in Chinese. Prefer UTF-8 for file I/O. Use uv instead of python. Think before coding and expose trade-offs.", cells: { "Generic Agent": "target", "Claude Code": "source", CodeX: "target", Copilot: "target", OpenCode: "target" } },
+  { id: "pr2", name: "AGENTS.md", scope: "global", path: "~/.codex/AGENTS.md", content: "Follow conventional commits. Run the test suite before pushing. Keep functions small and pure.", cells: { "Generic Agent": "target", "Claude Code": "none", CodeX: "source", Copilot: "none", OpenCode: "target" } },
+  { id: "pr3", name: "oll-context · AGENTS.md", scope: "project", projectId: "oll-context", path: "D:/Workspace/oll-context/AGENTS.md", content: "TAP modules are scaffolded from a spec file. Validate the schema before generating code.", cells: { "Generic Agent": "source", "Claude Code": "target", CodeX: "none", Copilot: "none", OpenCode: "none" } },
+  { id: "pr4", name: "tap · CLAUDE.md", scope: "project", projectId: "tap", path: "D:/Workspace/tap/CLAUDE.md", content: "Draft release notes from merged PRs. Summarize breaking changes at the top.", cells: { "Generic Agent": "target", "Claude Code": "source", CodeX: "none", Copilot: "none", OpenCode: "none" } },
+  { id: "pr5", name: "agent-nexus · CLAUDE.md", scope: "project", projectId: "agent-nexus", path: "D:/Workspace/agent-nexus/CLAUDE.md", content: "Read CONTEXT.md and GOTCHAS.md first. Reject fallback patches; simplicity first.", cells: { "Generic Agent": "none", "Claude Code": "source", CodeX: "none", Copilot: "none", OpenCode: "none" } },
+  { id: "pr6", name: "awesome-vibe-coding · AGENTS.md", scope: "project", projectId: "awesome-vibe-coding", path: "D:/Workspace/awesome-vibe-coding/AGENTS.md", content: "Lint vibe-coding examples. Keep snippets runnable and idiomatic.", cells: { "Generic Agent": "source", "Claude Code": "none", CodeX: "none", Copilot: "none", OpenCode: "none" } },
 ];
 
 // ─── Sessions ───────────────────────────────────────────────────────────────

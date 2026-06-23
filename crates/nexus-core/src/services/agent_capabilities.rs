@@ -23,6 +23,7 @@ pub struct SkillSurface {
 #[serde(rename_all = "camelCase")]
 pub struct PromptSurface {
     pub global_file: &'static str,
+    pub project_file: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -44,6 +45,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
         }),
         prompt: Some(PromptSurface {
             global_file: "~/.agents/AGENTS.md",
+            project_file: Some("AGENTS.md"),
         }),
         provider: None,
     },
@@ -58,6 +60,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
         }),
         prompt: Some(PromptSurface {
             global_file: "~/.claude/CLAUDE.md",
+            project_file: Some("CLAUDE.md"),
         }),
         provider: Some(ProviderSurface {
             provider_id: "claude",
@@ -75,6 +78,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
         }),
         prompt: Some(PromptSurface {
             global_file: "~/.codex/AGENTS.md",
+            project_file: None,
         }),
         provider: Some(ProviderSurface {
             provider_id: "codex",
@@ -92,6 +96,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
         }),
         prompt: Some(PromptSurface {
             global_file: "~/.github/AGENTS.md",
+            project_file: None,
         }),
         provider: Some(ProviderSurface {
             provider_id: "copilot",
@@ -109,6 +114,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
         }),
         prompt: Some(PromptSurface {
             global_file: "~/.config/opencode/AGENTS.md",
+            project_file: None,
         }),
         provider: None,
     },

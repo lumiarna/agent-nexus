@@ -25,7 +25,11 @@ use crate::{
 pub struct Prompt {
     pub id: String,
     pub name: String,
+    pub scope: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     pub path: String,
+    pub content: String,
     pub cells: BTreeMap<String, String>,
 }
 
@@ -43,14 +47,26 @@ pub struct PromptService {
 }
 
 #[derive(Debug, Clone)]
+struct ProjectRoot {
+    id: String,
+    name: String,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
 struct PromptSource {
     source_agent: &'static str,
+    scope: String,
+    project_id: Option<String>,
+    project_path: Option<PathBuf>,
     name: String,
     canonical_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
 struct PromptTargetContext {
+    scope: String,
+    project_path: Option<PathBuf>,
     canonical_path: PathBuf,
     source_agent: String,
 }
@@ -72,7 +88,11 @@ impl MatrixSource for PromptMatrixSource<'_> {
     }
 
     fn target_path_for(&self, agent: &AgentCapabilitySurface) -> AppResult<Option<PathBuf>> {
-        target_path_for_agent(agent)
+        target_path_for_parts(
+            &self.source.scope,
+            self.source.project_path.as_deref(),
+            agent,
+        )
     }
 
     fn target_path_label(&self) -> &'static str {
@@ -93,18 +113,39 @@ impl PromptService {
         let conn = self.db.connection()?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, name, canonical_path
-            FROM prompts
-            ORDER BY name, canonical_path
+            SELECT p.id, p.name, p.scope, p.project_id, p.canonical_path
+            FROM prompts p
+            LEFT JOIN projects project ON project.id = p.project_id
+            JOIN prompt_distributions source
+                ON source.prompt_id = p.id AND source.role = 'source'
+            ORDER BY
+                CASE p.scope WHEN 'global' THEN 0 ELSE 1 END,
+                CASE WHEN p.scope = 'project' THEN project.sort_index IS NULL ELSE 0 END,
+                CASE WHEN p.scope = 'project' THEN project.sort_index END,
+                CASE WHEN p.scope = 'project' THEN project.created_at END,
+                CASE WHEN p.scope = 'project' THEN project.name END,
+                CASE source.agent
+                    WHEN 'Generic Agent' THEN 0
+                    WHEN 'Claude Code' THEN 1
+                    WHEN 'CodeX' THEN 2
+                    WHEN 'Copilot' THEN 3
+                    WHEN 'OpenCode' THEN 4
+                    ELSE 5
+                END,
+                p.name,
+                p.canonical_path
             "#,
         )?;
         let rows = stmt.query_map([], |row| prompt_from_row(row, &conn))?;
         let mut prompts = rows.collect::<Result<Vec<_>, _>>()?;
-        prompts.sort_by_key(source_index);
+        for prompt in &mut prompts {
+            prompt.content = fs::read_to_string(&prompt.path)?;
+        }
         Ok(prompts)
     }
 
     pub fn scan_prompts(&self) -> AppResult<Vec<Prompt>> {
+        let projects = self.list_project_roots()?;
         let known_target_paths = self.known_prompt_target_paths()?;
         let mut sources = Vec::new();
 
@@ -113,13 +154,49 @@ impl PromptService {
                 continue;
             };
             let prompt_file = paths::resolve_local_path(prompt.global_file)?;
-            if let Some(source) = discover_prompt_source(agent, &prompt_file, &known_target_paths)?
-            {
+            if let Some(source) = discover_prompt_source(
+                agent,
+                "global",
+                None,
+                None,
+                None,
+                &prompt_file,
+                &known_target_paths,
+            )? {
                 sources.push(source);
             }
         }
 
-        sources.sort_by_key(|source| source_index_for_agent(source.source_agent));
+        for project in &projects {
+            for agent in agent_capability_surfaces() {
+                let Some(project_file) = agent.prompt.and_then(|prompt| prompt.project_file) else {
+                    continue;
+                };
+                let prompt_file = project.path.join(project_file);
+                if let Some(source) = discover_prompt_source(
+                    agent,
+                    "project",
+                    Some(project.id.clone()),
+                    Some(project.name.as_str()),
+                    Some(project.path.clone()),
+                    &prompt_file,
+                    &known_target_paths,
+                )? {
+                    sources.push(source);
+                }
+            }
+        }
+
+        sources.sort_by(|left, right| {
+            left.scope
+                .cmp(&right.scope)
+                .then_with(|| left.project_id.cmp(&right.project_id))
+                .then_with(|| {
+                    source_index_for_agent(left.source_agent)
+                        .cmp(&source_index_for_agent(right.source_agent))
+                })
+                .then_with(|| left.canonical_path.cmp(&right.canonical_path))
+        });
         self.replace_scanned_sources(sources)?;
         self.list_prompts()
     }
@@ -141,8 +218,13 @@ impl PromptService {
             ));
         }
 
-        let target_path = target_path_for_agent(target_agent)?.ok_or_else(|| {
-            AppError::Validation("prompt target path cannot be computed".to_string())
+        let target_path = target_path_for_parts(
+            &context.scope,
+            context.project_path.as_deref(),
+            target_agent,
+        )?
+        .ok_or_else(|| {
+            AppError::Validation("agent does not support prompt targets in this scope".to_string())
         })?;
 
         distribution::write_target(
@@ -174,6 +256,28 @@ impl PromptService {
         reveal_path(&canonical_path)
     }
 
+    fn list_project_roots(&self) -> AppResult<Vec<ProjectRoot>> {
+        let conn = self.db.connection()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, name, path
+            FROM projects
+            WHERE status = 'active'
+            ORDER BY sort_index IS NULL, sort_index, created_at, name
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let path: String = row.get(2)?;
+            Ok(ProjectRoot {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                path: PathBuf::from(path),
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     fn replace_scanned_sources(&self, sources: Vec<PromptSource>) -> AppResult<()> {
         let now = now_epoch_seconds()?;
         let mut scanned_paths = BTreeSet::new();
@@ -199,11 +303,20 @@ impl PromptService {
                         r#"
                         UPDATE prompts
                         SET name = ?2,
-                            canonical_path = ?3,
-                            updated_at = ?4
+                            scope = ?3,
+                            project_id = ?4,
+                            canonical_path = ?5,
+                            updated_at = ?6
                         WHERE id = ?1
                         "#,
-                        params![id, source.name, canonical_path, now],
+                        params![
+                            id,
+                            source.name,
+                            source.scope,
+                            source.project_id,
+                            canonical_path,
+                            now
+                        ],
                     )?;
                     id
                 }
@@ -211,10 +324,19 @@ impl PromptService {
                     let id = Uuid::new_v4().to_string();
                     tx.execute(
                         r#"
-                        INSERT INTO prompts (id, name, canonical_path, created_at, updated_at)
-                        VALUES (?1, ?2, ?3, ?4, ?4)
+                        INSERT INTO prompts (
+                            id, name, scope, project_id, canonical_path, created_at, updated_at
+                        )
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
                         "#,
-                        params![id, source.name, canonical_path, now],
+                        params![
+                            id,
+                            source.name,
+                            source.scope,
+                            source.project_id,
+                            canonical_path,
+                            now
+                        ],
                     )?;
                     id
                 }
@@ -272,34 +394,41 @@ impl PromptService {
 
     fn get_prompt(&self, id: &str) -> AppResult<Prompt> {
         let conn = self.db.connection()?;
-        conn.query_row(
-            r#"
-            SELECT id, name, canonical_path
+        let mut prompt = conn
+            .query_row(
+                r#"
+            SELECT id, name, scope, project_id, canonical_path
             FROM prompts
             WHERE id = ?1
             "#,
-            params![id],
-            |row| prompt_from_row(row, &conn),
-        )
-        .optional()?
-        .ok_or_else(|| AppError::Validation("prompt was not found".to_string()))
+                params![id],
+                |row| prompt_from_row(row, &conn),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::Validation("prompt was not found".to_string()))?;
+        prompt.content = fs::read_to_string(&prompt.path)?;
+        Ok(prompt)
     }
 
     fn prompt_target_context(&self, id: &str) -> AppResult<PromptTargetContext> {
         let conn = self.db.connection()?;
         conn.query_row(
             r#"
-            SELECT p.canonical_path, d.agent
+            SELECT p.scope, project.path, p.canonical_path, d.agent
             FROM prompts p
+            LEFT JOIN projects project ON project.id = p.project_id
             JOIN prompt_distributions d ON d.prompt_id = p.id AND d.role = 'source'
             WHERE p.id = ?1
             "#,
             params![id],
             |row| {
-                let canonical_path: String = row.get(0)?;
+                let project_path: Option<String> = row.get(1)?;
+                let canonical_path: String = row.get(2)?;
                 Ok(PromptTargetContext {
+                    scope: row.get(0)?,
+                    project_path: project_path.map(PathBuf::from),
                     canonical_path: PathBuf::from(canonical_path),
-                    source_agent: row.get(1)?,
+                    source_agent: row.get(3)?,
                 })
             },
         )
@@ -322,6 +451,10 @@ impl PromptService {
 
 fn discover_prompt_source(
     agent: &AgentCapabilitySurface,
+    scope: &str,
+    project_id: Option<String>,
+    project_name: Option<&str>,
+    project_path: Option<PathBuf>,
     prompt_file: &Path,
     known_target_paths: &BTreeSet<String>,
 ) -> AppResult<Option<PromptSource>> {
@@ -339,9 +472,33 @@ fn discover_prompt_source(
         return Ok(None);
     }
 
+    let file_name = prompt_file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| AppError::Validation("prompt file has no file name".to_string()))?
+        .to_string();
+    let name = match scope {
+        "global" => file_name,
+        "project" => format!(
+            "{} · {}",
+            project_name.ok_or_else(|| {
+                AppError::Validation("project prompt source has no project name".to_string())
+            })?,
+            file_name
+        ),
+        _ => {
+            return Err(AppError::Validation(format!(
+                "unsupported prompt scope: {scope}"
+            )))
+        }
+    };
+
     Ok(Some(PromptSource {
         source_agent: agent.name,
-        name: format!("{} Global Prompt", agent.name),
+        scope: scope.to_string(),
+        project_id,
+        project_path,
+        name,
         canonical_path: prompt_file.canonicalize()?,
     }))
 }
@@ -361,11 +518,29 @@ fn target_paths_for_prompt(
     rows.collect()
 }
 
-fn target_path_for_agent(agent: &AgentCapabilitySurface) -> AppResult<Option<PathBuf>> {
+fn target_path_for_parts(
+    scope: &str,
+    project_path: Option<&Path>,
+    agent: &AgentCapabilitySurface,
+) -> AppResult<Option<PathBuf>> {
     let Some(prompt) = agent.prompt else {
         return Ok(None);
     };
-    Ok(Some(paths::resolve_local_path(prompt.global_file)?))
+    match scope {
+        "global" => Ok(Some(paths::resolve_local_path(prompt.global_file)?)),
+        "project" => {
+            let Some(project_file) = prompt.project_file else {
+                return Ok(None);
+            };
+            let project_path = project_path.ok_or_else(|| {
+                AppError::Validation("project prompt has no project path".to_string())
+            })?;
+            Ok(Some(project_path.join(project_file)))
+        }
+        _ => Err(AppError::Validation(format!(
+            "unsupported prompt scope: {scope}"
+        ))),
+    }
 }
 
 fn existing_target_exists(
@@ -382,18 +557,11 @@ fn prompt_from_row(row: &Row<'_>, conn: &rusqlite::Connection) -> rusqlite::Resu
         cells: distribution::cells(conn, "prompt_distributions", "prompt_id", &id)?,
         id,
         name: row.get(1)?,
-        path: row.get(2)?,
+        scope: row.get(2)?,
+        project_id: row.get(3)?,
+        path: row.get(4)?,
+        content: String::new(),
     })
-}
-
-fn source_index(prompt: &Prompt) -> usize {
-    agent_capability_surfaces()
-        .iter()
-        .enumerate()
-        .find_map(|(index, agent)| {
-            (prompt.cells.get(agent.name).map(String::as_str) == Some("source")).then_some(index)
-        })
-        .unwrap_or(usize::MAX)
 }
 
 fn source_index_for_agent(agent_name: &str) -> usize {

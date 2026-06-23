@@ -7,6 +7,7 @@ export interface SkillCapabilitySurface {
 
 export interface PromptCapabilitySurface {
   globalFile: string;
+  projectFile?: string | null;
 }
 
 export interface ProviderCapabilitySurface {

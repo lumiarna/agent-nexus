@@ -94,7 +94,14 @@
 
 - 来源（排除 Symlink）
 	- 自动扫描每种 Agent Global PROMPT_FILE
+	- 自动扫描每个 Project 的仓库根提示文件
+		- Generic Agent: `${project_dir}/AGENTS.md`
+		- Claude Code: `${project_dir}/CLAUDE.md`
+- Project Prompt 名称使用「项目名 · 文件」，Global Prompt 直接使用文件名
+- 支持按文件正文搜索
 - 支持 Symlink 到其他 Agent
+	- Global Prompt 支持全部 prompt-capable Agent
+	- Project Prompt 仅支持 Generic Agent 与 Claude Code
 - 支持 WebDAV 备份
 
 ## Sync

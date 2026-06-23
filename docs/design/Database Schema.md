@@ -93,14 +93,16 @@ CREATE TABLE skill_distributions (
     FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE
 );
 
--- Prompt: 全局提示资产
--- CONTEXT.md: MVP 只覆盖 global prompt file
+-- Prompt: 支持 global / project Scope 的提示资产
 CREATE TABLE prompts (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
+    project_id TEXT,                                  -- global 时为 NULL
     canonical_path TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
 -- Prompt 传播关系
@@ -216,6 +218,8 @@ CREATE TABLE settings (
 ```sql
 CREATE INDEX idx_skills_scope ON skills(scope);
 CREATE INDEX idx_skills_project ON skills(project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX idx_prompts_scope ON prompts(scope);
+CREATE INDEX idx_prompts_project ON prompts(project_id) WHERE project_id IS NOT NULL;
 CREATE UNIQUE INDEX idx_skill_distributions_one_source
     ON skill_distributions(skill_id)
     WHERE role = 'source';

@@ -61,8 +61,8 @@ _Avoid_: Local path, mutable folder name as identity, remote guess
 _Avoid_: Skill copy, skill target, generated placement
 
 **Prompt**:
-一种面向 agent 的全局提示资产。MVP 中 `Prompt` 只覆盖 `global prompt file`，不纳入 `project-level prompt`。
-_Avoid_: Project prompt, prompt copy
+一种面向 agent 的共享提示资产，同时支持 `global` 与 `project` 两种 `Scope`。Global Prompt 使用各 Agent 的全局提示文件；Project Prompt 只覆盖仓库根的 `AGENTS.md`（Generic Agent）与 `CLAUDE.md`（Claude Code）。
+_Avoid_: Arbitrary project prompt path, prompt copy
 
 **Session**:
 一种可搜索、可归档的会话内容资产。它既有 `Local` 视图，也有 `Cloud` 视图，但归档与恢复的任务粒度保持在 `Project` 级。
@@ -103,7 +103,7 @@ _Avoid_: Copy target, mirrored file, duplicate asset
 _Avoid_: New asset, cloned asset
 
 **Scope**:
-`Asset` 的适用范围。当前只用于 `Skill`，取值为 `global` 或 `project`。
+`Asset` 的适用范围。当前用于 `Skill` 与 `Prompt`，取值为 `global` 或 `project`。
 _Avoid_: Type, category
 
 ## Distribution
@@ -125,7 +125,7 @@ _Avoid_: Owner, primary target
 _Avoid_: Secondary source, duplicate source
 
 **Agent Capability Surface**:
-某个 `Agent` 在当前产品中实际参与的资产与页面范围。它集中描述 canonical order、配置根、`Skill` surface（global/project skill 目录）、`Prompt` surface（global prompt 文件）以及可选的 `Provider` 展示事实。`Agent` 的领域身份可以完整存在，但其可操作 surface 可以分阶段开放；当前已确认 `Copilot` 在 MVP 中同时参与 `Skill` 与 `Prompt`。`Agent Capability Surface` 的展示名必须使用 canonical agent 名；内部 ID（如 `claude`、`opencode`）只能作为实现层标识，不能替代 `Claude Code`、`OpenCode` 等领域名。
+某个 `Agent` 在当前产品中实际参与的资产与页面范围。它集中描述 canonical order、配置根、`Skill` surface（global/project skill 目录）、`Prompt` surface（global prompt 文件与可选的 project prompt 文件）以及可选的 `Provider` 展示事实。Global Prompt 覆盖全部 prompt-capable agent；Project Prompt 只开放 Generic Agent 的 `AGENTS.md` 与 Claude Code 的 `CLAUDE.md`。`Agent` 的领域身份可以完整存在，但其可操作 surface 可以分阶段开放；当前已确认 `Copilot` 在 MVP 中参与 `Skill` 与 Global Prompt。`Agent Capability Surface` 的展示名必须使用 canonical agent 名；内部 ID（如 `claude`、`opencode`）只能作为实现层标识，不能替代 `Claude Code`、`OpenCode` 等领域名。
 _Avoid_: Partial agent identity, ad hoc special case, short ID as display name, OpenCode Go as agent surface
 
 ## Sync

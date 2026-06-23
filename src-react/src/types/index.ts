@@ -89,7 +89,11 @@ export interface Skill {
 export interface Prompt {
   id: string;
   name: string;
+  scope: "global" | "project";
+  projectId?: string;
   path: string;
+  /** File body, read from the canonical UTF-8 source for client-side search. */
+  content: string;
   cells: Cells;
 }
 

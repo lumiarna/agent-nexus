@@ -67,17 +67,21 @@ function cellTitle(agent: AgentName, role: CellRole): string {
   return agent + suffix;
 }
 
-/** The row of clickable Agent Matrix cells (canonical agent order). */
+/** The row of clickable Agent Matrix cells (canonical agent order).
+ *  `agents` narrows the rendered set — e.g. project prompts only span
+ *  Generic Agent / Claude Code. Defaults to the full canonical order. */
 export function AgentMatrixCells({
   cells,
   onToggle,
+  agents = AGENT_ORDER,
 }: {
   cells: Cells;
   onToggle: (agent: AgentName) => void;
+  agents?: AgentName[];
 }) {
   return (
     <div className="flex justify-center gap-[5px]">
-      {AGENT_ORDER.map((a) => (
+      {agents.map((a) => (
         <AgentIcon
           key={a}
           agent={a}

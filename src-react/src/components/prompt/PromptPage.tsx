@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -7,15 +7,26 @@ import {
   SourceBadge,
 } from "@/components/ui/agent-icon";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/primitives";
+import { Card, Input } from "@/components/ui/primitives";
+import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
 import { promptsApi } from "@/lib/api/prompts";
+import { AGENTS } from "@/config/agents";
 import { nexus } from "@/lib/mock";
+import { useProjectsQuery } from "@/lib/query/projects";
 import { usePromptsQuery, useSetPromptTargetMutation } from "@/lib/query/prompts";
 import { isTauriRuntime } from "@/lib/runtime";
 import { srcAgentOf, toggleCellRole } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type { AgentName, Prompt } from "@/types";
+
+type Scope = "global" | "project";
+
+/** Project prompts collapse to the two repo-root files — AGENTS.md (the
+ *  cross-tool standard) and CLAUDE.md — so the matrix only spans these agents. */
+const PROJECT_PROMPT_AGENTS: AgentName[] = AGENTS.filter(
+  (agent) => agent.projectPromptFile,
+).map((agent) => agent.name);
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -34,9 +45,17 @@ function getErrorMessage(error: unknown): string {
 export function PromptPage() {
   const desktop = isTauriRuntime();
   const promptsQuery = usePromptsQuery();
+  const projectsQuery = useProjectsQuery();
   const setPromptTarget = useSetPromptTargetMutation();
   const [mockPrompts, setMockPrompts] = useState(() => nexus.prompts());
+  const [scope, setScope] = useState<Scope>("global");
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const mockProjects = useRef(nexus.projects().filter((p) => p.status === "active"));
   const prompts = desktop ? promptsQuery.data ?? [] : mockPrompts;
+  const projects = desktop
+    ? (projectsQuery.data ?? []).filter((p) => p.status === "active")
+    : mockProjects.current;
   const pageError =
     desktop && promptsQuery.error ? getErrorMessage(promptsQuery.error) : null;
   const isLoading = desktop && promptsQuery.isLoading;
@@ -108,6 +127,29 @@ export function PromptPage() {
     }
   }
 
+  const isProj = scope === "project";
+  const q = search.trim().toLowerCase();
+  let set = prompts.filter((p) =>
+    isProj
+      ? p.scope === "project" && (projectId === null || p.projectId === projectId)
+      : p.scope !== "project",
+  );
+  if (q) set = set.filter((p) => p.content.toLowerCase().includes(q));
+
+  let emptyTitle = "";
+  let emptyBody = "";
+  if (q && set.length === 0) {
+    emptyTitle = "No matching prompts";
+    emptyBody = `No prompt content matches “${search}” in this scope.`;
+  } else if (isProj) {
+    const pn = projectId === null ? "any project" : projects.find((p) => p.id === projectId)?.name;
+    emptyTitle = "No project prompts";
+    emptyBody = `No project-scoped prompts recorded for ${pn}.`;
+  } else {
+    emptyTitle = "No global prompts";
+    emptyBody = "No global prompt files discovered across prompt-capable agents yet.";
+  }
+
   return (
     <ScreenScroll>
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -116,7 +158,7 @@ export function PromptPage() {
             Prompt
           </h1>
           <p className="mt-1.5 text-[13px] text-[#9a8f80]">
-            Global prompt assets · Agent Matrix drives distribution
+            Shared prompt assets · Agent Matrix drives distribution
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -129,9 +171,44 @@ export function PromptPage() {
             <RefreshCw size={14} className={cn(isRefreshing && "animate-spin")} />
             {isRefreshing ? "Refreshing..." : "Refresh"}
           </Button>
-          <MatrixLegend />
+          <Segmented<Scope>
+            options={[
+              { value: "global", label: "Global" },
+              { value: "project", label: "Project" },
+            ]}
+            value={scope}
+            onChange={setScope}
+          />
         </div>
       </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3.5">
+        <Input
+          className="min-w-[240px] flex-1 rounded-full bg-nexus-card px-[13px] text-[13px]"
+          placeholder="Search by content"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <MatrixLegend />
+      </div>
+
+      {isProj ? (
+        <div className="mt-3.5 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-[#b3a999]">Project</span>
+          <Chip active={projectId === null} onClick={() => setProjectId(null)}>
+            All
+          </Chip>
+          {projects.map((p) => (
+            <Chip
+              key={p.id}
+              active={projectId === p.id}
+              onClick={() => setProjectId(p.id)}
+            >
+              {p.name}
+            </Chip>
+          ))}
+        </div>
+      ) : null}
 
       <Card className="mt-4 overflow-hidden">
         <div
@@ -142,11 +219,11 @@ export function PromptPage() {
           <div className="text-center">Distribution</div>
           <div className="text-right">Source file</div>
         </div>
-        {isLoading && prompts.length === 0 ? (
+        {isLoading && set.length === 0 ? (
           <div className="px-6 py-12 text-center">
             <div className="text-[14px] font-bold text-[#7a6f60]">Scanning prompts</div>
             <div className="mt-1.5 text-[12.5px] text-[#b3a999]">
-              Reading global prompt files from agent capability surfaces.
+              Reading prompt files from agent capability surfaces.
             </div>
           </div>
         ) : pageError ? (
@@ -154,8 +231,8 @@ export function PromptPage() {
             <div className="text-[14px] font-bold text-nexus-crit">Prompt scan failed</div>
             <div className="mt-1.5 text-[12.5px] text-[#b3a999]">{pageError}</div>
           </div>
-        ) : prompts.length > 0 ? (
-          prompts.map((p) => (
+        ) : set.length > 0 ? (
+          set.map((p) => (
             <div
               key={p.id}
               className="grid items-center gap-4 border-b border-[#f3eee5] px-5 py-[14px]"
@@ -170,7 +247,11 @@ export function PromptPage() {
                   {p.path}
                 </div>
               </div>
-              <AgentMatrixCells cells={p.cells} onToggle={(a) => void toggleCell(p, a)} />
+              <AgentMatrixCells
+                cells={p.cells}
+                agents={isProj ? PROJECT_PROMPT_AGENTS : undefined}
+                onToggle={(a) => void toggleCell(p, a)}
+              />
               <div className="flex flex-col items-end gap-[5px]">
                 <span
                   onClick={() => void openSource(p)}
@@ -189,19 +270,31 @@ export function PromptPage() {
           ))
         ) : (
           <div className="px-6 py-12 text-center">
-            <div className="text-[14px] font-bold text-[#7a6f60]">No global prompts</div>
-            <div className="mt-1.5 text-[12.5px] text-[#b3a999]">
-              No global prompt files discovered across prompt-capable agents yet.
-            </div>
+            <div className="text-[14px] font-bold text-[#7a6f60]">{emptyTitle}</div>
+            <div className="mt-1.5 text-[12.5px] text-[#b3a999]">{emptyBody}</div>
           </div>
         )}
       </Card>
 
       <p className="mt-3.5 text-[11.5px] text-[#b3a999]">
-        MVP keeps Prompt as a global single-file asset — there is no project-level prompt.
-        Distribution defaults to <b className="text-[#9a8f80]">symlink</b>; target paths are
-        computed per agent. <b className="text-[#9a8f80]">Agents</b> (
-        <span className="font-mono">~/.agents</span>) is the leftmost generic target.
+        {isProj ? (
+          <>
+            Project prompts live at the repo root and collapse to two files —{" "}
+            <span className="font-mono">AGENTS.md</span> (
+            <b className="text-[#9a8f80]">Generic Agent</b>) and{" "}
+            <span className="font-mono">CLAUDE.md</span> (
+            <b className="text-[#9a8f80]">Claude Code</b>). Each row has exactly one
+            source; distribution defaults to <b className="text-[#9a8f80]">symlink</b>.
+          </>
+        ) : (
+          <>
+            Global prompts span every prompt-capable agent —{" "}
+            <b className="text-[#9a8f80]">Generic Agent</b> (
+            <span className="font-mono">~/.agents</span>) sits leftmost, then Claude Code
+            / CodeX / Copilot / OpenCode. Each row has exactly one source; distribution
+            defaults to <b className="text-[#9a8f80]">symlink</b>.
+          </>
+        )}
       </p>
     </ScreenScroll>
   );

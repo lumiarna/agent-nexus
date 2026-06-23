@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 10;
+const CURRENT_SCHEMA_VERSION: i64 = 11;
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
 const NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
@@ -57,6 +57,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 10 {
             migrate_to_v10(conn)?;
         }
+        if current < 11 {
+            migrate_to_v11(conn)?;
+        }
     }
 
     Ok(())
@@ -88,7 +91,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (7);
+        INSERT INTO schema_version (version) VALUES (11);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -139,9 +142,12 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE prompts (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
+            project_id TEXT,
             canonical_path TEXT NOT NULL,
             created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
         CREATE TABLE prompt_distributions (
@@ -234,6 +240,8 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
 
         CREATE INDEX idx_skills_scope ON skills(scope);
         CREATE INDEX idx_skills_project ON skills(project_id) WHERE project_id IS NOT NULL;
+        CREATE INDEX idx_prompts_scope ON prompts(scope);
+        CREATE INDEX idx_prompts_project ON prompts(project_id) WHERE project_id IS NOT NULL;
         CREATE UNIQUE INDEX idx_skill_distributions_one_source
             ON skill_distributions(skill_id)
             WHERE role = 'source';
@@ -597,6 +605,31 @@ fn migrate_to_v10(conn: &Connection) -> AppResult<()> {
     }
 }
 
+fn migrate_to_v11(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        ALTER TABLE prompts
+            ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'
+            CHECK (scope IN ('global', 'project'));
+        ALTER TABLE prompts
+            ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE CASCADE;
+        CREATE INDEX idx_prompts_scope ON prompts(scope);
+        CREATE INDEX idx_prompts_project
+            ON prompts(project_id)
+            WHERE project_id IS NOT NULL;
+        UPDATE schema_version SET version = 11;
+        COMMIT;
+        "#,
+    )
+    .or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    Ok(())
+}
+
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
     if task_column_exists(conn, column)? {
         return Ok(());
@@ -657,6 +690,20 @@ mod tests {
             .expect("create schema_version table");
         conn.execute("INSERT INTO schema_version (version) VALUES (6)", [])
             .expect("seed schema_version 6");
+        conn.execute("CREATE TABLE projects (id TEXT PRIMARY KEY)", [])
+            .expect("create projects table");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE prompts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                canonical_path TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            "#,
+        )
+        .expect("create prompts table");
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('sync_project_symlink_ignored_dirs', ?1)",
             [ignored_dirs_value],
@@ -704,6 +751,65 @@ mod tests {
         );
         assert_eq!(setting_count(&conn, "sync_project_symlink_ignored_dirs"), 0);
         assert_eq!(setting_count(&conn, "sync_project_symlink_max_depth"), 0);
+
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
+
+        let prompt_columns = conn
+            .prepare("PRAGMA table_info(prompts)")
+            .expect("prepare prompt columns")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query prompt columns")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect prompt columns");
+        assert!(prompt_columns.contains(&"scope".to_string()));
+        assert!(prompt_columns.contains(&"project_id".to_string()));
+    }
+
+    #[test]
+    fn migrates_v10_prompts_to_scoped_prompts_without_losing_rows() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (10);
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY
+            );
+            CREATE TABLE prompts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                canonical_path TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            INSERT INTO prompts (
+                id, name, canonical_path, created_at, updated_at
+            ) VALUES (
+                'prompt-1', 'AGENTS.md', '/tmp/AGENTS.md', 1, 1
+            );
+            "#,
+        )
+        .expect("seed v10 prompt schema");
+
+        migrate_to_v11(&conn).expect("migrate prompts to v11");
+
+        let (scope, project_id): (String, Option<String>) = conn
+            .query_row(
+                "SELECT scope, project_id FROM prompts WHERE id = 'prompt-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read migrated prompt");
+        assert_eq!(scope, "global");
+        assert_eq!(project_id, None);
+
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, 11);
     }
 
     #[test]

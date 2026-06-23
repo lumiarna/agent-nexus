@@ -23,6 +23,7 @@ export function fallbackAgentCapabilities(): AgentCapabilitySurface[] {
       prompt: globalPromptFile
         ? {
             globalFile: globalPromptFile,
+            projectFile: agent.projectPromptFile ?? null,
           }
         : null,
       provider: agent.providerId

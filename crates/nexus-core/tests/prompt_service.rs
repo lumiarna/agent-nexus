@@ -6,7 +6,10 @@ use nexus_core::services::{
 };
 use nexus_core::{
     database::Database,
-    services::prompts::{PromptService, SetPromptTargetInput},
+    services::{
+        projects::ProjectService,
+        prompts::{PromptService, SetPromptTargetInput},
+    },
 };
 use serial_test::serial;
 use tempfile::TempDir;
@@ -41,28 +44,16 @@ fn write_prompt(path: &Path, body: &str) {
     fs::write(path, body).expect("write prompt");
 }
 
+fn git_repo(parent: &Path, name: &str) -> String {
+    let path = parent.join(name);
+    fs::create_dir_all(path.join(".git")).expect("create test git repo");
+    path.to_string_lossy().into_owned()
+}
+
 #[cfg(unix)]
 fn canonical_display_path(path: impl AsRef<Path>) -> String {
     let path = fs::canonicalize(path).expect("canonicalize path");
     paths::path_to_string(&path, "path").expect("display path")
-}
-
-#[cfg(unix)]
-fn assert_link_points_to(source: &Path, target: &Path) {
-    let raw_link = fs::read_link(target).expect("read target link");
-    let resolved = if raw_link.is_absolute() {
-        raw_link
-    } else {
-        target
-            .parent()
-            .map(|parent| parent.join(&raw_link))
-            .unwrap_or(raw_link)
-    };
-
-    assert_eq!(
-        fs::canonicalize(resolved).expect("canonicalize resolved link"),
-        fs::canonicalize(source).expect("canonicalize source")
-    );
 }
 
 fn assert_file_distribution_tracks_source_writes(source: &Path, target: &Path) {
@@ -98,8 +89,11 @@ fn scans_global_prompt_sources_and_derives_distribution_from_capability_surface(
 
         assert_eq!(rows.len(), 1);
         let prompt = &rows[0];
-        assert_eq!(prompt.name, "Copilot Global Prompt");
+        assert_eq!(prompt.name, "AGENTS.md");
+        assert_eq!(prompt.scope, "global");
+        assert_eq!(prompt.project_id, None);
         assert_eq!(prompt.path, canonical_display_path(source_file));
+        assert_eq!(prompt.content, "# Copilot instructions\n");
         assert_eq!(prompt.cells.len(), agent_capability_surfaces().len());
         for agent in agent_capability_surfaces() {
             assert!(prompt.cells.contains_key(agent.name));
@@ -109,6 +103,126 @@ fn scans_global_prompt_sources_and_derives_distribution_from_capability_surface(
         assert_eq!(prompt.cells["Generic Agent"], "none");
         assert_eq!(prompt.cells["Claude Code"], "none");
         assert_eq!(prompt.cells["OpenCode"], "none");
+    });
+}
+
+#[test]
+#[serial]
+#[cfg(unix)]
+fn scans_project_prompt_sources_with_two_agent_matrix_and_content() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let prompts = PromptService::new(db);
+
+    with_isolated_home(|home| {
+        let repo = git_repo(&home.join("workspace"), "agent-nexus");
+        let project = projects
+            .record_project(repo.clone())
+            .expect("record project");
+        let repo = Path::new(&repo);
+        let source_file = repo.join("AGENTS.md");
+        let target_file = repo.join("CLAUDE.md");
+        write_prompt(&source_file, "# Project instructions\n");
+        create_symlink_placement(&source_file, &target_file).expect("create project prompt link");
+
+        let rows = prompts.scan_prompts().expect("scan project prompts");
+
+        assert_eq!(rows.len(), 1);
+        let prompt = &rows[0];
+        assert_eq!(prompt.name, "agent-nexus · AGENTS.md");
+        assert_eq!(prompt.scope, "project");
+        assert_eq!(prompt.project_id.as_deref(), Some(project.id.as_str()));
+        assert_eq!(prompt.path, canonical_display_path(source_file));
+        assert_eq!(prompt.content, "# Project instructions\n");
+        assert_eq!(prompt.cells["Generic Agent"], "source");
+        assert_eq!(prompt.cells["Claude Code"], "target");
+        assert_eq!(prompt.cells["CodeX"], "none");
+        assert_eq!(prompt.cells["Copilot"], "none");
+        assert_eq!(prompt.cells["OpenCode"], "none");
+    });
+}
+
+#[test]
+#[serial]
+fn scans_both_real_project_prompt_files_as_independent_sources() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let prompts = PromptService::new(db);
+
+    with_isolated_home(|home| {
+        let repo = git_repo(&home.join("workspace"), "agent-nexus");
+        projects
+            .record_project(repo.clone())
+            .expect("record project");
+        let repo = Path::new(&repo);
+        write_prompt(&repo.join("AGENTS.md"), "# Generic instructions\n");
+        write_prompt(&repo.join("CLAUDE.md"), "# Claude instructions\n");
+
+        let rows = prompts.scan_prompts().expect("scan project prompts");
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].name, "agent-nexus · AGENTS.md");
+        assert_eq!(rows[0].content, "# Generic instructions\n");
+        assert_eq!(rows[0].cells["Generic Agent"], "source");
+        assert_eq!(rows[0].cells["Claude Code"], "none");
+        assert_eq!(rows[1].name, "agent-nexus · CLAUDE.md");
+        assert_eq!(rows[1].content, "# Claude instructions\n");
+        assert_eq!(rows[1].cells["Generic Agent"], "none");
+        assert_eq!(rows[1].cells["Claude Code"], "source");
+    });
+}
+
+#[test]
+#[serial]
+fn toggles_project_prompt_distribution_and_rejects_non_project_agents() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let prompts = PromptService::new(db);
+
+    with_isolated_home(|home| {
+        let repo = git_repo(&home.join("workspace"), "agent-nexus");
+        projects
+            .record_project(repo.clone())
+            .expect("record project");
+        let repo = Path::new(&repo);
+        let source_file = repo.join("AGENTS.md");
+        let target_file = repo.join("CLAUDE.md");
+        write_prompt(&source_file, "# Project instructions\n");
+        let scanned = prompts.scan_prompts().expect("scan project prompt");
+
+        let error = prompts
+            .set_prompt_target(SetPromptTargetInput {
+                prompt_id: scanned[0].id.clone(),
+                agent: "CodeX".to_string(),
+                enabled: true,
+            })
+            .expect_err("CodeX must not be a project prompt target");
+        assert!(error
+            .to_string()
+            .contains("agent does not support prompt targets in this scope"));
+        assert!(!repo.join(".codex/AGENTS.md").exists());
+
+        let enabled = prompts
+            .set_prompt_target(SetPromptTargetInput {
+                prompt_id: scanned[0].id.clone(),
+                agent: "Claude Code".to_string(),
+                enabled: true,
+            })
+            .expect("enable Claude Code target");
+
+        assert_eq!(enabled.cells["Claude Code"], "target");
+        assert_file_distribution_tracks_source_writes(&source_file, &target_file);
+
+        let disabled = prompts
+            .set_prompt_target(SetPromptTargetInput {
+                prompt_id: scanned[0].id.clone(),
+                agent: "Claude Code".to_string(),
+                enabled: false,
+            })
+            .expect("disable Claude Code target");
+
+        assert_eq!(disabled.cells["Claude Code"], "none");
+        assert!(!target_file.exists());
     });
 }
 

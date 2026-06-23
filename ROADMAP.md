@@ -3,7 +3,6 @@
 - Icon
 - Copy 应先移到回收站再复制
 - Local 删除 Copy Task 时，应把目标位置的文件也删掉
-- 项目里有三份 Cargo.toml, 两份 package.json/pnpm-workspace.yaml
 - 按 ESC 不应退出全屏
 - 列文档表示 Provider 取值顺序、显示的 Credential 是什么
 - Claude Code / OpenCode Go 命名

@@ -22,7 +22,17 @@ fn defines_agent_capability_surfaces_in_canonical_order() {
     assert_eq!(generic.config_dir, "~/.agents");
     assert!(generic.skill.is_some());
     assert!(generic.prompt.is_some());
+    assert_eq!(
+        generic.prompt.expect("generic prompt surface").project_file,
+        Some("AGENTS.md")
+    );
     assert!(generic.provider.is_none());
+
+    let claude = agent_by_name("Claude Code").expect("claude capability");
+    assert_eq!(
+        claude.prompt.expect("claude prompt surface").project_file,
+        Some("CLAUDE.md")
+    );
 
     let copilot = agent_by_name("Copilot").expect("copilot capability");
     assert_eq!(
@@ -32,6 +42,10 @@ fn defines_agent_capability_surfaces_in_canonical_order() {
     assert_eq!(
         copilot.prompt.expect("copilot prompt surface").global_file,
         "~/.github/AGENTS.md"
+    );
+    assert_eq!(
+        copilot.prompt.expect("copilot prompt surface").project_file,
+        None
     );
     assert_eq!(
         copilot

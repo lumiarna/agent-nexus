@@ -17,6 +17,7 @@ export interface AgentDef<Name extends string = string> {
   dirs: readonly AgentDirDef[];
   surfaces: readonly AgentSurface[];
   projectSkillDir?: string;
+  projectPromptFile?: string;
   providerId?: string;
   /** Credential file path, if any. Not a config root — used by Provider logic. */
   authFile?: string;
@@ -37,6 +38,7 @@ export const AGENTS = [
     color: "#9a7b53",
     surfaces: ["skill", "prompt"],
     projectSkillDir: ".agents/skills",
+    projectPromptFile: "AGENTS.md",
     dirs: [
       { key: "GENERIC_AGENT_CONFIG_DIR", value: "~/.agents" },
       { key: "GENERIC_AGENT_SKILLS_DIR", value: "~/.agents/skills", derivedFrom: "GENERIC_AGENT_CONFIG_DIR" },
@@ -49,6 +51,7 @@ export const AGENTS = [
     color: "#c2410c",
     surfaces: ["skill", "prompt", "provider"],
     projectSkillDir: ".claude/skills",
+    projectPromptFile: "CLAUDE.md",
     providerId: "claude",
     authFile: "~/.claude",
     dirs: [
