@@ -1,12 +1,32 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { providersApi } from "@/lib/api/providers";
 import { isTauriRuntime } from "@/lib/runtime";
 
 export const providerKeys = {
   customCatalog: ["providers", "opencode-custom"] as const,
+  order: ["providers", "order"] as const,
   quota: (providerId: string) => ["providers", providerId, "quota"] as const,
 };
+
+export function useProviderOrderQuery() {
+  return useQuery({
+    queryKey: providerKeys.order,
+    queryFn: providersApi.getOrder,
+    enabled: isTauriRuntime(),
+  });
+}
+
+export function useReorderProvidersMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (providerIds: string[]) => providersApi.setOrder(providerIds),
+    onSuccess: (providerIds: string[]) => {
+      queryClient.setQueryData<string[]>(providerKeys.order, providerIds);
+    },
+  });
+}
 
 export function useOpenCodeCustomProvidersQuery() {
   return useQuery({

@@ -18,6 +18,7 @@ const DEFAULT_CODEX_CONFIG_DIR: &str = "~/.codex";
 pub const COPILOT_GITHUB_TOKEN_KEY: &str = "COPILOT_GITHUB_TOKEN";
 pub const OPENCODE_GO_WORKSPACE_ID_KEY: &str = "OPENCODE_GO_WORKSPACE_ID";
 pub const OPENCODE_GO_AUTH_COOKIE_KEY: &str = "OPENCODE_GO_AUTH_COOKIE";
+const PROVIDER_ORDER_KEY: &str = "PROVIDER_ORDER";
 const MINIMAX_TOKEN_PLAN_CN_API_KEY_KEY: &str = "PROVIDER_API_KEY_MINIMAX_TOKEN";
 const DEEPSEEK_API_KEY_KEY: &str = "PROVIDER_API_KEY_DEEPSEEK";
 const OPENROUTER_API_KEY_KEY: &str = "PROVIDER_API_KEY_OPENROUTER";
@@ -146,6 +147,31 @@ impl AppConfigService {
         Ok(())
     }
 
+    pub fn get_provider_order(&self) -> AppResult<Vec<String>> {
+        let raw = self.read_setting(PROVIDER_ORDER_KEY)?.unwrap_or_default();
+        if raw.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let provider_ids = serde_json::from_str::<Vec<String>>(&raw).map_err(|error| {
+            AppError::Validation(format!("invalid provider order setting: {error}"))
+        })?;
+        normalize_provider_order(provider_ids)
+    }
+
+    pub fn set_provider_order(&self, provider_ids: &[String]) -> AppResult<Vec<String>> {
+        let normalized = normalize_provider_order(provider_ids.to_vec())?;
+        let conn = self.db.connection()?;
+        let value = serde_json::to_string(&normalized)
+            .map_err(|error| AppError::Internal(format!("serialize provider order: {error}")))?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![PROVIDER_ORDER_KEY, value],
+        )?;
+        Ok(normalized)
+    }
+
     fn read_setting(&self, key: &str) -> AppResult<Option<String>> {
         let conn = self.db.connection()?;
         conn.query_row(
@@ -156,6 +182,27 @@ impl AppConfigService {
         .optional()
         .map_err(Into::into)
     }
+}
+
+fn normalize_provider_order(provider_ids: Vec<String>) -> AppResult<Vec<String>> {
+    let mut normalized = Vec::with_capacity(provider_ids.len());
+
+    for provider_id in provider_ids {
+        let provider_id = provider_id.trim();
+        if provider_id.is_empty() {
+            return Err(AppError::Validation(
+                "provider order cannot contain empty ids".to_string(),
+            ));
+        }
+        if normalized.iter().any(|existing| existing == provider_id) {
+            return Err(AppError::Validation(format!(
+                "provider order contains duplicate id: {provider_id}"
+            )));
+        }
+        normalized.push(provider_id.to_string());
+    }
+
+    Ok(normalized)
 }
 
 fn provider_api_key_setting_key(provider_id: &str) -> AppResult<&'static str> {

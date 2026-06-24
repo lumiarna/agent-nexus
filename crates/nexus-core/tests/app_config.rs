@@ -94,6 +94,45 @@ fn provider_connection_params_round_trip_through_settings() {
 }
 
 #[test]
+fn provider_order_round_trips_through_settings() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = AppConfigService::new(db);
+
+    assert_eq!(
+        service
+            .get_provider_order()
+            .expect("read default provider order"),
+        Vec::<String>::new(),
+    );
+
+    assert_eq!(
+        service
+            .set_provider_order(&[
+                "copilot".to_string(),
+                "claude".to_string(),
+                "opencode-go".to_string(),
+            ])
+            .expect("save provider order"),
+        vec![
+            "copilot".to_string(),
+            "claude".to_string(),
+            "opencode-go".to_string(),
+        ],
+    );
+
+    assert_eq!(
+        service
+            .get_provider_order()
+            .expect("read saved provider order"),
+        vec![
+            "copilot".to_string(),
+            "claude".to_string(),
+            "opencode-go".to_string(),
+        ],
+    );
+}
+
+#[test]
 fn reads_claude_config_dir_from_app_settings() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     {

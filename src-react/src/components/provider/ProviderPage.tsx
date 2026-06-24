@@ -37,7 +37,9 @@ import { customProviderRows } from "@/lib/providerCatalog";
 import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
 import {
   useOpenCodeCustomProvidersQuery,
+  useProviderOrderQuery,
   useProviderQuotaQueries,
+  useReorderProvidersMutation,
 } from "@/lib/query/providers";
 import { palette, quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
@@ -86,6 +88,43 @@ function actionLabel(st: ProviderUiStatus, loading: boolean): string {
   if (st === "failed") return "Retry";
   if (st === "nocreds") return "Add cred";
   return loading ? "Checking…" : "Refresh";
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return "Unexpected error";
+}
+
+function mergeProviderOrder(
+  baseOrder: readonly string[],
+  providerIds: readonly string[],
+): string[] {
+  const knownIds = new Set(providerIds);
+  const seen = new Set<string>();
+  const merged: string[] = [];
+
+  for (const id of baseOrder) {
+    if (!knownIds.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    merged.push(id);
+  }
+
+  for (const id of providerIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    merged.push(id);
+  }
+
+  return merged;
 }
 
 function mergeProviderQuota(provider: Provider, quota: ProviderQuotaSnapshot): Provider {
@@ -158,6 +197,8 @@ function SortableProviderCard({
 export function ProviderPage() {
   const agentCapabilitiesQuery = useAgentCapabilitiesQuery();
   const customProvidersQuery = useOpenCodeCustomProvidersQuery();
+  const providerOrderQuery = useProviderOrderQuery();
+  const reorderProviders = useReorderProvidersMutation();
   const providerSeeds = useMemo(() => {
     const builtInProviders = nexus.providers();
     return [
@@ -224,12 +265,14 @@ export function ProviderPage() {
 
   useEffect(() => {
     const providerIds = new Set(providerCatalog.map((provider) => provider.id));
-    setOrder((current) => [
-      ...current.filter((id) => providerIds.has(id)),
-      ...providerCatalog
-        .map((provider) => provider.id)
-        .filter((id) => !current.includes(id)),
-    ]);
+    setOrder((current) =>
+      mergeProviderOrder(
+        providerOrderQuery.data && providerOrderQuery.data.length > 0
+          ? providerOrderQuery.data
+          : current,
+        providerCatalog.map((provider) => provider.id),
+      ).filter((id) => providerIds.has(id)),
+    );
     setCardVisible((current) => ({
       ...Object.fromEntries(
         providerCatalog.map((provider) => [provider.id, !provider.hiddenCard]),
@@ -242,7 +285,7 @@ export function ProviderPage() {
       ),
       ...current,
     }));
-  }, [providerCatalog]);
+  }, [providerCatalog, providerOrderQuery.data]);
 
   useEffect(() => {
     if (configId !== "copilot" || !isTauriRuntime()) return;
@@ -345,24 +388,35 @@ export function ProviderPage() {
     );
   }
 
-  function reorder(fromId: string, toId: string) {
-    if (!fromId || fromId === toId) return;
-    setOrder((o) => {
-      const fi = o.indexOf(fromId);
-      const ti = o.indexOf(toId);
-      if (fi < 0 || ti < 0) return o;
-      return arrayMove(o, fi, ti);
-    });
+  function reorder(fromId: string, toId: string, currentOrder: string[]) {
+    if (!fromId || fromId === toId) return null;
+    const fromIndex = currentOrder.indexOf(fromId);
+    const toIndex = currentOrder.indexOf(toId);
+    if (fromIndex < 0 || toIndex < 0) return null;
+    return arrayMove(currentOrder, fromIndex, toIndex);
   }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
 
-  function handleDragEnd(e: DragEndEvent) {
+  async function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
-    reorder(String(active.id), String(over.id));
+    const previousOrder = order;
+    const nextOrder = reorder(String(active.id), String(over.id), previousOrder);
+    if (!nextOrder) return;
+
+    setOrder(nextOrder);
+    if (!isTauriRuntime()) return;
+
+    try {
+      await reorderProviders.mutateAsync(nextOrder);
+      toast("Provider order saved");
+    } catch (error) {
+      setOrder(previousOrder);
+      toast(getErrorMessage(error));
+    }
   }
 
   const byId = Object.fromEntries(displayProviders.map((p) => [p.id, p]));

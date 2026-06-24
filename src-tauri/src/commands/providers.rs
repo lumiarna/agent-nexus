@@ -21,3 +21,16 @@ pub fn list_opencode_custom_providers(
 ) -> AppResult<Vec<OpenCodeCustomProvider>> {
     state.provider_quota.list_opencode_custom_providers()
 }
+
+#[tauri::command]
+pub fn get_provider_order(state: State<'_, AppState>) -> AppResult<Vec<String>> {
+    state.app_config.get_provider_order()
+}
+
+#[tauri::command]
+pub fn set_provider_order(
+    state: State<'_, AppState>,
+    provider_ids: Vec<String>,
+) -> AppResult<Vec<String>> {
+    state.app_config.set_provider_order(&provider_ids)
+}

@@ -41,6 +41,12 @@ export const providersApi = {
   listOpenCodeCustomProviders(): Promise<OpenCodeCustomProvider[]> {
     return invokeCommand<OpenCodeCustomProvider[]>("list_opencode_custom_providers");
   },
+  getOrder(): Promise<string[]> {
+    return invokeCommand<string[]>("get_provider_order");
+  },
+  setOrder(providerIds: string[]): Promise<string[]> {
+    return invokeCommand<string[]>("set_provider_order", { providerIds });
+  },
   getQuota(providerId: string): Promise<ProviderQuotaSnapshot> {
     return invokeCommand<ProviderQuotaSnapshot>("get_provider_quota", { providerId });
   },
