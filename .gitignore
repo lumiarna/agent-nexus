@@ -3,6 +3,7 @@ __sessions/
 .claude/
 .codex/
 .opencode/
+CLAUDE.md
 
 .npmrc
 

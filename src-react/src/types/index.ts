@@ -119,7 +119,7 @@ export interface Session {
 export type TaskDirection = "Distribution" | "Push" | "Pull";
 export type TaskAction = "Symlink" | "Junction" | "Copy";
 export type LocationType = "Local" | "Cloud";
-export type TaskStatus = "ok" | "pending" | "failed" | "never";
+export type TaskStatus = "ok" | "pending" | "failed" | "never" | "skipped";
 export type TaskLinkState = "present" | "missing";
 
 export interface Task {

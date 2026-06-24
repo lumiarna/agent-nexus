@@ -286,6 +286,51 @@ async fn automatically_pushes_due_session_backup_and_records_status() {
     assert!(requests[3].contains("# Session"));
 }
 
+#[tokio::test]
+async fn skips_due_session_backup_when_local_sessions_directory_is_missing() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    projects
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+
+    let ran = sync
+        .run_due_scheduled_tasks(3_600)
+        .await
+        .expect("run due session backup");
+
+    assert_eq!(ran.len(), 1);
+    assert_eq!(ran[0].status, "skipped");
+    let backups = sync.list_session_backups().expect("list session backups");
+    assert_eq!(backups[0].task.status, "skipped");
+    assert_ne!(backups[0].task.last_run, "鈥?");
+}
+
+#[tokio::test]
+async fn manually_running_session_backup_skips_missing_local_sessions_directory() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    projects
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+    let backup = sync
+        .list_session_backups()
+        .expect("list session backups")
+        .remove(0);
+
+    let task = sync
+        .run_task(backup.task.id)
+        .await
+        .expect("run session backup");
+
+    assert_eq!(task.status, "skipped");
+    assert_ne!(task.last_run, "鈥?");
+}
+
 #[test]
 fn saves_and_reads_webdav_settings() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));

@@ -52,6 +52,11 @@ struct ScheduledTask {
     last_run_at: Option<i64>,
 }
 
+enum TaskRunStatus {
+    Ok,
+    Skipped,
+}
+
 type TransferFuture<'a> = Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>>;
 
 trait Transfer: Send + Sync {
@@ -436,7 +441,8 @@ impl TaskLifecycle {
 
         let result = self.run_task_operation(&task).await;
         match result {
-            Ok(()) => self.record_task_run(&id, "ok")?,
+            Ok(TaskRunStatus::Ok) => self.record_task_run(&id, "ok")?,
+            Ok(TaskRunStatus::Skipped) => self.record_task_run(&id, "skipped")?,
             Err(error) => {
                 let _ = self.record_task_run(&id, "failed");
                 return Err(error);
@@ -471,7 +477,8 @@ impl TaskLifecycle {
             }
 
             let status = match self.run_task_operation(&scheduled.task).await {
-                Ok(()) => "ok",
+                Ok(TaskRunStatus::Ok) => "ok",
+                Ok(TaskRunStatus::Skipped) => "skipped",
                 Err(_) => "failed",
             };
             self.record_task_run_at(&scheduled.task.id, status, now_epoch_seconds)?;
@@ -483,22 +490,30 @@ impl TaskLifecycle {
         Ok(ran)
     }
 
-    async fn run_task_operation(&self, task: &Task) -> AppResult<()> {
+    async fn run_task_operation(&self, task: &Task) -> AppResult<TaskRunStatus> {
         if task.action != "Copy" {
             return Err(AppError::Validation(
                 "only Copy tasks can be run manually".to_string(),
             ));
         }
 
+        if should_skip_missing_session_backup_source(task)? {
+            return Ok(TaskRunStatus::Skipped);
+        }
+
         match (task.source_type.as_str(), task.target_type.as_str()) {
             ("Local", "Cloud") => {
                 let settings = self.valid_webdav_settings()?;
-                self.transfer.push_local_to_cloud(task, &settings).await
+                self.transfer.push_local_to_cloud(task, &settings).await?;
+                Ok(TaskRunStatus::Ok)
             }
             ("Cloud", "Local") => Err(AppError::Validation(
                 "Cloud to Local copy is not implemented yet".to_string(),
             )),
-            ("Local", "Local") => copy_local_to_local(task),
+            ("Local", "Local") => {
+                copy_local_to_local(task)?;
+                Ok(TaskRunStatus::Ok)
+            }
             _ => Err(AppError::Validation(
                 "Cloud to Cloud copy is not supported".to_string(),
             )),
@@ -724,6 +739,15 @@ fn copy_local_to_local(task: &Task) -> AppResult<()> {
         copy_local_directory(&source, &target)?;
     }
     Ok(())
+}
+
+fn should_skip_missing_session_backup_source(task: &Task) -> AppResult<bool> {
+    if !task.id.starts_with("session-backup:") || task.source_type != "Local" {
+        return Ok(false);
+    }
+
+    let source = resolve_local_path(&task.source)?;
+    Ok(!source.exists())
 }
 
 fn copy_local_directory(source: &Path, target: &Path) -> AppResult<()> {

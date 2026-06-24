@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 12;
+const CURRENT_SCHEMA_VERSION: i64 = 13;
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
 const NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
@@ -63,6 +63,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 12 {
             migrate_to_v12(conn)?;
         }
+        if current < 13 {
+            migrate_to_v13(conn)?;
+        }
     }
 
     Ok(())
@@ -94,7 +97,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (12);
+        INSERT INTO schema_version (version) VALUES (13);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -231,7 +234,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             schedule TEXT NOT NULL DEFAULT 'manual',
             sort_index INTEGER,
             last_run_at INTEGER,
-            last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+            last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never', 'skipped') OR last_status IS NULL),
             project_id TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
@@ -346,7 +349,7 @@ fn migrate_to_v3(conn: &Connection) -> AppResult<()> {
             schedule TEXT NOT NULL DEFAULT 'manual',
             sort_index INTEGER,
             last_run_at INTEGER,
-            last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+            last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never', 'skipped') OR last_status IS NULL),
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
@@ -453,7 +456,7 @@ fn migrate_to_v6(conn: &Connection) -> AppResult<()> {
             schedule TEXT NOT NULL DEFAULT 'manual',
             sort_index INTEGER,
             last_run_at INTEGER,
-            last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+            last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never', 'skipped') OR last_status IS NULL),
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
@@ -656,6 +659,56 @@ fn migrate_to_v12(conn: &Connection) -> AppResult<()> {
             ON tasks(group_id, project_id)
             WHERE project_id IS NOT NULL;
         UPDATE schema_version SET version = 12;
+        COMMIT;
+        "#,
+    )
+    .or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    Ok(())
+}
+
+fn migrate_to_v13(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        CREATE TABLE tasks_v13 (
+            id TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL,
+            direction TEXT NOT NULL
+                CHECK (direction IN ('Distribution', 'Push', 'Pull')),
+            action TEXT NOT NULL CHECK (action IN ('Symlink', 'Junction', 'Copy')),
+            source_type TEXT NOT NULL CHECK (source_type IN ('Local', 'Cloud')),
+            source TEXT NOT NULL,
+            target_type TEXT NOT NULL CHECK (target_type IN ('Local', 'Cloud')),
+            target TEXT NOT NULL,
+            schedule TEXT NOT NULL DEFAULT 'manual',
+            sort_index INTEGER,
+            last_run_at INTEGER,
+            last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never', 'skipped') OR last_status IS NULL),
+            project_id TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        INSERT INTO tasks_v13 (
+            id, group_id, direction, action, source_type, source, target_type, target,
+            schedule, sort_index, last_run_at, last_status, project_id, created_at, updated_at
+        )
+        SELECT
+            id, group_id, direction, action, source_type, source, target_type, target,
+            schedule, sort_index, last_run_at, last_status, project_id, created_at, updated_at
+        FROM tasks;
+        DROP TABLE tasks;
+        ALTER TABLE tasks_v13 RENAME TO tasks;
+        CREATE INDEX idx_tasks_group ON tasks(group_id);
+        CREATE UNIQUE INDEX idx_tasks_system_project
+            ON tasks(group_id, project_id)
+            WHERE project_id IS NOT NULL;
+        UPDATE schema_version SET version = 13;
         COMMIT;
         "#,
     )
@@ -1014,7 +1067,7 @@ mod tests {
                 schedule TEXT NOT NULL DEFAULT 'manual',
                 sort_index INTEGER,
                 last_run_at INTEGER,
-                last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+                last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never', 'skipped') OR last_status IS NULL),
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
@@ -1046,5 +1099,78 @@ mod tests {
             [],
         )
         .expect("rebuilt tasks table accepts Junction action");
+    }
+
+    #[test]
+    fn migrate_to_v13_allows_skipped_task_status_and_preserves_rows() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (12);
+            CREATE TABLE projects (
+                id TEXT PRIMARY KEY
+            );
+            CREATE TABLE task_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                system_kind TEXT,
+                sort_index INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY,
+                group_id TEXT NOT NULL,
+                direction TEXT NOT NULL
+                    CHECK (direction IN ('Distribution', 'Push', 'Pull')),
+                action TEXT NOT NULL CHECK (action IN ('Symlink', 'Junction', 'Copy')),
+                source_type TEXT NOT NULL CHECK (source_type IN ('Local', 'Cloud')),
+                source TEXT NOT NULL,
+                target_type TEXT NOT NULL CHECK (target_type IN ('Local', 'Cloud')),
+                target TEXT NOT NULL,
+                schedule TEXT NOT NULL DEFAULT 'manual',
+                sort_index INTEGER,
+                last_run_at INTEGER,
+                last_status TEXT CHECK (last_status IN ('ok', 'failed', 'never') OR last_status IS NULL),
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE
+            );
+            CREATE INDEX idx_tasks_group ON tasks(group_id);
+            CREATE UNIQUE INDEX idx_tasks_system_project
+                ON tasks(group_id, project_id)
+                WHERE project_id IS NOT NULL;
+            INSERT INTO task_groups (id, name, system_kind, created_at, updated_at)
+            VALUES ('g1', 'G', 'session_backup', 0, 0);
+            INSERT INTO projects (id) VALUES ('p1');
+            INSERT INTO tasks (
+                id, group_id, direction, action, source_type, source, target_type, target,
+                schedule, last_status, project_id, created_at, updated_at
+            ) VALUES (
+                't1', 'g1', 'Push', 'Copy', 'Local', '/s', 'Cloud', '/t',
+                'manual', 'never', 'p1', 0, 0
+            );
+            "#,
+        )
+        .expect("seed v12 tasks");
+
+        migrate_to_v13(&conn).expect("migrate to v13");
+
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, 13);
+
+        let kept: String = conn
+            .query_row("SELECT last_status FROM tasks WHERE id = 't1'", [], |row| {
+                row.get(0)
+            })
+            .expect("existing row preserved");
+        assert_eq!(kept, "never");
+
+        conn.execute("UPDATE tasks SET last_status = 'skipped' WHERE id = 't1'", [])
+            .expect("rebuilt tasks table accepts skipped status");
     }
 }

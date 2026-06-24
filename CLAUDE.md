@@ -1,1 +1,0 @@
-/Users/lumiarna/Workspace/agent-nexus/AGENTS.md

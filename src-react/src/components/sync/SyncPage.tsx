@@ -85,6 +85,7 @@ function directionColor(d: TaskDirection): string {
 function statusOf(st: TaskStatus): { label: string; fg: string; dot: string } {
   if (st === "ok") return { label: "OK", fg: "#5f7a3e", dot: palette.good };
   if (st === "pending") return { label: "Pending", fg: "#9a6f0a", dot: palette.warn };
+  if (st === "skipped") return { label: "Skipped", fg: "#8a7a68", dot: "#c6b6a1" };
   if (st === "failed") return { label: "Failed", fg: palette.crit, dot: palette.crit };
   return { label: "Never", fg: "#a99a89", dot: "#d9c9b3" };
 }
