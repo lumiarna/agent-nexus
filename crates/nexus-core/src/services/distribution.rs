@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -11,6 +11,7 @@ use crate::{
     error::AppResult,
     services::agent_capabilities::{agent_capability_surfaces, AgentCapabilitySurface},
     services::paths::path_to_string,
+    services::placement::scanned_target_identity,
     services::symlink::is_junction,
 };
 
@@ -163,6 +164,45 @@ pub fn empty_cells() -> BTreeMap<String, String> {
         .iter()
         .map(|agent| (agent.name.to_string(), "none".to_string()))
         .collect()
+}
+
+/// Existing project-scoped Skill and Prompt Distribution placements, keyed the same way as
+/// Project Symlink inventory scan results. A recorded target is managed only while it still
+/// resolves to the recorded canonical source.
+pub fn project_managed_target_identities(conn: &Connection) -> AppResult<HashSet<String>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT skill.canonical_path, distribution.target_path
+        FROM skills skill
+        JOIN skill_distributions distribution ON distribution.skill_id = skill.id
+        WHERE skill.scope = 'project'
+          AND distribution.role = 'target'
+          AND distribution.target_path IS NOT NULL
+
+        UNION ALL
+
+        SELECT prompt.canonical_path, distribution.target_path
+        FROM prompts prompt
+        JOIN prompt_distributions distribution ON distribution.prompt_id = prompt.id
+        WHERE prompt.scope = 'project'
+          AND distribution.role = 'target'
+          AND distribution.target_path IS NOT NULL
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut identities = HashSet::new();
+
+    for row in rows {
+        let (source, target) = row?;
+        let target = Path::new(&target);
+        if placement_points_to(target, Path::new(&source))? {
+            identities.insert(scanned_target_identity(target)?);
+        }
+    }
+
+    Ok(identities)
 }
 
 /// Whether `target_path` is a managed placement (symlink or junction) resolving to `source_path`.

@@ -12,7 +12,7 @@ use crate::{
     database::Database,
     error::{AppError, AppResult},
     services::{
-        paths,
+        distribution, paths,
         placement::{
             remove_unmanaged_link_placement, scanned_target_identity,
             task_managed_target_identities,
@@ -93,7 +93,9 @@ impl ProjectSymlinkInventory {
         let max_depth = self.project_symlink_max_depth()?;
         let managed_targets = {
             let conn = self.db.connection()?;
-            task_managed_target_identities(&conn)?
+            let mut targets = task_managed_target_identities(&conn)?;
+            targets.extend(distribution::project_managed_target_identities(&conn)?);
+            targets
         };
         let mut links = Vec::new();
         let mut seen_targets = HashSet::new();

@@ -2,7 +2,14 @@ use std::{fs, path::Path, sync::Arc};
 
 use nexus_core::{
     database::Database,
-    services::{paths, project_symlinks::ProjectSymlinkInventory, projects::ProjectService},
+    services::{
+        paths,
+        project_symlinks::ProjectSymlinkInventory,
+        projects::ProjectService,
+        prompts::{PromptService, SetPromptTargetInput},
+        skills::{SetSkillTargetInput, SkillService},
+        symlink::create_symlink_placement,
+    },
 };
 use tempfile::TempDir;
 
@@ -23,6 +30,15 @@ fn create_directory_link(source: &Path, target: &Path) {
     #[cfg(not(windows))]
     nexus_core::services::symlink::create_symlink_placement(source, target)
         .expect("create symlink link");
+}
+
+fn write_skill(dir: &Path) {
+    fs::create_dir_all(dir).expect("create skill dir");
+    fs::write(
+        dir.join("SKILL.md"),
+        "---\nname: shared-skill\ndescription: Shared project skill\n---\n",
+    )
+    .expect("write project skill");
 }
 
 #[test]
@@ -117,4 +133,73 @@ fn lists_project_symlinks_by_project_display_order() {
             .collect::<Vec<_>>(),
         vec![Some("source-beta"), Some("source-alpha")]
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn skips_project_skill_and_prompt_distribution_links() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let skills = SkillService::new(db.clone());
+    let prompts = PromptService::new(db.clone());
+    let inventory = ProjectSymlinkInventory::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "distribution-project");
+    let project = projects
+        .record_project(repo.clone())
+        .expect("record project");
+    let repo = Path::new(&repo);
+
+    write_skill(&repo.join(".github/skills/shared-skill"));
+    fs::write(repo.join("AGENTS.md"), "# Project instructions\n").expect("write project prompt");
+
+    let skill = skills
+        .scan_skills()
+        .expect("scan project skill")
+        .into_iter()
+        .find(|skill| skill.project_id.as_deref() == Some(project.id.as_str()))
+        .expect("find project skill");
+    skills
+        .set_skill_target(SetSkillTargetInput {
+            skill_id: skill.id,
+            agent: "CodeX".to_string(),
+            enabled: true,
+        })
+        .expect("enable project skill distribution");
+
+    let prompt = prompts
+        .scan_prompts()
+        .expect("scan project prompt")
+        .into_iter()
+        .find(|prompt| prompt.project_id.as_deref() == Some(project.id.as_str()))
+        .expect("find project prompt");
+    prompts
+        .set_prompt_target(SetPromptTargetInput {
+            prompt_id: prompt.id,
+            agent: "Claude Code".to_string(),
+            enabled: true,
+        })
+        .expect("enable project prompt distribution");
+
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
+
+    assert!(
+        links.is_empty(),
+        "project Distribution placements should be hidden, got {links:?}"
+    );
+
+    let prompt_target = repo.join("CLAUDE.md");
+    fs::remove_file(&prompt_target).expect("remove managed prompt link");
+    let replacement_source = root.path().join("replacement.md");
+    fs::write(&replacement_source, "# Replacement\n").expect("write replacement prompt");
+    create_symlink_placement(&replacement_source, &prompt_target)
+        .expect("replace managed target with an unrelated link");
+
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list replaced project symlink");
+    assert_eq!(links.len(), 1, "unrelated replacement should be listed");
+    assert!(Path::new(&links[0].target_path).ends_with("CLAUDE.md"));
 }
