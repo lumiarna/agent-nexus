@@ -245,18 +245,6 @@ function TaskGroupCard({
   onDeleteGroup,
   onDeleteTask,
 }: TaskGroupCardProps) {
-  const renderTask = (task: Task, taskSortable?: SortableRender) => (
-    <TaskGroupRow
-      key={task.id}
-      group={group}
-      task={task}
-      sortable={taskSortable}
-      onEditSchedule={onEditSchedule}
-      onRunTask={onRunTask}
-      onDeleteTask={onDeleteTask}
-    />
-  );
-
   return (
     <div
       ref={sortable?.setNodeRef}
@@ -315,6 +303,46 @@ function TaskGroupCard({
         </div>
       </div>
 
+      <TaskTable
+        group={group}
+        sortable={!!sortable}
+        onEditSchedule={onEditSchedule}
+        onRunTask={onRunTask}
+        onDeleteTask={onDeleteTask}
+      />
+    </div>
+  );
+}
+
+/** Column header + task rows for a group — shared by the editable Task Group card and the
+ *  system-managed Session Backup section, which renders it flush (no card chrome / header). */
+function TaskTable({
+  group,
+  sortable,
+  onEditSchedule,
+  onRunTask,
+  onDeleteTask,
+}: {
+  group: TaskGroup;
+  sortable?: boolean;
+  onEditSchedule: (group: TaskGroup, task: Task) => void;
+  onRunTask: (group: TaskGroup, task: Task) => void;
+  onDeleteTask?: (group: TaskGroup, task: Task) => void;
+}) {
+  const renderTask = (task: Task, taskSortable?: SortableRender) => (
+    <TaskGroupRow
+      key={task.id}
+      group={group}
+      task={task}
+      sortable={taskSortable}
+      onEditSchedule={onEditSchedule}
+      onRunTask={onRunTask}
+      onDeleteTask={onDeleteTask}
+    />
+  );
+
+  return (
+    <>
       <div
         className="grid items-center gap-3 bg-nexus-sand2 px-5 py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
         style={{ gridTemplateColumns: GRID16 }}
@@ -340,7 +368,7 @@ function TaskGroupCard({
       ) : (
         group.tasks.map((task) => renderTask(task))
       )}
-    </div>
+    </>
   );
 }
 
@@ -980,21 +1008,31 @@ export function SyncPage() {
               <span className="ml-auto text-[11.5px] text-[#b3a999]">
                 {sessionBackupGroup.tasks.length} projects
               </span>
+              {sessionBackupGroup.tasks.some((task) => task.action === "Copy") ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void runGroup(sessionBackupGroup);
+                  }}
+                  className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
+                >
+                  Run group
+                </button>
+              ) : null}
             </div>
             {openSec.backup ? (
-              <div className="border-t border-nexus-border bg-nexus-card p-3.5">
+              <div className="border-t border-nexus-border bg-nexus-card">
                 {sessionBackupsQuery.isLoading ? (
-                  <div className="flex items-center gap-2 px-2 py-5 text-[12.5px] text-[#9a8f80]">
+                  <div className="flex items-center gap-2 px-5 py-6 text-[12.5px] text-[#9a8f80]">
                     <Spinner /> Loading Session Backup...
                   </div>
                 ) : sessionBackupsQuery.error ? (
-                  <div className="px-2 py-5 text-[12.5px] font-semibold text-nexus-crit">
+                  <div className="px-5 py-6 text-[12.5px] font-semibold text-nexus-crit">
                     {getErrorMessage(sessionBackupsQuery.error)}
                   </div>
                 ) : (
-                  <TaskGroupCard
+                  <TaskTable
                     group={sessionBackupGroup}
-                    onRunGroup={(group) => void runGroup(group)}
                     onEditSchedule={openSchedule}
                     onRunTask={(group, task) => void runTask(group.id, task)}
                   />
