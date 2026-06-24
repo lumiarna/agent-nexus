@@ -20,6 +20,9 @@ use crate::{
 
 const CLAUDE_CODE_PROVIDER_ID: &str = "claude";
 const CLAUDE_CODE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_CODE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+const CLAUDE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const CLAUDE_OAUTH_REFRESH_URL: &str = "https://platform.claude.com/v1/oauth/token";
 
 const CODEX_PROVIDER_ID: &str = "codex";
 const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
@@ -197,9 +200,22 @@ pub struct OpenRouterCreditsData {
 #[derive(Clone, Debug)]
 struct ClaudeCodeCredentials {
     access_token: String,
+    refresh_token: Option<String>,
     expires_at: Option<i64>,
+    scopes: Vec<String>,
     plan: Option<String>,
     source: String,
+    credentials_path: Option<PathBuf>,
+    keychain_account: Option<String>,
+    raw: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ClaudeOAuthRefreshResponse {
+    access_token: String,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    expires_in: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -309,6 +325,16 @@ trait ProviderCredentialSource: Send + Sync {
 
 trait ProviderUsageTransport: Send + Sync {
     fn claude_code_usage<'a>(&'a self, access_token: &'a str) -> ClaudeCodeUsageFuture<'a>;
+    fn claude_code_refresh<'a>(
+        &'a self,
+        refresh_token: &'a str,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<ClaudeOAuthRefreshResponse, ProviderQuotaPollError>>
+                + Send
+                + 'a,
+        >,
+    >;
     fn codex_usage<'a>(
         &'a self,
         access_token: &'a str,
@@ -494,6 +520,19 @@ impl ProviderUsageTransport for HttpUsageTransport {
         Box::pin(fetch_claude_code_usage(access_token))
     }
 
+    fn claude_code_refresh<'a>(
+        &'a self,
+        refresh_token: &'a str,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<ClaudeOAuthRefreshResponse, ProviderQuotaPollError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(fetch_claude_oauth_refresh(refresh_token))
+    }
+
     fn codex_usage<'a>(
         &'a self,
         access_token: &'a str,
@@ -563,21 +602,38 @@ impl ClaudeCodeQuotaAdapter {
             }
         };
 
-        if is_token_expired(credentials.expires_at) {
+        if !credentials.scopes.is_empty()
+            && !credentials.scopes.iter().any(|scope| scope == "user:profile")
+        {
             return ProviderQuotaSnapshot {
                 provider_id: CLAUDE_CODE_PROVIDER_ID.to_string(),
-                status: ProviderQuotaStatus::Expired,
+                status: ProviderQuotaStatus::Failed,
                 plan: credentials.plan,
                 primary: None,
                 windows: Vec::new(),
-                credential: Some(credentials.source),
-                error: Some("Claude Code token expired; run claude /login to refresh".to_string()),
+                credential: Some(credentials.source.clone()),
+                error: Some(
+                    "Claude OAuth token missing 'user:profile' scope. Run 'claude setup-token'."
+                        .to_string(),
+                ),
             };
         }
 
-        let usage = usage_transport
-            .claude_code_usage(&credentials.access_token)
-            .await;
+        let mut access_token = credentials.access_token.clone();
+        if is_token_expiring_soon(credentials.expires_at) {
+            if let Some(refreshed) = refresh_and_persist(&credentials, usage_transport).await {
+                access_token = refreshed.access_token.clone();
+            }
+        }
+
+        let mut usage = usage_transport.claude_code_usage(&access_token).await;
+        if let Err(ProviderQuotaPollError::AuthRequired) = usage {
+            if let Some(refreshed) = refresh_and_persist(&credentials, usage_transport).await {
+                access_token = refreshed.access_token.clone();
+                usage = usage_transport.claude_code_usage(&access_token).await;
+            }
+        }
+
         derive_claude_code_snapshot(credentials, usage)
     }
 }
@@ -1640,13 +1696,139 @@ async fn fetch_claude_code_usage(
         .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
 }
 
+async fn fetch_claude_oauth_refresh(
+    refresh_token: &str,
+) -> Result<ClaudeOAuthRefreshResponse, ProviderQuotaPollError> {
+    let params = [
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token),
+        ("client_id", CLAUDE_OAUTH_CLIENT_ID),
+    ];
+    let response = http_client()
+        .post(CLAUDE_OAUTH_REFRESH_URL)
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .form(&params)
+        .send()
+        .await
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+
+    if !response.status().is_success() {
+        return Err(ProviderQuotaPollError::AuthRequired);
+    }
+
+    let body = response
+        .text()
+        .await
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+    serde_json::from_str::<ClaudeOAuthRefreshResponse>(&body)
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
+}
+
+/// Refresh the Claude OAuth access token via the refresh-token grant and persist
+/// the refreshed credentials back to their source (file or macOS Keychain).
+async fn refresh_and_persist(
+    credentials: &ClaudeCodeCredentials,
+    usage_transport: &dyn ProviderUsageTransport,
+) -> Option<ClaudeOAuthRefreshResponse> {
+    let refresh_token = credentials.refresh_token.as_deref()?;
+    match usage_transport.claude_code_refresh(refresh_token).await {
+        Ok(refreshed) => {
+            persist_refreshed_credentials(credentials, &refreshed);
+            Some(refreshed)
+        }
+        Err(_) => None,
+    }
+}
+
+fn persist_refreshed_credentials(
+    credentials: &ClaudeCodeCredentials,
+    refreshed: &ClaudeOAuthRefreshResponse,
+) {
+    let mut raw = credentials.raw.clone();
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let new_expires_at = now_ms + refreshed.expires_in.saturating_mul(1000);
+
+    let oauth = if let Some(oauth) = raw.get_mut("claudeAiOauth") {
+        oauth
+    } else if let Some(oauth) = raw.get_mut("claude.ai_oauth") {
+        oauth
+    } else {
+        return;
+    };
+    oauth["accessToken"] = serde_json::json!(refreshed.access_token);
+    if let Some(refresh_token) = &refreshed.refresh_token {
+        oauth["refreshToken"] = serde_json::json!(refresh_token);
+    }
+    oauth["expiresAt"] = serde_json::json!(new_expires_at);
+
+    if let Some(account) = &credentials.keychain_account {
+        #[cfg(target_os = "macos")]
+        {
+            // Compact JSON — macOS `security -w` hex-encodes values containing
+            // newlines, which Claude Code cannot read back. Avoid newlines.
+            write_keychain_password(CLAUDE_CODE_KEYCHAIN_SERVICE, account, &raw.to_string());
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = account;
+        }
+    } else if let Some(path) = &credentials.credentials_path {
+        let pretty = serde_json::to_string_pretty(&raw).unwrap_or_else(|_| raw.to_string());
+        let _ = fs::write(path, format!("{pretty}\n"));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn read_keychain_account(service: &str) -> Option<String> {
+    let output = Command::new("security")
+        .args(["find-generic-password", "-s", service, "-g"])
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .ok()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    extract_keychain_account(&stderr)
+}
+
+fn extract_keychain_account(text: &str) -> Option<String> {
+    let needle = "\"acct\"<blob>=\"";
+    let start = text.find(needle)? + needle.len();
+    let rest = &text[start..];
+    let end = rest.find('"')?;
+    let account = &rest[..end];
+    if account.is_empty() {
+        None
+    } else {
+        Some(account.to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn write_keychain_password(service: &str, account: &str, value: &str) {
+    let _ = Command::new("security")
+        .args([
+            "add-generic-password",
+            "-U",
+            "-a",
+            account,
+            "-s",
+            service,
+            "-w",
+            value,
+        ])
+        .output();
+}
+
 #[cfg(target_os = "macos")]
 fn read_claude_code_credentials_from_keychain() -> AppResult<Option<ClaudeCodeCredentials>> {
     let output = match Command::new("security")
         .args([
             "find-generic-password",
             "-s",
-            "Claude Code-credentials",
+            CLAUDE_CODE_KEYCHAIN_SERVICE,
             "-w",
         ])
         .output()
@@ -1661,9 +1843,12 @@ fn read_claude_code_credentials_from_keychain() -> AppResult<Option<ClaudeCodeCr
 
     let content = String::from_utf8(output.stdout)
         .map_err(|error| AppError::Validation(format!("invalid Keychain credentials: {error}")))?;
+    let account = read_keychain_account(CLAUDE_CODE_KEYCHAIN_SERVICE);
     parse_claude_code_credentials_from_source(
         content.trim(),
-        "macOS Keychain · Claude Code-credentials".to_string(),
+        format!("macOS Keychain · {CLAUDE_CODE_KEYCHAIN_SERVICE}"),
+        None,
+        account,
     )
 }
 
@@ -1671,16 +1856,18 @@ fn parse_claude_code_credentials(
     content: &str,
     path: PathBuf,
 ) -> AppResult<Option<ClaudeCodeCredentials>> {
-    parse_claude_code_credentials_from_source(content, path_to_display(&path))
+    parse_claude_code_credentials_from_source(content, path_to_display(&path), Some(path), None)
 }
 
 fn parse_claude_code_credentials_from_source(
     content: &str,
     source: String,
+    credentials_path: Option<PathBuf>,
+    keychain_account: Option<String>,
 ) -> AppResult<Option<ClaudeCodeCredentials>> {
-    let json: serde_json::Value = serde_json::from_str(content).map_err(|error| {
-        AppError::Validation(format!("invalid Claude Code credentials: {error}"))
-    })?;
+    let Some(json) = try_parse_credential_json(content) else {
+        return Ok(None);
+    };
     let Some(oauth) = json
         .get("claudeAiOauth")
         .or_else(|| json.get("claude.ai_oauth"))
@@ -1690,7 +1877,21 @@ fn parse_claude_code_credentials_from_source(
     let Some(access_token) = oauth.get("accessToken").and_then(|value| value.as_str()) else {
         return Ok(None);
     };
+    let refresh_token = oauth
+        .get("refreshToken")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
     let expires_at = oauth.get("expiresAt").and_then(|value| value.as_i64());
+    let scopes = oauth
+        .get("scopes")
+        .and_then(|value| value.as_array())
+        .map(|array| {
+            array
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
     let rate_limit_tier = oauth
         .get("rateLimitTier")
         .or_else(|| oauth.get("rate_limit_tier"))
@@ -1702,10 +1903,37 @@ fn parse_claude_code_credentials_from_source(
 
     Ok(Some(ClaudeCodeCredentials {
         access_token: access_token.to_string(),
+        refresh_token,
         expires_at,
+        scopes,
         plan: infer_claude_code_plan(rate_limit_tier, subscription_type),
         source,
+        credentials_path,
+        keychain_account,
+        raw: json,
     }))
+}
+
+/// Parse a Claude Code credential document, tolerating macOS Keychain's
+/// hex-encoding of values that contain newlines.
+fn try_parse_credential_json(text: &str) -> Option<serde_json::Value> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+        return Some(value);
+    }
+    try_decode_hex_json(text)
+}
+
+fn try_decode_hex_json(text: &str) -> Option<serde_json::Value> {
+    let hex = text.trim();
+    let hex = hex.strip_prefix("0x").or_else(|| hex.strip_prefix("0X")).unwrap_or(hex);
+    if hex.is_empty() || !hex.len().is_multiple_of(2) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        .collect();
+    serde_json::from_slice(&bytes).ok()
 }
 
 fn infer_claude_code_plan(
@@ -1737,7 +1965,7 @@ fn infer_claude_code_plan(
     }
 }
 
-fn is_token_expired(expires_at: Option<i64>) -> bool {
+fn is_token_expiring_soon(expires_at: Option<i64>) -> bool {
     let Some(expires_at) = expires_at else {
         return false;
     };
@@ -1745,7 +1973,7 @@ fn is_token_expired(expires_at: Option<i64>) -> bool {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
-    now >= expires_at
+    now >= expires_at - 60_000
 }
 
 fn path_to_display(path: &Path) -> String {

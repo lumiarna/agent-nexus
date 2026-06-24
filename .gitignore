@@ -1,5 +1,9 @@
 __sessions/
 .agents/
+.claude/
+.codex/
+.opencode/
+
 .npmrc
 
 .DS_Store
