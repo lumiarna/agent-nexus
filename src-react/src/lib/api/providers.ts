@@ -20,6 +20,14 @@ export interface ProviderQuotaSnapshot {
   error?: string | null;
 }
 
+export interface OpenCodeCustomProvider {
+  id: string;
+  name: string;
+  npm: string;
+  baseUrl: string;
+  modelId: string;
+}
+
 export interface OpenCodeGoConnectionParams {
   workspaceId: string;
   authCookie: string;
@@ -30,6 +38,9 @@ export interface ProviderConnectionParams {
 }
 
 export const providersApi = {
+  listOpenCodeCustomProviders(): Promise<OpenCodeCustomProvider[]> {
+    return invokeCommand<OpenCodeCustomProvider[]>("list_opencode_custom_providers");
+  },
   getQuota(providerId: string): Promise<ProviderQuotaSnapshot> {
     return invokeCommand<ProviderQuotaSnapshot>("get_provider_quota", { providerId });
   },

@@ -1,6 +1,9 @@
 use tauri::State;
 
-use nexus_core::{error::AppResult, services::provider_quota::ProviderQuotaSnapshot};
+use nexus_core::{
+    error::AppResult,
+    services::provider_quota::{OpenCodeCustomProvider, ProviderQuotaSnapshot},
+};
 
 use crate::store::AppState;
 
@@ -10,4 +13,11 @@ pub async fn get_provider_quota(
     provider_id: String,
 ) -> AppResult<ProviderQuotaSnapshot> {
     state.provider_quota.get_provider_quota(&provider_id).await
+}
+
+#[tauri::command]
+pub fn list_opencode_custom_providers(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<OpenCodeCustomProvider>> {
+    state.provider_quota.list_opencode_custom_providers()
 }

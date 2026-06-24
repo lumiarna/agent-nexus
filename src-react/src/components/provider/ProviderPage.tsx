@@ -22,17 +22,23 @@ import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Segmented } from "@/components/ui/segmented";
 import { Toggle } from "@/components/ui/toggle";
 import { ScreenScroll } from "@/components/shell/screen";
-import { formatProviderQuotaDisplay } from "@/components/provider/quotaDisplay";
+import {
+  formatProviderQuotaDisplay,
+  isQuotaPaceAlert,
+} from "@/components/provider/quotaDisplay";
 import { nexus } from "@/lib/mock";
 import { providersApi } from "@/lib/api/providers";
 import {
   fallbackAgentCapabilities,
   providerRowsFromAgentCapabilities,
-  reconcileProviderRows,
 } from "@/lib/agentCapabilities";
 import { isTauriRuntime } from "@/lib/runtime";
+import { customProviderRows } from "@/lib/providerCatalog";
 import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
-import { useProviderQuotaQuery } from "@/lib/query/providers";
+import {
+  useOpenCodeCustomProvidersQuery,
+  useProviderQuotaQueries,
+} from "@/lib/query/providers";
 import { palette, quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type { Provider, TrayMetric } from "@/types";
@@ -70,10 +76,6 @@ const API_KEY_PROVIDER_HINTS: Record<
     savedLabel: "OpenRouter API key",
   },
 };
-
-/** Used − pace gap (in percentage points) above which a window is burning ahead
- *  of schedule, turning its pace marker critical. */
-const PACE_ALERT_THRESHOLD = 15;
 
 function isApiKeyProvider(providerId: string): boolean {
   return providerId in API_KEY_PROVIDER_HINTS;
@@ -155,23 +157,28 @@ function SortableProviderCard({
 
 export function ProviderPage() {
   const agentCapabilitiesQuery = useAgentCapabilitiesQuery();
+  const customProvidersQuery = useOpenCodeCustomProvidersQuery();
+  const providerSeeds = useMemo(() => {
+    const builtInProviders = nexus.providers();
+    return [
+      ...builtInProviders,
+      ...customProviderRows(customProvidersQuery.data ?? [], builtInProviders),
+    ];
+  }, [customProvidersQuery.data]);
   const providerCatalog = useMemo(
     () =>
       providerRowsFromAgentCapabilities(
         agentCapabilitiesQuery.data ?? fallbackAgentCapabilities(),
-        nexus.providers(),
+        providerSeeds,
       ),
-    [agentCapabilitiesQuery.data],
+    [agentCapabilitiesQuery.data, providerSeeds],
   );
-  const [providers, setProviders] = useState<Provider[]>(() =>
-    providerRowsFromAgentCapabilities(fallbackAgentCapabilities(), nexus.providers()),
-  );
-  const [order, setOrder] = useState<string[]>(() => providers.map((p) => p.id));
+  const [order, setOrder] = useState<string[]>(() => providerCatalog.map((p) => p.id));
   const [cardVisible, setCardVisible] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(providers.map((p) => [p.id, !p.hiddenCard])),
+    Object.fromEntries(providerCatalog.map((p) => [p.id, !p.hiddenCard])),
   );
   const [trayVisible, setTrayVisible] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(providers.map((p) => [p.id, p.status === "available"])),
+    Object.fromEntries(providerCatalog.map((p) => [p.id, p.status === "available"])),
   );
   const [configId, setConfigId] = useState<string | null>(null);
   const [copilotToken, setCopilotToken] = useState("");
@@ -184,13 +191,18 @@ export function ProviderPage() {
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [trayMetric, setTrayMetric] = useState<TrayMetric>(() => nexus.settings().trayMetric);
   const [colCount, setColCount] = useState(1);
-  const claudeQuota = useProviderQuotaQuery("claude");
-  const codexQuota = useProviderQuotaQuery("codex");
-  const copilotQuota = useProviderQuotaQuery("copilot");
-  const opencodeGoQuota = useProviderQuotaQuery("opencode-go");
-  const minimaxTokenQuota = useProviderQuotaQuery("minimax-token");
-  const deepseekQuota = useProviderQuotaQuery("deepseek");
-  const openrouterQuota = useProviderQuotaQuery("openrouter");
+  const providerIds = useMemo(
+    () => providerCatalog.map((provider) => provider.id),
+    [providerCatalog],
+  );
+  const quotaResults = useProviderQuotaQueries(providerIds);
+  const quotaQueries = Object.fromEntries(
+    providerIds.map((providerId, index) => [providerId, quotaResults[index]]),
+  );
+  const displayProviders = providerCatalog.map((provider) => {
+    const quota = quotaQueries[provider.id]?.data;
+    return quota ? mergeProviderQuota(provider, quota) : provider;
+  });
 
   const gridRef = useRef<HTMLDivElement>(null);
   const timers = useRef<Record<string, number>>({});
@@ -211,75 +223,26 @@ export function ProviderPage() {
   }, []);
 
   useEffect(() => {
-    setProviders((current) => reconcileProviderRows(current, providerCatalog));
-  }, [providerCatalog]);
-
-  useEffect(() => {
-    const providerIds = new Set(providers.map((provider) => provider.id));
+    const providerIds = new Set(providerCatalog.map((provider) => provider.id));
     setOrder((current) => [
       ...current.filter((id) => providerIds.has(id)),
-      ...providers
+      ...providerCatalog
         .map((provider) => provider.id)
         .filter((id) => !current.includes(id)),
     ]);
     setCardVisible((current) => ({
-      ...Object.fromEntries(providers.map((provider) => [provider.id, !provider.hiddenCard])),
+      ...Object.fromEntries(
+        providerCatalog.map((provider) => [provider.id, !provider.hiddenCard]),
+      ),
       ...current,
     }));
     setTrayVisible((current) => ({
-      ...Object.fromEntries(providers.map((provider) => [provider.id, provider.status === "available"])),
+      ...Object.fromEntries(
+        providerCatalog.map((provider) => [provider.id, provider.status === "available"]),
+      ),
       ...current,
     }));
-  }, [providers]);
-
-  useEffect(() => {
-    if (!claudeQuota.data) return;
-    setProviders((current) =>
-      current.map((provider) => mergeProviderQuota(provider, claudeQuota.data)),
-    );
-  }, [claudeQuota.data]);
-
-  useEffect(() => {
-    if (!codexQuota.data) return;
-    setProviders((current) =>
-      current.map((provider) => mergeProviderQuota(provider, codexQuota.data)),
-    );
-  }, [codexQuota.data]);
-
-  useEffect(() => {
-    if (!copilotQuota.data) return;
-    setProviders((current) =>
-      current.map((provider) => mergeProviderQuota(provider, copilotQuota.data)),
-    );
-  }, [copilotQuota.data]);
-
-  useEffect(() => {
-    if (!opencodeGoQuota.data) return;
-    setProviders((current) =>
-      current.map((provider) => mergeProviderQuota(provider, opencodeGoQuota.data)),
-    );
-  }, [opencodeGoQuota.data]);
-
-  useEffect(() => {
-    if (!minimaxTokenQuota.data) return;
-    setProviders((current) =>
-      current.map((provider) => mergeProviderQuota(provider, minimaxTokenQuota.data)),
-    );
-  }, [minimaxTokenQuota.data]);
-
-  useEffect(() => {
-    if (!deepseekQuota.data) return;
-    setProviders((current) =>
-      current.map((provider) => mergeProviderQuota(provider, deepseekQuota.data)),
-    );
-  }, [deepseekQuota.data]);
-
-  useEffect(() => {
-    if (!openrouterQuota.data) return;
-    setProviders((current) =>
-      current.map((provider) => mergeProviderQuota(provider, openrouterQuota.data)),
-    );
-  }, [openrouterQuota.data]);
+  }, [providerCatalog]);
 
   useEffect(() => {
     if (configId !== "copilot" || !isTauriRuntime()) return;
@@ -333,16 +296,6 @@ export function ProviderPage() {
     };
   }, [configId]);
 
-  const quotaQueries = {
-    claude: claudeQuota,
-    codex: codexQuota,
-    copilot: copilotQuota,
-    "opencode-go": opencodeGoQuota,
-    "minimax-token": minimaxTokenQuota,
-    deepseek: deepseekQuota,
-    openrouter: openrouterQuota,
-  } as const;
-
   const isAnyRefreshing =
     Object.values(quotaQueries).some((q) => q.isFetching) ||
     Object.values(refreshing).some(Boolean);
@@ -377,27 +330,7 @@ export function ProviderPage() {
   }
 
   function refreshProvider(id: string) {
-    if (id === "claude") {
-      void claudeQuota.refetch();
-    }
-    if (id === "codex") {
-      void codexQuota.refetch();
-    }
-    if (id === "copilot") {
-      void copilotQuota.refetch();
-    }
-    if (id === "opencode-go") {
-      void opencodeGoQuota.refetch();
-    }
-    if (id === "minimax-token") {
-      void minimaxTokenQuota.refetch();
-    }
-    if (id === "deepseek") {
-      void deepseekQuota.refetch();
-    }
-    if (id === "openrouter") {
-      void openrouterQuota.refetch();
-    }
+    void quotaQueries[id]?.refetch();
 
     setRefreshing((r) => ({ ...r, [id]: true }));
     window.clearTimeout(timers.current[id]);
@@ -432,11 +365,11 @@ export function ProviderPage() {
     reorder(String(active.id), String(over.id));
   }
 
-  const byId = Object.fromEntries(providers.map((p) => [p.id, p]));
+  const byId = Object.fromEntries(displayProviders.map((p) => [p.id, p]));
   const ordered = order.map((id) => byId[id]).filter(Boolean) as Provider[];
   const visible = ordered.filter((p) => cardVisible[p.id] !== false);
   const hidden = ordered.filter((p) => cardVisible[p.id] === false);
-  const cfg = configId ? providers.find((p) => p.id === configId) ?? null : null;
+  const cfg = configId ? displayProviders.find((p) => p.id === configId) ?? null : null;
   const columns: Provider[][] = Array.from({ length: colCount }, () => []);
   visible.forEach((p, i) => columns[i % colCount].push(p));
 
@@ -449,7 +382,7 @@ export function ProviderPage() {
           </h1>
           <p className="mt-1.5 text-[13px] text-[#9a8f80]">
             Global quota &amp; credential visibility · {visible.length} of{" "}
-            {providers.length} shown · drag cards to reorder
+            {providerCatalog.length} shown · drag cards to reorder
           </p>
         </div>
         <Button
@@ -473,15 +406,7 @@ export function ProviderPage() {
             {columns.map((col, ci) => (
               <div key={ci} className="flex min-w-0 flex-1 flex-col gap-4">
                 {col.map((p) => {
-              const loading =
-                !!refreshing[p.id] ||
-                (p.id === "claude" && claudeQuota.isFetching) ||
-                (p.id === "codex" && codexQuota.isFetching) ||
-                (p.id === "copilot" && copilotQuota.isFetching) ||
-                (p.id === "opencode-go" && opencodeGoQuota.isFetching) ||
-                (p.id === "minimax-token" && minimaxTokenQuota.isFetching) ||
-                (p.id === "deepseek" && deepseekQuota.isFetching) ||
-                (p.id === "openrouter" && openrouterQuota.isFetching);
+              const loading = !!refreshing[p.id] || !!quotaQueries[p.id]?.isFetching;
               const st: ProviderUiStatus = loading ? "loading" : p.status;
               const si = statusInfo(st);
               const showQuota = st === "available" && !!p.windows;
@@ -571,10 +496,9 @@ export function ProviderPage() {
                                           className="absolute -top-0.5 h-3 w-0.5 rounded-full"
                                           style={{
                                             left: `calc(${w.pace}% - 1px)`,
-                                            background:
-                                              w.used - w.pace > PACE_ALERT_THRESHOLD
-                                                ? palette.crit
-                                                : "#6a6055",
+                                            background: isQuotaPaceAlert(w)
+                                              ? palette.crit
+                                              : "#6a6055",
                                           }}
                                         />
                                       ) : null}
@@ -839,7 +763,7 @@ export function ProviderPage() {
                       await providersApi.setCopilotGithubToken(copilotToken.trim());
                       setConfigId(null);
                       toast("Saved Copilot GitHub token");
-                      void copilotQuota.refetch();
+                      refreshProvider("copilot");
                     } catch {
                       toast.error("Failed to save Copilot GitHub token");
                     } finally {
@@ -872,7 +796,7 @@ export function ProviderPage() {
                       });
                       setConfigId(null);
                       toast("Saved OpenCode Go connection params");
-                      void opencodeGoQuota.refetch();
+                      refreshProvider("opencode-go");
                     } catch {
                       toast.error("Failed to save OpenCode Go connection params");
                     } finally {

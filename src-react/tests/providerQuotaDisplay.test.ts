@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { formatProviderQuotaDisplay } from "../src/components/provider/quotaDisplay.js";
+import {
+  formatProviderQuotaDisplay,
+  isQuotaPaceAlert,
+} from "../src/components/provider/quotaDisplay.js";
 
 test("Claude Code quota display keeps the current card's used-percent semantics", () => {
   const provider = {
@@ -147,4 +150,30 @@ test("pace is derived only for weekly/monthly windows that carry a resetAt", () 
   assert.equal(display.windows[0].pace, 50);
   assert.equal(display.windows[1].pace, undefined);
   assert.equal(display.windows[2].pace, undefined);
+});
+
+test("natural-month quota warns only when usage is ahead of the long-window pace", () => {
+  const display = formatProviderQuotaDisplay(
+    {
+      windows: [
+        {
+          label: "Monthly limit",
+          used: 56,
+          kind: "monthly",
+          resetAt: "2026-07-01T00:00:00Z",
+        },
+        {
+          label: "Daily limit",
+          used: 99,
+          kind: "rolling",
+          resetAt: "2026-06-07T00:00:00Z",
+        },
+      ],
+    },
+    { now: new Date("2026-06-06T00:00:00Z") },
+  );
+
+  assert.equal(isQuotaPaceAlert(display.windows[0]), true);
+  assert.equal(display.windows[1].pace, undefined);
+  assert.equal(isQuotaPaceAlert(display.windows[1]), false);
 });

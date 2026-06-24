@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
 use nexus_core::{
     database::Database,
@@ -7,8 +7,9 @@ use nexus_core::{
         provider_quota::{
             claude_code_quota_from_usage_response, codex_quota_from_usage_response,
             copilot_quota_from_usage_response, deepseek_balance_quota_from_usage_response,
-            minimax_token_plan_cn_quota_from_usage_response, opencode_go_quota_from_html,
-            openrouter_credits_quota_from_usage_response, parse_opencode_copilot_token,
+            llm_gateway_quota_from_headers_at, minimax_token_plan_cn_quota_from_usage_response,
+            opencode_go_quota_from_html, openrouter_credits_quota_from_usage_response,
+            parse_opencode_copilot_token, parse_opencode_custom_providers,
             parse_opencode_provider_token, ClaudeCodeUsageBucket, ClaudeCodeUsageResponse,
             CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse, CopilotQuotaDetail,
             CopilotQuotaSnapshots, CopilotUsageResponse, DeepSeekBalanceInfo,
@@ -19,6 +20,130 @@ use nexus_core::{
     },
 };
 use serial_test::serial;
+
+#[test]
+fn opencode_config_exposes_custom_provider_metadata_without_credentials() {
+    let providers = parse_opencode_custom_providers(
+        r#"{
+          "provider": {
+            "llm-gateway-azure": {
+              "name": "LLM Gateway Azure",
+              "npm": "@ai-sdk/openai",
+              "options": {
+                "baseURL": "https://gateway.example/v2/openai/v1",
+                "apiKey": "secret-must-not-leak"
+              },
+              "models": {
+                "gpt-5.4": { "name": "GPT 5.4" }
+              }
+            }
+          }
+        }"#,
+    )
+    .expect("parse OpenCode custom providers");
+
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0].id, "llm-gateway-azure");
+    assert_eq!(providers[0].name, "LLM Gateway Azure");
+    assert_eq!(providers[0].npm, "@ai-sdk/openai");
+    assert_eq!(
+        providers[0].base_url,
+        "https://gateway.example/v2/openai/v1"
+    );
+    assert_eq!(providers[0].model_id, "gpt-5.4");
+    assert!(!serde_json::to_string(&providers)
+        .expect("serialize provider catalog")
+        .contains("secret-must-not-leak"));
+}
+
+#[test]
+fn llm_gateway_headers_map_effective_limits_to_quota_windows() {
+    let snapshot = llm_gateway_quota_from_headers_at(
+        "llm-gateway-alicloud",
+        "OpenCode custom",
+        &[
+            ("x-token-count-limit-per-minute", "480000000"),
+            ("x-token-count-used-per-minute", "0"),
+            ("x-token-count-limit-per-hour-and-user", "60000000"),
+            ("x-token-count-limit-per-hour-and-client-id", "480000000"),
+            ("x-token-count-used-per-hour", "561685"),
+            ("x-token-count-limit-per-day-and-user", "60000000"),
+            ("x-token-count-limit-per-day-and-client-id", "480000000"),
+            ("x-token-count-used-per-day", "693461"),
+            ("x-token-count-limit-per-month-and-user", "60000000"),
+            ("x-token-count-limit-per-month-and-client-id", "480000000"),
+            ("x-token-count-used-per-month", "33608618"),
+        ],
+        1_782_309_600,
+    )
+    .expect("derive gateway quota");
+
+    assert_eq!(snapshot.provider_id, "llm-gateway-alicloud");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::Available);
+    assert_eq!(snapshot.primary, Some(0));
+    assert_eq!(snapshot.windows.len(), 4);
+    assert_eq!(snapshot.windows[0].label, "Minute limit");
+    assert_eq!(snapshot.windows[1].label, "Hourly limit");
+    assert_eq!(snapshot.windows[1].used, 1);
+    assert_eq!(
+        snapshot.windows[1].value_label.as_deref(),
+        Some("561,685 / 60,000,000 tokens")
+    );
+    assert_eq!(snapshot.windows[3].label, "Monthly limit");
+    assert_eq!(snapshot.windows[3].kind, ProviderQuotaWindowKind::Monthly);
+    assert_eq!(snapshot.windows[3].used, 56);
+    assert_eq!(
+        snapshot.windows[3].reset_at.as_deref(),
+        Some("2026-07-01T00:00:00Z"),
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn provider_quota_service_lists_and_dispatches_custom_provider_without_api_key() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let config_file = temp_dir.path().join("opencode.json");
+    fs::write(
+        &config_file,
+        r#"{
+          "provider": {
+            "custom-gateway": {
+              "name": "Custom Gateway",
+              "npm": "@ai-sdk/openai-compatible",
+              "options": { "baseURL": "https://gateway.example/v1" },
+              "models": { "test-model": {} }
+            }
+          }
+        }"#,
+    )
+    .expect("write OpenCode config");
+    let previous_config_file = std::env::var_os("OPENCODE_CONFIG_FILE");
+    std::env::set_var("OPENCODE_CONFIG_FILE", &config_file);
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let providers = service
+        .list_opencode_custom_providers()
+        .expect("list custom providers");
+    let snapshot = service
+        .get_provider_quota("custom-gateway")
+        .await
+        .expect("dispatch custom provider");
+
+    match previous_config_file {
+        Some(value) => std::env::set_var("OPENCODE_CONFIG_FILE", value),
+        None => std::env::remove_var("OPENCODE_CONFIG_FILE"),
+    }
+
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0].id, "custom-gateway");
+    assert_eq!(snapshot.provider_id, "custom-gateway");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
+    assert_eq!(
+        snapshot.credential.as_deref(),
+        Some("opencode.json · custom-gateway")
+    );
+}
 
 fn copilot_detail(percent_remaining: Option<f64>) -> CopilotQuotaDetail {
     CopilotQuotaDetail {

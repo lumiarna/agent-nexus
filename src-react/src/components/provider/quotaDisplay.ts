@@ -32,6 +32,14 @@ export interface ProviderQuotaDisplay {
   windows: ProviderQuotaDisplayWindow[];
 }
 
+const PACE_ALERT_THRESHOLD = 15;
+
+export function isQuotaPaceAlert(
+  window: Pick<ProviderQuotaDisplayWindow, "used" | "pace">,
+): boolean {
+  return window.pace != null && window.used - window.pace > PACE_ALERT_THRESHOLD;
+}
+
 interface ProviderQuotaDisplayOptions {
   now?: Date;
   timeZone?: string;

@@ -52,6 +52,7 @@ pub fn run() {
             commands::sync::create_task_group,
             commands::project_symlinks::delete_project_symlink,
             commands::providers::get_provider_quota,
+            commands::providers::list_opencode_custom_providers,
             commands::app_config::get_copilot_github_token,
             commands::app_config::get_opencode_go_connection_params,
             commands::app_config::get_provider_connection_params,
