@@ -82,6 +82,12 @@ function directionColor(d: TaskDirection): string {
   return "#4a6a8a";
 }
 
+function directionLabel(d: TaskDirection): string {
+  if (d === "Push") return "PUSH";
+  if (d === "Pull") return "PULL";
+  return "DIST";
+}
+
 function statusOf(st: TaskStatus): { label: string; fg: string; dot: string } {
   if (st === "ok") return { label: "OK", fg: "#5f7a3e", dot: palette.good };
   if (st === "pending") return { label: "Pending", fg: "#9a6f0a", dot: palette.warn };
@@ -425,7 +431,7 @@ function TaskGroupRow({
           style={{ color: directionColor(task.direction) }}
           title={task.direction}
         >
-          {task.direction}
+          {directionLabel(task.direction)}
         </span>
       </div>
       <div className="col-span-6 flex min-w-0 items-center gap-1.5">
