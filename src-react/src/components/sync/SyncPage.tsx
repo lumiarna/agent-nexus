@@ -15,7 +15,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, RefreshCw } from "lucide-react";
+import { Copy, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dot, Input, Spinner } from "@/components/ui/primitives";
@@ -231,9 +231,28 @@ function SortableTask({ groupId, taskId, children }: {
   return <>{children(sortable)}</>;
 }
 
+/** Run group action — mirrors the Refresh button's feedback: disabled + spinner + label swap
+ *  while its group runs, so a click is never silent during the (potentially slow) serial run. */
+function RunGroupButton({ running, onRun }: { running: boolean; onRun: () => void }) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onRun();
+      }}
+      disabled={running}
+      className="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white enabled:hover:bg-nexus-accent-hover disabled:cursor-default disabled:opacity-70"
+    >
+      {running ? <Loader2 size={12} className="animate-spin" /> : null}
+      {running ? "Running..." : "Run group"}
+    </button>
+  );
+}
+
 interface TaskGroupCardProps {
   group: TaskGroup;
   sortable?: SortableRender;
+  running: boolean;
   onRunGroup: (group: TaskGroup) => void;
   onEditSchedule: (group: TaskGroup, task: Task) => void;
   onRunTask: (group: TaskGroup, task: Task) => void;
@@ -245,6 +264,7 @@ interface TaskGroupCardProps {
 function TaskGroupCard({
   group,
   sortable,
+  running,
   onRunGroup,
   onEditSchedule,
   onRunTask,
@@ -284,12 +304,7 @@ function TaskGroupCard({
         </span>
         <div className="ml-auto flex gap-[7px]">
           {group.tasks.some((task) => task.action === "Copy") ? (
-            <button
-              onClick={() => onRunGroup(group)}
-              className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
-            >
-              Run group
-            </button>
+            <RunGroupButton running={running} onRun={() => onRunGroup(group)} />
           ) : null}
           {onAddTask ? (
             <button
@@ -521,6 +536,7 @@ export function SyncPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const [platform, setPlatform] = useState<HostPlatform>("unknown");
+  const [runningGroupId, setRunningGroupId] = useState<string | null>(null);
   const supportsJunction = platform === "windows";
   const projectSymlinks = projectSymlinksQuery.data ?? [];
   const projectSymlinkError = projectSymlinksQuery.error
@@ -666,6 +682,7 @@ export function SyncPage() {
     const runnable = group.tasks.filter((task) => task.action === "Copy");
     if (!runnable.length) return;
 
+    setRunningGroupId(group.id);
     try {
       for (const task of runnable) {
         const updated = await runTaskMutation.mutateAsync(task.id);
@@ -674,6 +691,8 @@ export function SyncPage() {
       toast(`Run group complete · ${group.name}`);
     } catch (error) {
       toast(getErrorMessage(error));
+    } finally {
+      setRunningGroupId(null);
     }
   }
 
@@ -818,6 +837,7 @@ export function SyncPage() {
                       <TaskGroupCard
                         group={g}
                         sortable={sortable}
+                        running={runningGroupId === g.id}
                         onRunGroup={(group) => void runGroup(group)}
                         onEditSchedule={openSchedule}
                         onRunTask={(group, task) => void runTask(group.id, task)}
@@ -1016,15 +1036,10 @@ export function SyncPage() {
                 {sessionBackupGroup.tasks.length} projects
               </span>
               {sessionBackupGroup.tasks.some((task) => task.action === "Copy") ? (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void runGroup(sessionBackupGroup);
-                  }}
-                  className="cursor-pointer whitespace-nowrap rounded-full bg-nexus-accent px-[13px] py-[5px] text-[11.5px] font-bold text-white hover:bg-nexus-accent-hover"
-                >
-                  Run group
-                </button>
+                <RunGroupButton
+                  running={runningGroupId === sessionBackupGroup.id}
+                  onRun={() => void runGroup(sessionBackupGroup)}
+                />
               ) : null}
             </div>
             {openSec.backup ? (
