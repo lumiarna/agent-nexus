@@ -26,7 +26,42 @@ pub fn resolve_local_path(raw: &str) -> AppResult<PathBuf> {
             )
         });
     }
+    if let Some(path) = expand_supported_env_path(raw)? {
+        return Ok(path);
+    }
     Ok(PathBuf::from(raw))
+}
+
+fn expand_supported_env_path(raw: &str) -> AppResult<Option<PathBuf>> {
+    for variable in ["APPDATA", "LOCALAPPDATA"] {
+        if let Some(path) = expand_named_env_path(raw, variable)? {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
+}
+
+fn expand_named_env_path(raw: &str, variable: &str) -> AppResult<Option<PathBuf>> {
+    let token = format!("%{variable}%");
+    if raw == token {
+        return resolve_named_env_dir(variable).map(Some);
+    }
+
+    let Some(rest) = raw.strip_prefix(&token) else {
+        return Ok(None);
+    };
+    let Some(rest) = rest.strip_prefix(['/', '\\']) else {
+        return Ok(None);
+    };
+    Ok(Some(resolve_named_env_dir(variable)?.join(rest)))
+}
+
+fn resolve_named_env_dir(variable: &str) -> AppResult<PathBuf> {
+    env::var_os(variable).map(PathBuf::from).ok_or_else(|| {
+        AppError::Validation(format!(
+            "cannot resolve '%{variable}%': {variable} environment variable is not set"
+        ))
+    })
 }
 
 pub fn path_to_string(path: &Path, label: &str) -> AppResult<String> {
@@ -100,6 +135,59 @@ mod tests {
             resolve_local_path("plain").expect("resolve plain"),
             PathBuf::from("plain")
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[serial]
+    fn resolve_local_path_expands_supported_windows_env_paths() {
+        let root = TempDir::new().expect("create temp env root");
+        let appdata = root.path().join("Roaming");
+        let localappdata = root.path().join("Local");
+        let previous_appdata = env::var_os("APPDATA");
+        let previous_localappdata = env::var_os("LOCALAPPDATA");
+        env::set_var("APPDATA", &appdata);
+        env::set_var("LOCALAPPDATA", &localappdata);
+
+        assert_eq!(
+            resolve_local_path(r"%APPDATA%\Zed\settings.json").expect("resolve %APPDATA% path"),
+            appdata.join("Zed").join("settings.json")
+        );
+        assert_eq!(
+            resolve_local_path("%LOCALAPPDATA%/warp/Warp/config/settings.toml")
+                .expect("resolve %LOCALAPPDATA% path"),
+            localappdata
+                .join("warp")
+                .join("Warp")
+                .join("config")
+                .join("settings.toml")
+        );
+
+        match previous_appdata {
+            Some(value) => env::set_var("APPDATA", value),
+            None => env::remove_var("APPDATA"),
+        }
+        match previous_localappdata {
+            Some(value) => env::set_var("LOCALAPPDATA", value),
+            None => env::remove_var("LOCALAPPDATA"),
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[serial]
+    fn resolve_local_path_rejects_missing_supported_windows_env_path() {
+        let previous_appdata = env::var_os("APPDATA");
+        env::remove_var("APPDATA");
+
+        let error =
+            resolve_local_path("%APPDATA%/Zed/settings.json").expect_err("missing APPDATA");
+
+        match previous_appdata {
+            Some(value) => env::set_var("APPDATA", value),
+            None => env::remove_var("APPDATA"),
+        }
+        assert!(error.to_string().contains("APPDATA environment variable is not set"));
     }
 
     #[cfg(windows)]

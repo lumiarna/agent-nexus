@@ -79,6 +79,10 @@ fn display_path(path: &Path) -> String {
     paths::path_to_string(path, "path").expect("display path")
 }
 
+fn normalized_display_path(path: &Path) -> String {
+    display_path(path).replace('\\', "/")
+}
+
 fn assert_link_points_to(source: &Path, target: &Path) {
     // Works for both symlinks and junctions: canonicalize resolves either to the source.
     assert_eq!(
@@ -564,6 +568,62 @@ async fn runs_local_file_copy_task_with_tilde_source_to_webdav() {
 }
 
 #[tokio::test]
+#[serial]
+async fn runs_local_file_copy_task_with_appdata_source_to_webdav() {
+    let (url, requests, server) = spawn_webdav_server(vec![
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+    ]);
+    let root = TempDir::new().expect("create temp dir");
+    let appdata = root.path().join("Roaming");
+    fs::create_dir_all(appdata.join("Zed")).expect("create APPDATA dir");
+    let source_file = appdata.join("Zed").join("settings.json");
+    fs::write(&source_file, "theme = 'light'\n").expect("write source file");
+    let previous_appdata = env::var_os("APPDATA");
+    env::set_var("APPDATA", &appdata);
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    sync.save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
+        url,
+        user: "alice".to_string(),
+        pass: "secret".to_string(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Zed APPDATA".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: "%APPDATA%/Zed/settings.json".to_string(),
+                target_type: "Cloud".to_string(),
+                target: "config/zed/settings.json".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    let task = sync
+        .run_task(created.tasks[0].id.clone())
+        .await
+        .expect("run APPDATA source task");
+    match previous_appdata {
+        Some(value) => env::set_var("APPDATA", value),
+        None => env::remove_var("APPDATA"),
+    }
+
+    server.join().expect("join webdav server");
+    let requests = requests.lock().expect("lock request log");
+    assert_eq!(task.status, "ok");
+    assert!(requests[3].starts_with("PUT /webdav/agent-nexus-sync/config/zed/settings.json HTTP/1.1"));
+    assert!(requests[3].contains("theme = 'light'"));
+}
+
+#[tokio::test]
 async fn runs_local_directory_copy_task_to_webdav() {
     let (url, requests, server) = spawn_webdav_server(vec![
         http_response("201 Created"),
@@ -640,8 +700,8 @@ fn creates_symlink_placement_and_lists_custom_task_group() {
     assert_eq!(groups[0].tasks.len(), 1);
     assert_eq!(groups[0].tasks[0].direction, "Distribution");
     assert_eq!(groups[0].tasks[0].action, LINK_ACTION);
-    assert_eq!(groups[0].tasks[0].source, source_dir.to_string_lossy());
-    assert_eq!(groups[0].tasks[0].target, target_link.to_string_lossy());
+    assert_eq!(groups[0].tasks[0].source, normalized_display_path(&source_dir));
+    assert_eq!(groups[0].tasks[0].target, normalized_display_path(&target_link));
     assert_eq!(groups[0].tasks[0].schedule, "manual");
     assert_eq!(groups[0].tasks[0].last_run, "—");
     assert_eq!(groups[0].tasks[0].status, "never");
@@ -1149,8 +1209,8 @@ fn adds_symlink_task_to_existing_group_and_creates_placement() {
 
     assert_eq!(updated.id, created.id);
     assert_eq!(updated.tasks.len(), 2);
-    assert_eq!(updated.tasks[1].source, second_source.to_string_lossy());
-    assert_eq!(updated.tasks[1].target, second_link.to_string_lossy());
+    assert_eq!(updated.tasks[1].source, normalized_display_path(&second_source));
+    assert_eq!(updated.tasks[1].target, normalized_display_path(&second_link));
     assert_eq!(updated.tasks[1].action, LINK_ACTION);
     assert_link_points_to(&second_source, &second_link);
 }
@@ -1200,7 +1260,75 @@ fn adds_copy_task_appended_after_existing_tasks() {
     assert_eq!(updated.tasks.len(), 2);
     assert_eq!(updated.tasks[0].action, LINK_ACTION);
     assert_eq!(updated.tasks[1].action, "Copy");
-    assert_eq!(updated.tasks[1].source, copy_source.to_string_lossy());
+    assert_eq!(updated.tasks[1].source, normalized_display_path(&copy_source));
+}
+
+#[test]
+fn create_task_group_normalizes_saved_paths_to_forward_slashes() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source = root.path().join("source.txt");
+    fs::write(&source, "payload").expect("write source file");
+
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Normalized create".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: display_path(&source).replace('/', r#"\"#),
+                target_type: "Cloud".to_string(),
+                target: r#"config\zed\settings.json"#.to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create normalized task group");
+
+    assert_eq!(created.tasks.len(), 1);
+    assert_eq!(created.tasks[0].source, normalized_display_path(&source));
+    assert_eq!(created.tasks[0].target, "config/zed/settings.json");
+}
+
+#[test]
+fn add_task_normalizes_saved_paths_to_forward_slashes() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let source = root.path().join("source.txt");
+    let target = root.path().join("restore").join("settings.json");
+    fs::write(&source, "payload").expect("write source file");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Normalized add".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: display_path(&source),
+                target_type: "Cloud".to_string(),
+                target: "backup/settings.json".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create base task group");
+
+    let updated = sync
+        .add_task(
+            created.id.clone(),
+            CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Cloud".to_string(),
+                source: r#"config\zed\settings.json"#.to_string(),
+                target_type: "Local".to_string(),
+                target: display_path(&target).replace('/', r#"\"#),
+                schedule: "manual".to_string(),
+            },
+        )
+        .expect("add normalized task");
+
+    assert_eq!(updated.tasks.len(), 2);
+    assert_eq!(updated.tasks[1].source, "config/zed/settings.json");
+    assert_eq!(updated.tasks[1].target, normalized_display_path(&target));
 }
 
 #[test]

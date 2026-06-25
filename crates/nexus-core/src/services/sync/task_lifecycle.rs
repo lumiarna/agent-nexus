@@ -593,8 +593,8 @@ fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
             "Cloud to Cloud sync tasks are not supported".to_string(),
         ));
     }
-    let source = required_trimmed(&task.source, "task source")?;
-    let target = required_trimmed(&task.target, "task target")?;
+    let source = normalize_task_path(&task.source, "task source")?;
+    let target = normalize_task_path(&task.target, "task target")?;
     if (action == "Symlink" || action == "Junction")
         && (source_type != "Local" || target_type != "Local")
     {
@@ -619,6 +619,10 @@ fn prepare_task(task: &CreateTaskInput) -> AppResult<PreparedTask> {
         schedule,
         direction: direction.to_string(),
     })
+}
+
+fn normalize_task_path(raw: &str, label: &str) -> AppResult<String> {
+    Ok(required_trimmed(raw, label)?.replace('\\', "/"))
 }
 
 async fn push_local_to_cloud(task: &Task, settings: &WebdavSettings) -> AppResult<()> {
