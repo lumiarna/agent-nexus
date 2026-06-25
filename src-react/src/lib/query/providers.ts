@@ -9,6 +9,13 @@ export const providerKeys = {
   quota: (providerId: string) => ["providers", providerId, "quota"] as const,
 };
 
+export const PROVIDER_QUOTA_REFETCH_INTERVAL_MS = 5 * 60 * 1000;
+
+const providerQuotaRefreshOptions = {
+  refetchInterval: PROVIDER_QUOTA_REFETCH_INTERVAL_MS,
+  refetchIntervalInBackground: true,
+} as const;
+
 export function useProviderOrderQuery() {
   return useQuery({
     queryKey: providerKeys.order,
@@ -41,6 +48,7 @@ export function useProviderQuotaQuery(providerId: string) {
     queryKey: providerKeys.quota(providerId),
     queryFn: () => providersApi.getQuota(providerId),
     enabled: isTauriRuntime(),
+    ...providerQuotaRefreshOptions,
   });
 }
 
@@ -50,6 +58,7 @@ export function useProviderQuotaQueries(providerIds: readonly string[]) {
       queryKey: providerKeys.quota(providerId),
       queryFn: () => providersApi.getQuota(providerId),
       enabled: isTauriRuntime(),
+      ...providerQuotaRefreshOptions,
     })),
   });
 }
