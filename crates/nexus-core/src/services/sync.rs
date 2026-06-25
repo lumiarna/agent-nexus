@@ -241,7 +241,7 @@ fn normalize_webdav_settings(input: WebdavSettingsInput) -> AppResult<WebdavSett
     })
 }
 
-fn read_webdav_settings(conn: &rusqlite::Connection) -> AppResult<WebdavSettings> {
+pub(crate) fn read_webdav_settings(conn: &rusqlite::Connection) -> AppResult<WebdavSettings> {
     Ok(WebdavSettings {
         url: read_setting(conn, WEBDAV_URL_SETTING)?.unwrap_or_default(),
         user: read_setting(conn, WEBDAV_USER_SETTING)?.unwrap_or_default(),

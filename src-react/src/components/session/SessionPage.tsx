@@ -7,7 +7,12 @@ import { Chip, Segmented } from "@/components/ui/segmented";
 import { useNav } from "@/lib/nav";
 import { nexus } from "@/lib/mock";
 import { useProjectsQuery } from "@/lib/query/projects";
-import { useLocalSessionQuery, useLocalSessionsQuery } from "@/lib/query/sessions";
+import {
+  useCloudSessionQuery,
+  useCloudSessionsQuery,
+  useLocalSessionQuery,
+  useLocalSessionsQuery,
+} from "@/lib/query/sessions";
 import { isTauriRuntime } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
 import type { Session, SessionSource } from "@/types";
@@ -42,38 +47,35 @@ export function SessionPage() {
   const desktop = isTauriRuntime();
   const projectsQuery = useProjectsQuery();
   const localSessionsQuery = useLocalSessionsQuery();
+  const cloudSessionsQuery = useCloudSessionsQuery();
   const [mockSessions] = useState(() => nexus.sessions());
   const mockProjects = useRef(nexus.projects().filter((p) => p.status === "active"));
   const [source, setSource] = useState<Source>("local");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [cloudAvailable, setCloudAvailable] = useState(true);
   const [projectId, setProjectId] = useState<string | null>(null);
-  const isRealLocal = desktop && source === "local";
-  const sessions = isRealLocal ? localSessionsQuery.data ?? [] : mockSessions;
-  const projects = isRealLocal
+  const activeSessionsQuery = source === "local" ? localSessionsQuery : cloudSessionsQuery;
+  const isRealSource = desktop;
+  const sessions = isRealSource ? activeSessionsQuery.data ?? [] : mockSessions;
+  const projects = isRealSource
     ? (projectsQuery.data ?? []).filter((p) => p.status === "active")
     : mockProjects.current;
   const queryError =
-    isRealLocal && localSessionsQuery.error ? getErrorMessage(localSessionsQuery.error) : null;
+    isRealSource && activeSessionsQuery.error
+      ? getErrorMessage(activeSessionsQuery.error)
+      : null;
   const pageError = queryError;
-  const isLoading = isRealLocal && localSessionsQuery.isLoading;
-  const isRefreshing = isRealLocal && localSessionsQuery.isFetching;
+  const isLoading = isRealSource && activeSessionsQuery.isLoading;
+  const isRefreshing = isRealSource && activeSessionsQuery.isFetching;
 
   async function refreshSessions() {
-    if (source === "cloud") {
-      setCloudAvailable(true);
-      toast("Cloud refresh is not wired yet");
-      return;
-    }
-
     if (!desktop) {
-      toast("Desktop runtime required for local refresh");
+      toast("Desktop runtime required for session refresh");
       return;
     }
 
     try {
-      const rows = await localSessionsQuery.refetch();
+      const rows = await activeSessionsQuery.refetch();
       if (rows.data) {
         toast(`Refreshed ${rows.data.length} ${rows.data.length === 1 ? "session" : "sessions"}`);
       }
@@ -82,7 +84,6 @@ export function SessionPage() {
     }
   }
 
-  const cloudDown = source === "cloud" && !cloudAvailable;
   const q = search.trim().toLowerCase();
   const projectCounts = new Map<string, number>();
   for (const session of sessions) {
@@ -96,7 +97,7 @@ export function SessionPage() {
       (se) =>
         se.title.toLowerCase().includes(q) ||
         se.excerpt.toLowerCase().includes(q) ||
-        (!isRealLocal && se.body.toLowerCase().includes(q)) ||
+        (!isRealSource && se.body.toLowerCase().includes(q)) ||
         (se.projectName ?? "").toLowerCase().includes(q) ||
         se.project.toLowerCase().includes(q),
     );
@@ -106,27 +107,34 @@ export function SessionPage() {
   const sel = sess.find((se) => se.id === selId) ?? null;
   const localSessionDetail = useLocalSessionQuery(
     sel?.id ?? null,
-    isRealLocal && sel != null && !pageError,
+    isRealSource && source === "local" && sel != null && !pageError,
   );
+  const cloudSessionDetail = useCloudSessionQuery(
+    sel?.id ?? null,
+    isRealSource && source === "cloud" && sel != null && !pageError,
+  );
+  const activeSessionDetail = source === "local" ? localSessionDetail : cloudSessionDetail;
   const projectNameById = new Map(projects.map((project) => [project.id, project.name]));
   const sessionProjectLabel = (session: Session) =>
     session.projectName ?? projectNameById.get(session.project) ?? session.project;
-  const previewBody = isRealLocal ? localSessionDetail.data?.body ?? "" : sel?.body ?? "";
+  const previewBody = isRealSource ? activeSessionDetail.data?.body ?? "" : sel?.body ?? "";
   const previewError =
-    isRealLocal && localSessionDetail.error ? getErrorMessage(localSessionDetail.error) : null;
+    isRealSource && activeSessionDetail.error
+      ? getErrorMessage(activeSessionDetail.error)
+      : null;
   const isPreviewLoading =
-    isRealLocal && sel != null && localSessionDetail.isLoading && !previewError;
+    isRealSource && sel != null && activeSessionDetail.isLoading && !previewError;
 
-  const listShown = !cloudDown && !pageError && !isLoading && sess.length > 0;
+  const listShown = !pageError && !isLoading && sess.length > 0;
 
   let emptyTitle = "";
   let emptyBody = "";
-  if (cloudDown) {
-    emptyTitle = "Cloud unavailable";
-    emptyBody = "Could not reach the Cloud archive.";
-  } else if (isLoading && sess.length === 0) {
+  if (isLoading && sess.length === 0) {
     emptyTitle = "Refreshing sessions";
-    emptyBody = "Reading local session directories across recorded projects.";
+    emptyBody =
+      source === "cloud"
+        ? "Reading Cloud session archive across recorded projects."
+        : "Reading local session directories across recorded projects.";
   } else if (pageError) {
     emptyTitle = "Session refresh failed";
     emptyBody = pageError;
@@ -259,25 +267,12 @@ export function SessionPage() {
             <div className="px-[26px] py-[50px] text-center">
               <div className="text-[14px] font-bold text-[#7a6f60]">{emptyTitle}</div>
               <div className="mt-1.5 text-[12.5px] leading-[1.5] text-[#b3a999]">{emptyBody}</div>
-              {cloudDown ? (
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  className="mt-3.5"
-                  onClick={() => {
-                    setCloudAvailable(true);
-                    toast("Reconnected to Cloud");
-                  }}
-                >
-                  Retry connection
-                </Button>
-              ) : null}
             </div>
           )}
         </div>
 
         <div className="overflow-auto bg-nexus-card">
-          {sel && !cloudDown && !pageError && !isLoading ? (
+          {sel && !pageError && !isLoading ? (
             <div className="px-7 py-6">
               <div className="font-mono text-[18px] font-extrabold tracking-[-.01em] text-nexus-ink">
                 {sel.title}
