@@ -133,3 +133,9 @@ pub fn agent_by_name(name: &str) -> Option<&'static AgentCapabilitySurface> {
         .iter()
         .find(|agent| agent.name == name)
 }
+
+pub fn agent_order_index(name: &str) -> Option<usize> {
+    AGENT_CAPABILITY_SURFACES
+        .iter()
+        .position(|agent| agent.name == name)
+}

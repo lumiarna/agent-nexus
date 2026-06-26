@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
@@ -12,7 +13,9 @@ use uuid::Uuid;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
-    services::agent_capabilities::{agent_capability_surfaces, AgentCapabilitySurface},
+    services::agent_capabilities::{
+        agent_capability_surfaces, agent_order_index, AgentCapabilitySurface,
+    },
     services::distribution::{self, MatrixSource},
     services::paths::{self, path_to_string},
     services::symlink::{create_managed_file_link, remove_managed_file_link_if_present},
@@ -71,6 +74,15 @@ struct PromptTargetContext {
     source_agent: String,
 }
 
+#[derive(Debug, Clone)]
+struct PromptListRow {
+    prompt: Prompt,
+    source_agent: String,
+    project_sort_index: Option<i64>,
+    project_created_at: Option<i64>,
+    project_name: Option<String>,
+}
+
 /// A scanned Prompt source paired with the already-known target paths, so `matrix_rows` can
 /// honour a previously-recorded target that still exists on disk (Prompt-specific signal).
 struct PromptMatrixSource<'a> {
@@ -113,35 +125,38 @@ impl PromptService {
         let conn = self.db.connection()?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT p.id, p.name, p.scope, p.project_id, p.canonical_path
+            SELECT
+                p.id,
+                p.name,
+                p.scope,
+                p.project_id,
+                p.canonical_path,
+                source.agent,
+                project.sort_index,
+                project.created_at,
+                project.name
             FROM prompts p
             LEFT JOIN projects project ON project.id = p.project_id
             JOIN prompt_distributions source
                 ON source.prompt_id = p.id AND source.role = 'source'
-            ORDER BY
-                CASE p.scope WHEN 'global' THEN 0 ELSE 1 END,
-                CASE WHEN p.scope = 'project' THEN project.sort_index IS NULL ELSE 0 END,
-                CASE WHEN p.scope = 'project' THEN project.sort_index END,
-                CASE WHEN p.scope = 'project' THEN project.created_at END,
-                CASE WHEN p.scope = 'project' THEN project.name END,
-                CASE source.agent
-                    WHEN 'Generic Agent' THEN 0
-                    WHEN 'Claude Code' THEN 1
-                    WHEN 'CodeX' THEN 2
-                    WHEN 'Copilot' THEN 3
-                    WHEN 'OpenCode' THEN 4
-                    ELSE 5
-                END,
-                p.name,
-                p.canonical_path
             "#,
         )?;
-        let rows = stmt.query_map([], |row| prompt_from_row(row, &conn))?;
-        let mut prompts = rows.collect::<Result<Vec<_>, _>>()?;
-        for prompt in &mut prompts {
-            prompt.content = fs::read_to_string(&prompt.path)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(PromptListRow {
+                prompt: prompt_from_row(row, &conn)?,
+                source_agent: row.get(5)?,
+                project_sort_index: row.get(6)?,
+                project_created_at: row.get(7)?,
+                project_name: row.get(8)?,
+            })
+        })?;
+        let mut rows = rows.collect::<Result<Vec<_>, _>>()?;
+        rows.sort_by(compare_prompt_list_rows);
+
+        for row in &mut rows {
+            row.prompt.content = fs::read_to_string(&row.prompt.path)?;
         }
-        Ok(prompts)
+        Ok(rows.into_iter().map(|row| row.prompt).collect())
     }
 
     pub fn scan_prompts(&self) -> AppResult<Vec<Prompt>> {
@@ -564,9 +579,36 @@ fn prompt_from_row(row: &Row<'_>, conn: &rusqlite::Connection) -> rusqlite::Resu
     })
 }
 
+fn compare_prompt_list_rows(left: &PromptListRow, right: &PromptListRow) -> Ordering {
+    scope_rank(&left.prompt.scope)
+        .cmp(&scope_rank(&right.prompt.scope))
+        .then_with(|| project_sort_missing(left).cmp(&project_sort_missing(right)))
+        .then_with(|| left.project_sort_index.cmp(&right.project_sort_index))
+        .then_with(|| left.project_created_at.cmp(&right.project_created_at))
+        .then_with(|| left.project_name.cmp(&right.project_name))
+        .then_with(|| {
+            source_index_for_agent(&left.source_agent)
+                .cmp(&source_index_for_agent(&right.source_agent))
+        })
+        .then_with(|| left.prompt.name.cmp(&right.prompt.name))
+        .then_with(|| left.prompt.path.cmp(&right.prompt.path))
+}
+
+fn scope_rank(scope: &str) -> u8 {
+    match scope {
+        "global" => 0,
+        _ => 1,
+    }
+}
+
+fn project_sort_missing(row: &PromptListRow) -> u8 {
+    if row.prompt.scope == "project" && row.project_sort_index.is_none() {
+        1
+    } else {
+        0
+    }
+}
+
 fn source_index_for_agent(agent_name: &str) -> usize {
-    agent_capability_surfaces()
-        .iter()
-        .position(|agent| agent.name == agent_name)
-        .unwrap_or(usize::MAX)
+    agent_order_index(agent_name).unwrap_or(usize::MAX)
 }

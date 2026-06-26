@@ -108,6 +108,26 @@ fn scans_global_prompt_sources_and_derives_distribution_from_capability_surface(
 
 #[test]
 #[serial]
+fn lists_global_prompt_sources_in_capability_order_not_prompt_name_order() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let prompts = PromptService::new(db);
+
+    with_isolated_home(|home| {
+        write_prompt(&home.join(".codex/AGENTS.md"), "# CodeX instructions\n");
+        write_prompt(&home.join(".claude/CLAUDE.md"), "# Claude instructions\n");
+
+        let rows = prompts.scan_prompts().expect("scan prompts");
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].cells["Claude Code"], "source");
+        assert_eq!(rows[0].name, "CLAUDE.md");
+        assert_eq!(rows[1].cells["CodeX"], "source");
+        assert_eq!(rows[1].name, "AGENTS.md");
+    });
+}
+
+#[test]
+#[serial]
 #[cfg(unix)]
 fn scans_project_prompt_sources_with_two_agent_matrix_and_content() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));

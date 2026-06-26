@@ -1,6 +1,6 @@
-import { AGENTS } from "@/config/agents";
-import type { AgentCapabilitySurface } from "@/lib/api/agentCapabilities";
-import type { Provider } from "@/types";
+import { AGENTS } from "../config/agents.js";
+import type { AgentCapabilitySurface } from "./api/agentCapabilities.js";
+import type { Provider } from "../types/index.js";
 
 export function fallbackAgentCapabilities(): AgentCapabilitySurface[] {
   return AGENTS.map((agent) => {

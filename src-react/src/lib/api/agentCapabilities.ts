@@ -1,4 +1,4 @@
-import { invokeCommand } from "@/lib/api/tauri";
+import { invokeCommand } from "./tauri.js";
 
 export interface SkillCapabilitySurface {
   globalDir: string;
