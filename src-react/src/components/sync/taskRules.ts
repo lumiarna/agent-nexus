@@ -47,7 +47,7 @@ export function isCronSchedule(schedule: string): boolean {
 }
 
 /** Toggle a schedule between manual and cron, keeping an existing cron when re-enabling and
- *  seeding `defaultCron` when there is none yet. */
+ *  applying `defaultCron` when there is none yet. */
 export function scheduleForMode(
   mode: "manual" | "cron",
   currentSchedule: string,

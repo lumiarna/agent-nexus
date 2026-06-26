@@ -1,8 +1,8 @@
 // Domain types for the Agent Nexus frontend.
 //
-// Names follow the ADR0002 schema v1 / CONTEXT.md glossary so phase 3 (real IPC)
-// can reuse them. Field *shapes* follow prototype/nexus-data.js — the source of
-// truth for the mock UI — including UI-derived fields (windows, counts, body).
+// Names follow the ADR0002 schema v1 / CONTEXT.md glossary and the desktop IPC
+// payloads exposed by the Tauri backend. Some fields are UI-derived summaries
+// such as provider quota windows, project counts, and session preview bodies.
 
 // ─── Agents / distribution ──────────────────────────────────────────────────
 

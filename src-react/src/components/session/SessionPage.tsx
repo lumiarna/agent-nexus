@@ -1,11 +1,10 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dot, Input } from "@/components/ui/primitives";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { useNav } from "@/lib/nav";
-import { nexus } from "@/lib/mock";
 import { useProjectsQuery } from "@/lib/query/projects";
 import {
   useCloudSessionQuery,
@@ -19,13 +18,7 @@ import type { Session, SessionSource } from "@/types";
 
 type Source = Extract<SessionSource, "local" | "cloud">;
 
-const PROJ_COLORS: Record<string, string> = {
-  "agent-nexus": "#9d7a64",
-  "oll-context": "#4f7a6a",
-  tap: "#c2410c",
-  "tap-kit": "#7a5c9e",
-  "awesome-vibe-coding": "#b07d2e",
-};
+const PROJECT_COLORS = ["#9d7a64", "#4f7a6a", "#c2410c", "#7a5c9e", "#b07d2e", "#5a7894"];
 const ACCENT = "#9d7a64";
 
 function getErrorMessage(error: unknown): string {
@@ -42,24 +35,28 @@ function getErrorMessage(error: unknown): string {
   return "Unexpected error";
 }
 
+function projectColor(key: string): string {
+  let hash = 0;
+  for (const char of key) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return PROJECT_COLORS[hash % PROJECT_COLORS.length];
+}
+
 export function SessionPage() {
   const { go } = useNav();
   const desktop = isTauriRuntime();
   const projectsQuery = useProjectsQuery();
   const localSessionsQuery = useLocalSessionsQuery();
   const cloudSessionsQuery = useCloudSessionsQuery();
-  const [mockSessions] = useState(() => nexus.sessions());
-  const mockProjects = useRef(nexus.projects().filter((p) => p.status === "active"));
   const [source, setSource] = useState<Source>("local");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const activeSessionsQuery = source === "local" ? localSessionsQuery : cloudSessionsQuery;
   const isRealSource = desktop;
-  const sessions = isRealSource ? activeSessionsQuery.data ?? [] : mockSessions;
-  const projects = isRealSource
-    ? (projectsQuery.data ?? []).filter((p) => p.status === "active")
-    : mockProjects.current;
+  const sessions = activeSessionsQuery.data ?? [];
+  const projects = (projectsQuery.data ?? []).filter((p) => p.status === "active");
   const queryError =
     isRealSource && activeSessionsQuery.error
       ? getErrorMessage(activeSessionsQuery.error)
@@ -233,7 +230,7 @@ export function SessionPage() {
           {listShown ? (
             sess.map((se) => {
               const projectLabel = sessionProjectLabel(se);
-              const pc = PROJ_COLORS[projectLabel] ?? PROJ_COLORS[se.project] ?? "#a99a89";
+              const pc = projectColor(projectLabel || se.project);
               const selected = se.id === selId;
               return (
                 <div

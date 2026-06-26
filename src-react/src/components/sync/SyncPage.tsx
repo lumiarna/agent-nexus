@@ -49,17 +49,16 @@ import {
   useDeleteProjectSymlinkMutation,
   useProjectSymlinksQuery,
 } from "@/lib/query/projectSymlinks";
-import { nexus } from "@/lib/mock";
 import { palette } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type {
-  SystemSyncRow,
   Task,
   TaskAction,
   TaskDirection,
   TaskGroup,
   TaskStatus,
   LocationType,
+  Template,
 } from "@/types";
 
 // Both tables share a real 16-column grid so their Action column lands on the same physical
@@ -69,6 +68,9 @@ import type {
 // different column counts -> different gap totals -> different px-per-fr, so an equal
 // "fr-before-Action" sum still misaligns.
 const GRID16 = "repeat(16, minmax(0, 1fr))";
+const TASK_TEMPLATES: Template[] = [
+  { id: "blank", name: "Blank", desc: "Start an empty group and add tasks yourself.", tasks: [] },
+];
 
 function actionColors(a: TaskAction): { fg: string; bg: string } {
   if (a === "Junction") return { fg: "#6f5b92", bg: "#ebe5f2" };
@@ -522,8 +524,7 @@ export function SyncPage() {
   const projectSymlinksQuery = useProjectSymlinksQuery();
   const sessionBackupsQuery = useSessionBackupsQuery();
   const deleteProjectSymlinkMutation = useDeleteProjectSymlinkMutation();
-  const [templates] = useState(() => nexus.templates());
-  const [systemDefaults] = useState(() => nexus.systemSync());
+  const templates = TASK_TEMPLATES;
   const [openSec, setOpenSec] = useState({ skill: false, prompt: false, backup: false });
   const [createOpen, setCreateOpen] = useState(false);
   const [tpl, setTpl] = useState("blank");
@@ -784,10 +785,22 @@ export function SyncPage() {
     title: string;
     managedBy: string;
     count: string;
-    rows: SystemSyncRow[];
+    empty: string;
   }[] = [
-    { key: "skill", title: "Skill Distribution", managedBy: "Managed by Skill", count: `${systemDefaults.skill.length} records`, rows: systemDefaults.skill },
-    { key: "prompt", title: "Prompt Distribution", managedBy: "Managed by Prompt", count: `${systemDefaults.prompt.length} records`, rows: systemDefaults.prompt },
+    {
+      key: "skill",
+      title: "Skill Distribution",
+      managedBy: "Managed by Skill",
+      count: "0 records",
+      empty: "No Skill Distribution records generated yet.",
+    },
+    {
+      key: "prompt",
+      title: "Prompt Distribution",
+      managedBy: "Managed by Prompt",
+      count: "0 records",
+      empty: "No Prompt Distribution records generated yet.",
+    },
   ];
 
   return (
@@ -982,38 +995,13 @@ export function SyncPage() {
                   </span>
                   <span className="ml-auto text-[11.5px] text-[#b3a999]">{sec.count}</span>
                 </div>
-                {open ? (
-                  <div className="border-t border-nexus-border bg-nexus-card">
-                    <div
-                      className="grid gap-3.5 bg-nexus-sand2 px-[18px] py-[9px] text-[10px] font-bold uppercase tracking-[.05em] text-[#c3b9a8]"
-                      style={{ gridTemplateColumns: "1.2fr 1.5fr 1.6fr 120px" }}
-                    >
-                      <div>Asset</div>
-                      <div>Relation</div>
-                      <div>Target path</div>
-                      <div className="text-right">Status</div>
-                    </div>
-                    {sec.rows.map((r, i) => {
-                      const st = statusOf(r.status);
-                      return (
-                        <div
-                          key={i}
-                          className="grid items-center gap-3.5 border-t border-[#f3eee5] px-[18px] py-[11px]"
-                          style={{ gridTemplateColumns: "1.2fr 1.5fr 1.6fr 120px" }}
-                        >
-                          <div className="text-[12.5px] font-bold text-nexus-body">{r.asset}</div>
-                          <div className="text-[11.5px] text-[#6a6055]">{r.relation}</div>
-                          <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#a99a89]">
-                            {r.path}
-                          </div>
-                          <div className="inline-flex items-center gap-1.5 justify-self-end text-[11px] font-bold" style={{ color: st.fg }}>
-                            <Dot color={st.dot} /> {st.label}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
+	                {open ? (
+	                  <div className="border-t border-nexus-border bg-nexus-card">
+	                    <div className="px-[18px] py-5 text-[12px] text-[#b3a999]">
+	                      {sec.empty}
+	                    </div>
+	                  </div>
+	                ) : null}
               </div>
             );
           })}

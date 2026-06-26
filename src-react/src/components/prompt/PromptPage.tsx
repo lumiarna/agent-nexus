@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -12,11 +12,10 @@ import { Chip, Segmented } from "@/components/ui/segmented";
 import { ScreenScroll } from "@/components/shell/screen";
 import { promptsApi } from "@/lib/api/prompts";
 import { AGENTS } from "@/config/agents";
-import { nexus } from "@/lib/mock";
 import { useProjectsQuery } from "@/lib/query/projects";
 import { usePromptsQuery, useSetPromptTargetMutation } from "@/lib/query/prompts";
 import { isTauriRuntime } from "@/lib/runtime";
-import { srcAgentOf, toggleCellRole } from "@/lib/tokens";
+import { srcAgentOf } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type { AgentName, Prompt } from "@/types";
 
@@ -47,15 +46,11 @@ export function PromptPage() {
   const promptsQuery = usePromptsQuery();
   const projectsQuery = useProjectsQuery();
   const setPromptTarget = useSetPromptTargetMutation();
-  const [mockPrompts, setMockPrompts] = useState(() => nexus.prompts());
   const [scope, setScope] = useState<Scope>("global");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const mockProjects = useRef(nexus.projects().filter((p) => p.status === "active"));
-  const prompts = desktop ? promptsQuery.data ?? [] : mockPrompts;
-  const projects = desktop
-    ? (projectsQuery.data ?? []).filter((p) => p.status === "active")
-    : mockProjects.current;
+  const prompts = promptsQuery.data ?? [];
+  const projects = (projectsQuery.data ?? []).filter((p) => p.status === "active");
   const pageError =
     desktop && promptsQuery.error ? getErrorMessage(promptsQuery.error) : null;
   const isLoading = desktop && promptsQuery.isLoading;
@@ -83,9 +78,7 @@ export function PromptPage() {
     if (prompt.cells[agent] === "source") return;
 
     if (!desktop) {
-      setMockPrompts((ps) =>
-        ps.map((p) => (p.id === prompt.id ? { ...p, cells: toggleCellRole(p.cells, agent) } : p)),
-      );
+      toast("Desktop runtime required for changing prompt targets");
       return;
     }
 

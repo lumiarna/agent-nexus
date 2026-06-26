@@ -26,14 +26,13 @@ import {
   formatProviderQuotaDisplay,
   isQuotaPaceAlert,
 } from "@/components/provider/quotaDisplay";
-import { nexus } from "@/lib/mock";
 import { providersApi } from "@/lib/api/providers";
 import {
   fallbackAgentCapabilities,
   providerRowsFromAgentCapabilities,
 } from "@/lib/agentCapabilities";
 import { isTauriRuntime } from "@/lib/runtime";
-import { customProviderRows } from "@/lib/providerCatalog";
+import { builtInProviderRows, customProviderRows } from "@/lib/providerCatalog";
 import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
 import {
   useOpenCodeCustomProvidersQuery,
@@ -203,8 +202,8 @@ export function ProviderPage() {
   const providerOrderQuery = useProviderOrderQuery();
   const reorderProviders = useReorderProvidersMutation();
   const setProviderDisplayPreferences = useSetProviderDisplayPreferencesMutation();
-  const providerSeeds = useMemo(() => {
-    const builtInProviders = nexus.providers();
+  const baseProviderRows = useMemo(() => {
+    const builtInProviders = builtInProviderRows();
     return [
       ...builtInProviders,
       ...customProviderRows(customProvidersQuery.data ?? [], builtInProviders),
@@ -214,9 +213,9 @@ export function ProviderPage() {
     () =>
       providerRowsFromAgentCapabilities(
         agentCapabilitiesQuery.data ?? fallbackAgentCapabilities(),
-        providerSeeds,
+        baseProviderRows,
       ),
-    [agentCapabilitiesQuery.data, providerSeeds],
+    [agentCapabilitiesQuery.data, baseProviderRows],
   );
   const [order, setOrder] = useState<string[]>(() => providerCatalog.map((p) => p.id));
   const [cardVisible, setCardVisible] = useState<Record<string, boolean>>(() =>
@@ -234,7 +233,7 @@ export function ProviderPage() {
   const [providerApiKey, setProviderApiKey] = useState("");
   const [providerApiKeySaving, setProviderApiKeySaving] = useState(false);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
-  const [trayMetric, setTrayMetric] = useState<TrayMetric>(() => nexus.settings().trayMetric);
+  const [trayMetric, setTrayMetric] = useState<TrayMetric>("Remaining");
   const [colCount, setColCount] = useState(1);
   const providerIds = useMemo(
     () => providerCatalog.map((provider) => provider.id),

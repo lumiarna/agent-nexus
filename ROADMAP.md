@@ -3,4 +3,4 @@
 - 列文档表示 Provider 取值顺序、显示的 Credential 是什么
 - Sync Task，已经有删除线了，不需要再显示 Missing 字样（和 Project 面对齐）
 - Group 可以整体调 Schedule
-- 设置 cron 表达式触发 Provider 自动对话
+- 在 provider 卡片上增加一个设置项，通过设置 cron 表达式，如每天 5/10/15/20点，可自动触发对话以刷新 quota 窗口

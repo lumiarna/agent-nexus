@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { nexus } from "../src/lib/mock.js";
+import { builtInProviderRows } from "../src/lib/providerCatalog.js";
 
-test("MiniMax Token Plan CN is the default fifth visible provider card", () => {
-  const visibleProviders = nexus.providers().filter((provider) => !provider.hiddenCard);
+test("configured provider catalog includes MiniMax Token Plan CN after OpenCode Go", () => {
+  const visibleProviders = builtInProviderRows().filter((provider) => !provider.hiddenCard);
 
   assert.deepEqual(
     visibleProviders.slice(0, 5).map((provider) => provider.id),
-    ["claude", "codex", "copilot", "opencode-go", "minimax-token"],
+    ["opencode-go", "minimax-token", "deepseek", "openrouter"],
   );
-  assert.equal(visibleProviders[4].name, "MiniMax Token Plan CN");
+  assert.equal(visibleProviders[1].name, "MiniMax Token Plan CN");
 });

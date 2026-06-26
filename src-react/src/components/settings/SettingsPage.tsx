@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Card, Dot, Input } from "@/components/ui/primitives";
 import { ScreenScroll } from "@/components/shell/screen";
 import { useNav } from "@/lib/nav";
-import { nexus } from "@/lib/mock";
 import {
   useSaveWebdavSettingsMutation,
   useTestWebdavConnectionMutation,
@@ -43,14 +42,11 @@ export function SettingsPage() {
   const agentCapabilitiesQuery = useAgentCapabilitiesQuery();
   const saveWebdavSettingsMutation = useSaveWebdavSettingsMutation();
   const testWebdavConnectionMutation = useTestWebdavConnectionMutation();
-  const [init] = useState(() => nexus.settings());
-  const [url, setUrl] = useState(init.webdav.url);
-  const [user, setUser] = useState(init.webdav.user);
-  const [pass, setPass] = useState(init.webdav.pass);
-  const [remoteRoot, setRemoteRoot] = useState(init.webdav.remoteRoot);
-  const [webdavStatus, setWebdavStatus] = useState<WebdavStatus>(
-    init.webdav.status === "ok" ? "ok" : "untested",
-  );
+  const [url, setUrl] = useState("");
+  const [user, setUser] = useState("");
+  const [pass, setPass] = useState("");
+  const [remoteRoot, setRemoteRoot] = useState("");
+  const [webdavStatus, setWebdavStatus] = useState<WebdavStatus>("untested");
   const agents = agentCapabilitiesQuery.data ?? fallbackAgentCapabilities();
 
   const ws = WS_INFO[webdavStatus];

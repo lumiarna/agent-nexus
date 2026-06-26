@@ -22,8 +22,8 @@ import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Segmented } from "@/components/ui/segmented";
 import { SkillRow } from "@/components/skill/SkillRow";
 import { ScreenScroll } from "@/components/shell/screen";
+import { skillsApi } from "@/lib/api/skills";
 import { useNav } from "@/lib/nav";
-import { nexus } from "@/lib/mock";
 import { isTauriRuntime } from "@/lib/runtime";
 import {
   useDeleteProjectMutation,
@@ -36,9 +36,19 @@ import {
   useRemoveGitBaseFolderMutation,
   useScanGitBaseFoldersMutation,
 } from "@/lib/query/projects";
-import { palette, toggleCellRole } from "@/lib/tokens";
+import {
+  useCloudSessionsQuery,
+  useLocalSessionsQuery,
+} from "@/lib/query/sessions";
+import {
+  useSetSkillDisabledMutation,
+  useSetSkillTargetMutation,
+  useSkillsQuery,
+} from "@/lib/query/skills";
+import { useSessionBackupsQuery } from "@/lib/query/sync";
+import { palette } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
-import type { AgentName, Project } from "@/types";
+import type { AgentName, Project, Skill, TaskStatus } from "@/types";
 
 const LIST_COLS = "20px 1.5fr 1.8fr 220px 36px";
 type DetailSource = "local" | "cloud";
@@ -78,6 +88,14 @@ function moveProjectOrder(order: string[], fromId: string, toId: string): string
   const toIndex = order.indexOf(toId);
   if (fromIndex < 0 || toIndex < 0) return null;
   return arrayMove(order, fromIndex, toIndex);
+}
+
+function taskStatusSummary(status: TaskStatus): { label: string; fg: string; dot: string } {
+  if (status === "ok") return { label: "OK", fg: "#5f7a3e", dot: palette.good };
+  if (status === "pending") return { label: "Pending", fg: "#9a6f0a", dot: palette.warn };
+  if (status === "failed") return { label: "Failed", fg: palette.crit, dot: palette.crit };
+  if (status === "skipped") return { label: "Skipped", fg: "#8a7a68", dot: "#c6b6a1" };
+  return { label: "Never", fg: "#a99a89", dot: "#d9c9b3" };
 }
 
 interface SortableProjectRowProps {
@@ -135,25 +153,31 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const desktop = isTauriRuntime();
   const projectsQuery = useProjectsQuery();
   const baseFoldersQuery = useGitBaseFoldersQuery();
+  const skillsQuery = useSkillsQuery();
+  const localSessionsQuery = useLocalSessionsQuery();
+  const cloudSessionsQuery = useCloudSessionsQuery();
+  const sessionBackupsQuery = useSessionBackupsQuery();
   const recordProject = useRecordProjectMutation();
   const recordProjects = useRecordProjectsMutation();
   const deleteProject = useDeleteProjectMutation();
   const reorderProjects = useReorderProjectsMutation();
+  const setSkillTarget = useSetSkillTargetMutation();
+  const setSkillDisabled = useSetSkillDisabledMutation();
   const recordBaseFolder = useRecordGitBaseFolderMutation();
   const removeBaseFolder = useRemoveGitBaseFolderMutation();
   const scanBaseFolders = useScanGitBaseFoldersMutation();
   const projects = projectsQuery.data ?? [];
+  const skills = skillsQuery.data ?? [];
   const baseFolders = baseFoldersQuery.data ?? [];
   const projectError = projectsQuery.error ? getErrorMessage(projectsQuery.error) : null;
   const baseFoldersError = baseFoldersQuery.error
     ? getErrorMessage(baseFoldersQuery.error)
     : null;
   const [order, setOrder] = useState<string[]>([]);
-  const [skills, setSkills] = useState(() => nexus.skills());
   const [screen, setScreen] = useState<"list" | "detail">(
     initialProjectId ? "detail" : "list",
   );
-  const [detailId, setDetailId] = useState(initialProjectId ?? "oll-context");
+  const [detailId, setDetailId] = useState(initialProjectId ?? "");
   const [detailSource, setDetailSource] = useState<DetailSource>("local");
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -239,14 +263,88 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   // Detail derived state
   const dp = projects.find((p) => p.id === detailId) ?? projects[0];
   const dpSkills = dp ? skills.filter((k) => k.scope === "project" && k.projectId === dp.id) : [];
-  const dpSessions = dp ? nexus.sessionsForProject(dp.id, detailSource) : [];
+  const detailSessionsQuery = detailSource === "local" ? localSessionsQuery : cloudSessionsQuery;
+  const detailSessions = detailSessionsQuery.data ?? [];
+  const dpSessions = dp
+    ? detailSessions.filter(
+        (session) =>
+          session.project === dp.id &&
+          (session.source === detailSource || session.source === "both"),
+      )
+    : [];
+  const sessionBackup = dp
+    ? (sessionBackupsQuery.data ?? []).find((backup) => backup.projectKey === dp.key)
+    : undefined;
+  const skillError = skillsQuery.error ? getErrorMessage(skillsQuery.error) : null;
+  const detailSessionError = detailSessionsQuery.error
+    ? getErrorMessage(detailSessionsQuery.error)
+    : null;
+  const sessionBackupSummary = sessionBackup
+    ? taskStatusSummary(sessionBackup.task.status)
+    : sessionBackupsQuery.error
+      ? { label: "Error", fg: palette.crit, dot: palette.crit }
+      : sessionBackupsQuery.isLoading
+        ? { label: "Loading", fg: "#9a6f0a", dot: palette.warn }
+        : { label: "None", fg: "#a99a89", dot: "#d9c9b3" };
 
-  const toggleCell = (id: string, agent: AgentName) =>
-    setSkills((s) =>
-      s.map((k) => (k.id === id ? { ...k, cells: toggleCellRole(k.cells, agent) } : k)),
-    );
-  const toggleDmi = (id: string) =>
-    setSkills((s) => s.map((k) => (k.id === id ? { ...k, disabled: !k.disabled } : k)));
+  async function toggleCell(skill: Skill, agent: AgentName) {
+    if (skill.cells[agent] === "source") return;
+    if (!desktop) {
+      toast("Desktop runtime required for changing skill targets");
+      return;
+    }
+
+    try {
+      await setSkillTarget.mutateAsync({
+        skillId: skill.id,
+        agent,
+        enabled: skill.cells[agent] !== "target",
+      });
+      toast(skill.cells[agent] === "target" ? "Target removed" : "Target linked");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function toggleDmi(skill: Skill) {
+    if (!desktop) {
+      toast("Desktop runtime required for changing skill settings");
+      return;
+    }
+
+    try {
+      await setSkillDisabled.mutateAsync({ id: skill.id, disabled: !skill.disabled });
+      toast(!skill.disabled ? "Model invocation disabled" : "Model invocation enabled");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function openSkillSource(skill: Skill) {
+    if (!desktop) {
+      toast("Desktop runtime required for opening source files");
+      return;
+    }
+
+    try {
+      await skillsApi.openSource(skill.id);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function revealSkillPath(skill: Skill) {
+    if (!desktop) {
+      toast("Desktop runtime required for revealing files");
+      return;
+    }
+
+    try {
+      await skillsApi.revealPath(skill.id);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
 
   async function submitAddProject() {
     const path = addPath.trim();
@@ -573,15 +671,23 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               <div className="text-center">Disable invoke</div>
               <div className="text-right">Source file</div>
             </div>
-            {dpSkills.length > 0 ? (
+            {skillsQuery.isLoading && dpSkills.length === 0 ? (
+              <div className="mx-5 mb-5 rounded-[12px] border border-dashed border-nexus-border2 bg-nexus-sand p-[18px] text-center text-[12px] text-[#b3a999]">
+                Loading project skills...
+              </div>
+            ) : skillError ? (
+              <div className="mx-5 mb-5 rounded-[12px] border border-[#ecd0c6] bg-[#f8ebe6] p-[18px] text-center text-[12px] text-nexus-crit">
+                {skillError}
+              </div>
+            ) : dpSkills.length > 0 ? (
               dpSkills.map((k) => (
                 <SkillRow
                   key={k.id}
                   skill={k}
-                  onToggleCell={(a) => toggleCell(k.id, a)}
-                  onToggleDmi={() => toggleDmi(k.id)}
-                  onOpen={() => toast(`Open source · ${k.path}`)}
-                  onReveal={() => toast(`Reveal in file manager · ${k.path}`)}
+                  onToggleCell={(a) => void toggleCell(k, a)}
+                  onToggleDmi={() => void toggleDmi(k)}
+                  onOpen={() => void openSkillSource(k)}
+                  onReveal={() => void revealSkillPath(k)}
                 />
               ))
             ) : (
@@ -610,7 +716,15 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                 size="md"
               />
             </div>
-            {dpSessions.length > 0 ? (
+            {detailSessionsQuery.isLoading && dpSessions.length === 0 ? (
+              <div className="rounded-[12px] border border-dashed border-nexus-border2 bg-nexus-sand p-[18px] text-center text-[12px] text-[#b3a999]">
+                Loading {detailSource} sessions...
+              </div>
+            ) : detailSessionError ? (
+              <div className="rounded-[12px] border border-[#ecd0c6] bg-[#f8ebe6] p-[18px] text-center text-[12px] text-nexus-crit">
+                {detailSessionError}
+              </div>
+            ) : dpSessions.length > 0 ? (
               <div className="flex flex-col gap-0.5">
                 {dpSessions.map((se) => (
                   <div
@@ -652,24 +766,24 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               {[
                 {
                   label: "Skill Distribution",
-                  detail: `${dpSkills.length} managed relations from the Skill matrix`,
-                  status: "Linked",
-                  fg: "#5f7a3e",
-                  dot: palette.good,
+                  detail: `${dpSkills.length} project ${dpSkills.length === 1 ? "skill" : "skills"} recorded`,
+                  status: dpSkills.length > 0 ? "Recorded" : "None",
+                  fg: dpSkills.length > 0 ? "#5f7a3e" : "#a99a89",
+                  dot: dpSkills.length > 0 ? palette.good : "#d9c9b3",
                 },
                 {
                   label: "Session Backup",
-                  detail: `cloud://agent-nexus/${dp.key}`,
-                  status: "Healthy",
-                  fg: "#5f7a3e",
-                  dot: palette.good,
+                  detail: sessionBackup?.task.target ?? "No Session Backup task recorded",
+                  status: sessionBackupSummary.label,
+                  fg: sessionBackupSummary.fg,
+                  dot: sessionBackupSummary.dot,
                 },
                 {
-                  label: "Generic File",
-                  detail: dp.id === "tap" ? "TAP symlinks · 2 targets" : "No generic tasks bound",
-                  status: dp.id === "tap" ? "OK" : "None",
-                  fg: dp.id === "tap" ? "#5f7a3e" : "#a99a89",
-                  dot: dp.id === "tap" ? palette.good : "#d9c9b3",
+                  label: "Custom Task Groups",
+                  detail: `${dp.sync} project-bound sync ${dp.sync === 1 ? "record" : "records"}`,
+                  status: dp.sync > 0 ? "Recorded" : "None",
+                  fg: dp.sync > 0 ? "#5f7a3e" : "#a99a89",
+                  dot: dp.sync > 0 ? palette.good : "#d9c9b3",
                 },
               ].map((sy) => (
                 <div

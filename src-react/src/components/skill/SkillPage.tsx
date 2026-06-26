@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,6 @@ import { Chip, Segmented } from "@/components/ui/segmented";
 import { SkillRow } from "@/components/skill/SkillRow";
 import { ScreenScroll } from "@/components/shell/screen";
 import { skillsApi } from "@/lib/api/skills";
-import { nexus } from "@/lib/mock";
 import { useProjectsQuery } from "@/lib/query/projects";
 import {
   useSetSkillDisabledMutation,
@@ -16,7 +15,6 @@ import {
   useSkillsQuery,
 } from "@/lib/query/skills";
 import { isTauriRuntime } from "@/lib/runtime";
-import { toggleCellRole } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type { AgentName, Skill } from "@/types";
 
@@ -42,15 +40,11 @@ export function SkillPage() {
   const projectsQuery = useProjectsQuery();
   const setSkillTarget = useSetSkillTargetMutation();
   const setSkillDisabled = useSetSkillDisabledMutation();
-  const [mockSkills, setMockSkills] = useState(() => nexus.skills());
   const [scope, setScope] = useState<Scope>("global");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const mockProjects = useRef(nexus.projects().filter((p) => p.status === "active"));
-  const skills = desktop ? skillsQuery.data ?? [] : mockSkills;
-  const projects = desktop
-    ? (projectsQuery.data ?? []).filter((p) => p.status === "active")
-    : mockProjects.current;
+  const skills = skillsQuery.data ?? [];
+  const projects = (projectsQuery.data ?? []).filter((p) => p.status === "active");
   const queryError =
     desktop && skillsQuery.error ? getErrorMessage(skillsQuery.error) : null;
   const pageError = queryError;
@@ -77,9 +71,7 @@ export function SkillPage() {
     if (skill.cells[agent] === "source") return;
 
     if (!desktop) {
-      setMockSkills((s) =>
-        s.map((k) => (k.id === skill.id ? { ...k, cells: toggleCellRole(k.cells, agent) } : k)),
-      );
+      toast("Desktop runtime required for changing skill targets");
       return;
     }
 
@@ -97,9 +89,7 @@ export function SkillPage() {
 
   async function toggleDmi(skill: Skill) {
     if (!desktop) {
-      setMockSkills((s) =>
-        s.map((k) => (k.id === skill.id ? { ...k, disabled: !k.disabled } : k)),
-      );
+      toast("Desktop runtime required for changing skill settings");
       return;
     }
 
