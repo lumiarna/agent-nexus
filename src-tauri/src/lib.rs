@@ -6,7 +6,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use nexus_core::{database::Database, services::sync::SyncService};
+use nexus_core::{
+    database::Database,
+    services::{provider_trigger::ProviderTriggerService, sync::SyncService},
+};
 use store::AppState;
 use tauri::Manager;
 
@@ -18,8 +21,9 @@ pub fn run() {
             let db = Database::open(app_data_dir.join("agent-nexus.sqlite3"))?;
             let state = AppState::new(db);
             let scheduler_sync = state.sync.clone();
+            let scheduler_provider_trigger = state.provider_trigger.clone();
             app.manage(state);
-            start_sync_scheduler(scheduler_sync);
+            start_background_scheduler(scheduler_sync, scheduler_provider_trigger);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -55,9 +59,12 @@ pub fn run() {
             commands::sync::create_task_group,
             commands::project_symlinks::delete_project_symlink,
             commands::providers::get_provider_quota,
+            commands::providers::get_provider_schedule_settings,
             commands::providers::get_provider_order,
             commands::providers::list_opencode_custom_providers,
+            commands::providers::list_provider_trigger_models,
             commands::providers::set_provider_order,
+            commands::providers::set_provider_schedule_settings,
             commands::app_config::get_copilot_github_token,
             commands::app_config::get_opencode_go_connection_params,
             commands::app_config::get_provider_connection_params,
@@ -89,11 +96,16 @@ pub fn run() {
         .expect("failed to run Agent Nexus");
 }
 
-fn start_sync_scheduler(sync: SyncService) {
+fn start_background_scheduler(sync: SyncService, provider_trigger: ProviderTriggerService) {
     thread::spawn(move || loop {
         let now = current_epoch_seconds();
         if let Err(error) = tauri::async_runtime::block_on(sync.run_due_scheduled_tasks(now)) {
             eprintln!("scheduled sync task runner failed: {error}");
+        }
+        if let Err(error) =
+            tauri::async_runtime::block_on(provider_trigger.run_due_window_alignment(now))
+        {
+            eprintln!("provider window alignment runner failed: {error}");
         }
 
         let now = current_epoch_seconds();

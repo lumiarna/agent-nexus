@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 14;
+const CURRENT_SCHEMA_VERSION: i64 = 15;
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
 pub(crate) const DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
@@ -69,6 +69,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 14 {
             migrate_to_v14(conn)?;
         }
+        if current < 15 {
+            migrate_to_v15(conn)?;
+        }
     }
 
     Ok(())
@@ -100,7 +103,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (14);
+        INSERT INTO schema_version (version) VALUES (15);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -253,6 +256,31 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             updated_at INTEGER NOT NULL,
             PRIMARY KEY (task_id, rel_path),
             FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE provider_schedule_settings (
+            provider_id TEXT PRIMARY KEY,
+            quota_refresh_minutes INTEGER NOT NULL DEFAULT 5
+                CHECK (quota_refresh_minutes >= 1),
+            window_align_cron TEXT NOT NULL DEFAULT '',
+            window_align_model_id TEXT,
+            window_align_anchor_at INTEGER,
+            window_align_next_attempt_at INTEGER,
+            window_align_last_attempt_at INTEGER,
+            window_align_last_success_at INTEGER,
+            window_align_last_status TEXT NOT NULL DEFAULT 'never'
+                CHECK (
+                    window_align_last_status IN (
+                        'never',
+                        'success',
+                        'retryable_failed',
+                        'terminal_failed'
+                    )
+                ),
+            window_align_last_error TEXT,
+            window_align_failure_count INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
         );
 
         CREATE TABLE settings (
@@ -744,6 +772,45 @@ fn migrate_to_v14(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
+fn migrate_to_v15(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        CREATE TABLE provider_schedule_settings (
+            provider_id TEXT PRIMARY KEY,
+            quota_refresh_minutes INTEGER NOT NULL DEFAULT 5
+                CHECK (quota_refresh_minutes >= 1),
+            window_align_cron TEXT NOT NULL DEFAULT '',
+            window_align_model_id TEXT,
+            window_align_anchor_at INTEGER,
+            window_align_next_attempt_at INTEGER,
+            window_align_last_attempt_at INTEGER,
+            window_align_last_success_at INTEGER,
+            window_align_last_status TEXT NOT NULL DEFAULT 'never'
+                CHECK (
+                    window_align_last_status IN (
+                        'never',
+                        'success',
+                        'retryable_failed',
+                        'terminal_failed'
+                    )
+                ),
+            window_align_last_error TEXT,
+            window_align_failure_count INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        UPDATE schema_version SET version = 15;
+        COMMIT;
+        "#,
+    )
+    .inspect_err(|_| {
+        let _ = conn.execute("ROLLBACK", params![]);
+    })?;
+
+    Ok(())
+}
+
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
     if task_column_exists(conn, column)? {
         return Ok(());
@@ -870,6 +937,16 @@ mod tests {
         .expect("count setting")
     }
 
+    fn table_exists(conn: &Connection, table: &str) -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [table],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("check table")
+            > 0
+    }
+
     #[test]
     fn new_databases_seed_project_symlink_settings_with_project_keys() {
         let db = crate::database::Database::open_in_memory().expect("open in-memory database");
@@ -904,6 +981,36 @@ mod tests {
             .expect("collect prompt columns");
         assert!(prompt_columns.contains(&"scope".to_string()));
         assert!(prompt_columns.contains(&"project_id".to_string()));
+        assert!(table_exists(&conn, "provider_schedule_settings"));
+    }
+
+    #[test]
+    fn migrates_v14_databases_with_provider_schedule_settings() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (14);
+            "#,
+        )
+        .expect("seed v14 schema");
+
+        migrate_to_v15(&conn).expect("migrate to v15");
+
+        assert!(table_exists(&conn, "provider_schedule_settings"));
+        conn.execute(
+            "INSERT INTO provider_schedule_settings (
+                provider_id, quota_refresh_minutes, window_align_cron,
+                created_at, updated_at
+            ) VALUES ('claude', 5, '', 1, 1)",
+            [],
+        )
+        .expect("insert default schedule settings");
+
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, 15);
     }
 
     #[test]
@@ -1194,7 +1301,10 @@ mod tests {
             .expect("existing row preserved");
         assert_eq!(kept, "never");
 
-        conn.execute("UPDATE tasks SET last_status = 'skipped' WHERE id = 't1'", [])
-            .expect("rebuilt tasks table accepts skipped status");
+        conn.execute(
+            "UPDATE tasks SET last_status = 'skipped' WHERE id = 't1'",
+            [],
+        )
+        .expect("rebuilt tasks table accepts skipped status");
     }
 }

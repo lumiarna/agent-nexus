@@ -19,7 +19,7 @@ use crate::{
     services::app_config::{AppConfigService, OpenCodeGoConnectionParams},
 };
 
-const CLAUDE_CODE_PROVIDER_ID: &str = "claude";
+pub(crate) const CLAUDE_CODE_PROVIDER_ID: &str = "claude";
 const CLAUDE_CODE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const CLAUDE_CODE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 const CLAUDE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
@@ -245,21 +245,21 @@ pub struct OpenRouterCreditsData {
 }
 
 #[derive(Clone, Debug)]
-struct ClaudeCodeCredentials {
-    access_token: String,
+pub(crate) struct ClaudeCodeCredentials {
+    pub(crate) access_token: String,
     refresh_token: Option<String>,
-    expires_at: Option<i64>,
-    scopes: Vec<String>,
+    pub(crate) expires_at: Option<i64>,
+    pub(crate) scopes: Vec<String>,
     plan: Option<String>,
-    source: String,
+    pub(crate) source: String,
     credentials_path: Option<PathBuf>,
     keychain_account: Option<String>,
     raw: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct ClaudeOAuthRefreshResponse {
-    access_token: String,
+pub(crate) struct ClaudeOAuthRefreshResponse {
+    pub(crate) access_token: String,
     #[serde(default)]
     refresh_token: Option<String>,
     expires_in: i64,
@@ -409,10 +409,30 @@ trait ProviderUsageTransport: Send + Sync {
 }
 
 #[derive(Clone)]
-struct LocalCredentialSource;
+pub(crate) struct LocalCredentialSource;
 
 #[derive(Clone)]
-struct HttpUsageTransport;
+pub(crate) struct HttpUsageTransport;
+
+impl LocalCredentialSource {
+    pub(crate) fn claude_code_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<ClaudeCodeCredentials>> {
+        <Self as ProviderCredentialSource>::claude_code_credentials(self, app_config)
+    }
+}
+
+impl HttpUsageTransport {
+    pub(crate) async fn refresh_claude_code_credentials(
+        &self,
+        credentials: &ClaudeCodeCredentials,
+    ) -> Option<String> {
+        refresh_and_persist(credentials, self)
+            .await
+            .map(|refreshed| refreshed.access_token)
+    }
+}
 
 type ProviderQuotaFuture<'a> = Pin<Box<dyn Future<Output = ProviderQuotaSnapshot> + Send + 'a>>;
 
@@ -2037,7 +2057,7 @@ fn quota_window_kind_rank(kind: &ProviderQuotaWindowKind) -> u8 {
     }
 }
 
-fn http_client() -> reqwest::Client {
+pub(crate) fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -2350,7 +2370,7 @@ fn infer_claude_code_plan(
     }
 }
 
-fn is_token_expiring_soon(expires_at: Option<i64>) -> bool {
+pub(crate) fn is_token_expiring_soon(expires_at: Option<i64>) -> bool {
     let Some(expires_at) = expires_at else {
         return false;
     };
@@ -2798,7 +2818,7 @@ fn opencode_go_status(
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ProviderQuotaPollError {
+pub(crate) enum ProviderQuotaPollError {
     #[error("Claude Code authorization failed")]
     AuthRequired,
     #[error("{0}")]

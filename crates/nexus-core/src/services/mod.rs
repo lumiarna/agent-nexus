@@ -8,6 +8,7 @@ pub mod project_symlinks;
 pub mod projects;
 pub mod prompts;
 pub mod provider_quota;
+pub mod provider_trigger;
 pub mod sessions;
 pub mod skills;
 pub mod symlink;

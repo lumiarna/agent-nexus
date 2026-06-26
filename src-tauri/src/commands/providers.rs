@@ -2,7 +2,10 @@ use tauri::State;
 
 use nexus_core::{
     error::AppResult,
-    services::provider_quota::{OpenCodeCustomProvider, ProviderQuotaSnapshot},
+    services::{
+        provider_quota::{OpenCodeCustomProvider, ProviderQuotaSnapshot},
+        provider_trigger::{ProviderScheduleSettings, ProviderTriggerCapability},
+    },
 };
 
 use crate::store::AppState;
@@ -33,4 +36,36 @@ pub fn set_provider_order(
     provider_ids: Vec<String>,
 ) -> AppResult<Vec<String>> {
     state.app_config.set_provider_order(&provider_ids)
+}
+
+#[tauri::command]
+pub fn get_provider_schedule_settings(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> AppResult<ProviderScheduleSettings> {
+    state
+        .provider_trigger
+        .get_provider_schedule_settings(&provider_id)
+}
+
+#[tauri::command]
+pub fn set_provider_schedule_settings(
+    state: State<'_, AppState>,
+    provider_id: String,
+    settings: ProviderScheduleSettings,
+) -> AppResult<ProviderScheduleSettings> {
+    state
+        .provider_trigger
+        .set_provider_schedule_settings(&provider_id, settings)
+}
+
+#[tauri::command]
+pub async fn list_provider_trigger_models(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> AppResult<ProviderTriggerCapability> {
+    state
+        .provider_trigger
+        .list_provider_trigger_models(&provider_id)
+        .await
 }

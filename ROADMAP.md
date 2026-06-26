@@ -3,6 +3,10 @@
 - 列文档表示 Provider 取值顺序、显示的 Credential 是什么
 - Sync Task，已经有删除线了，不需要再显示 Missing 字样（和 Project 面对齐）
 - Group 可以整体调 Schedule
-- 在 provider 卡片上增加一个设置项，通过设置 cron 表达式，如每天 5/10/15/20点，可自动触发对话以刷新 quota 窗口
 - 支持 Disable Skill (实现方式：备份到 Cloud，然后删除本地文件)
 - 支持为 Project 设置自定义 Skills 目录（此时 Agent 矩阵隐藏），并允许勾选传播至 Global
+- 支持隐藏 Agent
+- 支持 Qoder
+- 验证 Claude Code 窗口对齐
+- 验证 CodeX 窗口对齐
+- .claudeignore 也加入检测

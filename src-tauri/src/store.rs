@@ -5,7 +5,8 @@ use nexus_core::{
     services::{
         app_config::AppConfigService, project_symlinks::ProjectSymlinkInventory,
         projects::ProjectService, prompts::PromptService, provider_quota::ProviderQuotaService,
-        sessions::SessionService, skills::SkillService, sync::SyncService,
+        provider_trigger::ProviderTriggerService, sessions::SessionService, skills::SkillService,
+        sync::SyncService,
     },
 };
 
@@ -15,6 +16,7 @@ pub struct AppState {
     pub projects: ProjectService,
     pub project_symlinks: ProjectSymlinkInventory,
     pub provider_quota: ProviderQuotaService,
+    pub provider_trigger: ProviderTriggerService,
     pub sessions: SessionService,
     pub skills: SkillService,
     pub sync: SyncService,
@@ -30,6 +32,10 @@ impl AppState {
             projects: ProjectService::new(db.clone()),
             project_symlinks: ProjectSymlinkInventory::new(db.clone()),
             provider_quota: ProviderQuotaService::new(app_config),
+            provider_trigger: ProviderTriggerService::new(
+                db.clone(),
+                AppConfigService::new(db.clone()),
+            ),
             sessions: SessionService::new(db.clone()),
             skills: SkillService::new(db.clone()),
             sync: SyncService::new(db),
