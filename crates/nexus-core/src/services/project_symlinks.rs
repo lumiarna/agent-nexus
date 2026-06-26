@@ -9,7 +9,7 @@ use rusqlite::{OptionalExtension, Row};
 use serde::Serialize;
 
 use crate::{
-    database::Database,
+    database::{Database, DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS, DEFAULT_PROJECT_SYMLINK_MAX_DEPTH},
     error::{AppError, AppResult},
     services::{
         distribution, paths,
@@ -22,29 +22,6 @@ use crate::{
 
 const PROJECT_SYMLINK_IGNORED_DIRS_SETTING: &str = "project_symlink_ignored_dirs";
 const PROJECT_SYMLINK_MAX_DEPTH_SETTING: &str = "project_symlink_max_depth";
-const DEFAULT_PROJECT_SYMLINK_MAX_DEPTH: usize = 3;
-const DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &[&str] = &[
-    ".git",
-    ".venv",
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-    "out",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".next",
-    ".nuxt",
-    ".turbo",
-    ".svelte-kit",
-    ".gradle",
-    ".idea",
-    "coverage",
-    ".tox",
-    ".cache",
-];
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -179,10 +156,7 @@ impl ProjectSymlinkInventory {
 
         Ok(match value {
             Some(value) => parse_ignored_dirs(&value),
-            None => DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS
-                .iter()
-                .map(|value| value.to_string())
-                .collect(),
+            None => parse_ignored_dirs(DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS),
         })
     }
 
@@ -195,13 +169,11 @@ impl ProjectSymlinkInventory {
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
+        let default_max_depth = default_project_symlink_max_depth()?;
 
         Ok(match value {
-            Some(raw) => raw
-                .trim()
-                .parse::<usize>()
-                .unwrap_or(DEFAULT_PROJECT_SYMLINK_MAX_DEPTH),
-            None => DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
+            Some(raw) => raw.trim().parse::<usize>().unwrap_or(default_max_depth),
+            None => default_max_depth,
         })
     }
 }
@@ -332,6 +304,17 @@ fn parse_ignored_dirs(value: &str) -> HashSet<String> {
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn default_project_symlink_max_depth() -> AppResult<usize> {
+    DEFAULT_PROJECT_SYMLINK_MAX_DEPTH
+        .trim()
+        .parse::<usize>()
+        .map_err(|error| {
+            AppError::Internal(format!(
+                "schema default project symlink max depth is invalid: {error}"
+            ))
+        })
 }
 
 fn project_display_index(link: &ProjectSymlink, project_order: &HashMap<&str, usize>) -> usize {

@@ -5,8 +5,8 @@ use crate::error::{AppError, AppResult};
 const CURRENT_SCHEMA_VERSION: i64 = 14;
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
-const NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
-const DEFAULT_PROJECT_SYMLINK_MAX_DEPTH: &str = "3";
+pub(crate) const DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
+pub(crate) const DEFAULT_PROJECT_SYMLINK_MAX_DEPTH: &str = "3";
 const LEGACY_PROJECT_SYMLINK_IGNORED_DIRS_KEY: &str = "sync_project_symlink_ignored_dirs";
 const LEGACY_PROJECT_SYMLINK_MAX_DEPTH_KEY: &str = "sync_project_symlink_max_depth";
 const PROJECT_SYMLINK_IGNORED_DIRS_KEY: &str = "project_symlink_ignored_dirs";
@@ -299,7 +299,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
 
         COMMIT;
         "#,
-        new_default_ignored_dirs = NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
+        new_default_ignored_dirs = DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
         default_max_depth = DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
         claude_config_dir_key = CLAUDE_CONFIG_DIR_KEY,
         default_claude_config_dir = DEFAULT_CLAUDE_CONFIG_DIR,
@@ -418,7 +418,7 @@ fn migrate_to_v5(conn: &Connection) -> AppResult<()> {
             "UPDATE settings SET value = ?1 \
              WHERE key = 'sync_project_symlink_ignored_dirs' AND value = ?2",
             params![
-                NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
+                DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
                 LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS
             ],
         )?;
@@ -494,7 +494,7 @@ fn migrate_to_v7(conn: &Connection) -> AppResult<()> {
             "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING",
             params![
                 PROJECT_SYMLINK_IGNORED_DIRS_KEY,
-                NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS
+                DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS
             ],
         )?;
         conn.execute(
@@ -877,7 +877,7 @@ mod tests {
 
         assert_eq!(
             setting_value(&conn, "project_symlink_ignored_dirs"),
-            NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS
+            DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS
         );
         assert_eq!(
             setting_value(&conn, "project_symlink_max_depth"),
@@ -955,7 +955,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open in-memory connection");
         seed_minimal_v6_project_symlink_settings(
             &conn,
-            NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
+            DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
             DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
         );
         migrate_to_v7(&conn).expect("migrate to v7");
@@ -976,14 +976,14 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open in-memory connection");
         seed_minimal_v6_project_symlink_settings(
             &conn,
-            NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
+            DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
             DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
         );
         migrate(&conn).expect("migrate schema");
 
         assert_eq!(
             setting_value(&conn, "project_symlink_ignored_dirs"),
-            NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS
+            DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS
         );
         assert_eq!(
             setting_value(&conn, "project_symlink_max_depth"),
@@ -1030,7 +1030,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("read ignored dirs");
-        assert_eq!(value, NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS);
+        assert_eq!(value, DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS);
 
         let depth: String = conn
             .query_row(

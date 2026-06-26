@@ -9,6 +9,8 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
+pub(crate) use schema::{DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS, DEFAULT_PROJECT_SYMLINK_MAX_DEPTH};
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
