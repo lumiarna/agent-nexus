@@ -4,7 +4,7 @@ use nexus_core::{
     database::Database,
     services::app_config::{
         AppConfigService, OpenCodeGoConnectionParams, ProviderConnectionParams,
-        CLAUDE_CONFIG_DIR_KEY, CODEX_CONFIG_DIR_KEY,
+        ProviderDisplayPreferences, CLAUDE_CONFIG_DIR_KEY, CODEX_CONFIG_DIR_KEY,
     },
 };
 
@@ -129,6 +129,39 @@ fn provider_order_round_trips_through_settings() {
             "claude".to_string(),
             "opencode-go".to_string(),
         ],
+    );
+}
+
+#[test]
+fn provider_display_preferences_round_trip_through_settings() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = AppConfigService::new(db);
+
+    assert_eq!(
+        service
+            .get_provider_display_preferences()
+            .expect("read default provider display preferences"),
+        ProviderDisplayPreferences::default(),
+    );
+
+    assert_eq!(
+        service
+            .set_provider_display_preferences(&ProviderDisplayPreferences {
+                card_visibility: vec!["copilot".to_string(), "claude".to_string()],
+            })
+            .expect("save provider display preferences"),
+        ProviderDisplayPreferences {
+            card_visibility: vec!["copilot".to_string(), "claude".to_string()],
+        },
+    );
+
+    assert_eq!(
+        service
+            .get_provider_display_preferences()
+            .expect("read saved provider display preferences"),
+        ProviderDisplayPreferences {
+            card_visibility: vec!["copilot".to_string(), "claude".to_string()],
+        },
     );
 }
 

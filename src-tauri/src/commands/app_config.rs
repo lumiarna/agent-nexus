@@ -2,7 +2,9 @@ use tauri::State;
 
 use nexus_core::{
     error::AppResult,
-    services::app_config::{OpenCodeGoConnectionParams, ProviderConnectionParams},
+    services::app_config::{
+        OpenCodeGoConnectionParams, ProviderConnectionParams, ProviderDisplayPreferences,
+    },
 };
 
 use crate::store::AppState;
@@ -51,4 +53,19 @@ pub fn set_provider_connection_params(
     state
         .app_config
         .set_provider_connection_params(&provider_id, &params)
+}
+
+#[tauri::command]
+pub fn get_provider_display_preferences(
+    state: State<'_, AppState>,
+) -> AppResult<ProviderDisplayPreferences> {
+    state.app_config.get_provider_display_preferences()
+}
+
+#[tauri::command]
+pub fn set_provider_display_preferences(
+    state: State<'_, AppState>,
+    preferences: ProviderDisplayPreferences,
+) -> AppResult<ProviderDisplayPreferences> {
+    state.app_config.set_provider_display_preferences(&preferences)
 }

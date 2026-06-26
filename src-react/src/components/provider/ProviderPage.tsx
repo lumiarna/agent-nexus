@@ -37,9 +37,11 @@ import { customProviderRows } from "@/lib/providerCatalog";
 import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
 import {
   useOpenCodeCustomProvidersQuery,
+  useProviderDisplayPreferencesQuery,
   useProviderOrderQuery,
   useProviderQuotaQueries,
   useReorderProvidersMutation,
+  useSetProviderDisplayPreferencesMutation,
 } from "@/lib/query/providers";
 import { palette, quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
@@ -197,8 +199,10 @@ function SortableProviderCard({
 export function ProviderPage() {
   const agentCapabilitiesQuery = useAgentCapabilitiesQuery();
   const customProvidersQuery = useOpenCodeCustomProvidersQuery();
+  const providerDisplayPreferencesQuery = useProviderDisplayPreferencesQuery();
   const providerOrderQuery = useProviderOrderQuery();
   const reorderProviders = useReorderProvidersMutation();
+  const setProviderDisplayPreferences = useSetProviderDisplayPreferencesMutation();
   const providerSeeds = useMemo(() => {
     const builtInProviders = nexus.providers();
     return [
@@ -273,19 +277,24 @@ export function ProviderPage() {
         providerCatalog.map((provider) => provider.id),
       ).filter((id) => providerIds.has(id)),
     );
-    setCardVisible((current) => ({
-      ...Object.fromEntries(
-        providerCatalog.map((provider) => [provider.id, !provider.hiddenCard]),
+
+    const savedVisible = new Set(providerDisplayPreferencesQuery.data?.cardVisibility ?? []);
+    const hasSavedVisible = savedVisible.size > 0;
+    setCardVisible(
+      Object.fromEntries(
+        providerCatalog.map((provider) => [
+          provider.id,
+          hasSavedVisible ? savedVisible.has(provider.id) : !provider.hiddenCard,
+        ]),
       ),
-      ...current,
-    }));
+    );
     setTrayVisible((current) => ({
       ...Object.fromEntries(
         providerCatalog.map((provider) => [provider.id, provider.status === "available"]),
       ),
       ...current,
     }));
-  }, [providerCatalog, providerOrderQuery.data]);
+  }, [providerCatalog, providerOrderQuery.data, providerDisplayPreferencesQuery.data]);
 
   useEffect(() => {
     if (configId !== "copilot" || !isTauriRuntime()) return;
@@ -396,6 +405,13 @@ export function ProviderPage() {
     return arrayMove(currentOrder, fromIndex, toIndex);
   }
 
+  function nextCardVisibility(providerId: string, visible: boolean) {
+    const next = { ...cardVisible, [providerId]: visible };
+    const cardVisibility = order.filter((id) => next[id] !== false);
+    return { next, cardVisibility };
+  }
+
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
@@ -426,6 +442,40 @@ export function ProviderPage() {
   const cfg = configId ? displayProviders.find((p) => p.id === configId) ?? null : null;
   const columns: Provider[][] = Array.from({ length: colCount }, () => []);
   visible.forEach((p, i) => columns[i % colCount].push(p));
+
+  async function persistCardVisibility(providerId: string, visible: boolean) {
+    const { next, cardVisibility } = nextCardVisibility(providerId, visible);
+    const previous = cardVisible;
+    const providerName = byId[providerId]?.name ?? providerId;
+    setCardVisible(next);
+
+    if (!isTauriRuntime()) {
+      toast(
+        visible
+          ? `${providerName} shown on Provider page`
+          : `${providerName} hidden from Provider page`,
+      );
+      return;
+    }
+
+    try {
+      const saved = await setProviderDisplayPreferences.mutateAsync({ cardVisibility });
+      const savedVisible = new Set(saved.cardVisibility);
+      setCardVisible((current) => ({
+        ...current,
+        ...Object.fromEntries(order.map((id) => [id, savedVisible.has(id)])),
+      }));
+      toast(
+        visible
+          ? `${providerName} shown on Provider page`
+          : `${providerName} hidden from Provider page`,
+      );
+    } catch (error) {
+      setCardVisible(previous);
+      toast(getErrorMessage(error));
+    }
+  }
+
 
   return (
     <ScreenScroll>
@@ -629,8 +679,7 @@ export function ProviderPage() {
             <div
               key={p.id}
               onClick={() => {
-                setCardVisible((cv) => ({ ...cv, [p.id]: true }));
-                toast(`${p.name} shown on Provider page`);
+                void persistCardVisibility(p.id, true);
               }}
               className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-nexus-border2 bg-nexus-card px-3 py-[5px] text-[12px] text-[#6a6055] hover:bg-nexus-sand"
             >
@@ -764,9 +813,9 @@ export function ProviderPage() {
                 </div>
                 <div className="flex flex-col gap-0.5">
                   <div
-                    onClick={() =>
-                      setCardVisible((cv) => ({ ...cv, [cfg.id]: !(cv[cfg.id] !== false) }))
-                    }
+                    onClick={() => {
+                      void persistCardVisibility(cfg.id, cardVisible[cfg.id] === false);
+                    }}
                     className="flex cursor-pointer items-center justify-between gap-3 rounded-[11px] px-[13px] py-[11px] hover:bg-nexus-sand"
                   >
                     <div>

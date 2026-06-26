@@ -22,6 +22,7 @@ const PROVIDER_ORDER_KEY: &str = "PROVIDER_ORDER";
 const MINIMAX_TOKEN_PLAN_CN_API_KEY_KEY: &str = "PROVIDER_API_KEY_MINIMAX_TOKEN";
 const DEEPSEEK_API_KEY_KEY: &str = "PROVIDER_API_KEY_DEEPSEEK";
 const OPENROUTER_API_KEY_KEY: &str = "PROVIDER_API_KEY_OPENROUTER";
+const PROVIDER_CARD_VISIBILITY_KEY: &str = "PROVIDER_CARD_VISIBILITY";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +35,12 @@ pub struct OpenCodeGoConnectionParams {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConnectionParams {
     pub api_key: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderDisplayPreferences {
+    pub card_visibility: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -146,7 +153,6 @@ impl AppConfigService {
         )?;
         Ok(())
     }
-
     pub fn get_provider_order(&self) -> AppResult<Vec<String>> {
         let raw = self.read_setting(PROVIDER_ORDER_KEY)?.unwrap_or_default();
         if raw.trim().is_empty() {
@@ -161,15 +167,51 @@ impl AppConfigService {
 
     pub fn set_provider_order(&self, provider_ids: &[String]) -> AppResult<Vec<String>> {
         let normalized = normalize_provider_order(provider_ids.to_vec())?;
+        self.write_json_setting(PROVIDER_ORDER_KEY, &normalized)?;
+        Ok(normalized)
+    }
+
+    pub fn get_provider_display_preferences(&self) -> AppResult<ProviderDisplayPreferences> {
+        let raw = self
+            .read_setting(PROVIDER_CARD_VISIBILITY_KEY)?
+            .unwrap_or_default();
+        if raw.trim().is_empty() {
+            return Ok(ProviderDisplayPreferences::default());
+        }
+
+        let preferences = serde_json::from_str::<ProviderDisplayPreferences>(&raw).map_err(
+            |error| {
+                AppError::Validation(format!(
+                    "invalid provider display preferences setting: {error}"
+                ))
+            },
+        )?;
+        Ok(ProviderDisplayPreferences {
+            card_visibility: normalize_provider_order(preferences.card_visibility)?,
+        })
+    }
+
+    pub fn set_provider_display_preferences(
+        &self,
+        preferences: &ProviderDisplayPreferences,
+    ) -> AppResult<ProviderDisplayPreferences> {
+        let normalized = ProviderDisplayPreferences {
+            card_visibility: normalize_provider_order(preferences.card_visibility.clone())?,
+        };
+        self.write_json_setting(PROVIDER_CARD_VISIBILITY_KEY, &normalized)?;
+        Ok(normalized)
+    }
+
+    fn write_json_setting<T: Serialize>(&self, key: &str, value: &T) -> AppResult<()> {
         let conn = self.db.connection()?;
-        let value = serde_json::to_string(&normalized)
-            .map_err(|error| AppError::Internal(format!("serialize provider order: {error}")))?;
+        let value = serde_json::to_string(value)
+            .map_err(|error| AppError::Internal(format!("serialize {key}: {error}")))?;
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) \
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![PROVIDER_ORDER_KEY, value],
+            params![key, value],
         )?;
-        Ok(normalized)
+        Ok(())
     }
 
     fn read_setting(&self, key: &str) -> AppResult<Option<String>> {

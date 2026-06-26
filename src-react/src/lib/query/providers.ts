@@ -5,6 +5,7 @@ import { isTauriRuntime } from "@/lib/runtime";
 
 export const providerKeys = {
   customCatalog: ["providers", "opencode-custom"] as const,
+  displayPreferences: ["providers", "display-preferences"] as const,
   order: ["providers", "order"] as const,
   quota: (providerId: string) => ["providers", providerId, "quota"] as const,
 };
@@ -24,6 +25,14 @@ export function useProviderOrderQuery() {
   });
 }
 
+export function useProviderDisplayPreferencesQuery() {
+  return useQuery({
+    queryKey: providerKeys.displayPreferences,
+    queryFn: providersApi.getDisplayPreferences,
+    enabled: isTauriRuntime(),
+  });
+}
+
 export function useReorderProvidersMutation() {
   const queryClient = useQueryClient();
 
@@ -31,6 +40,17 @@ export function useReorderProvidersMutation() {
     mutationFn: (providerIds: string[]) => providersApi.setOrder(providerIds),
     onSuccess: (providerIds: string[]) => {
       queryClient.setQueryData<string[]>(providerKeys.order, providerIds);
+    },
+  });
+}
+
+export function useSetProviderDisplayPreferencesMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: providersApi.setDisplayPreferences,
+    onSuccess: (preferences) => {
+      queryClient.setQueryData(providerKeys.displayPreferences, preferences);
     },
   });
 }

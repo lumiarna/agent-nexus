@@ -37,6 +37,10 @@ export interface ProviderConnectionParams {
   apiKey: string;
 }
 
+export interface ProviderDisplayPreferences {
+  cardVisibility: string[];
+}
+
 export const providersApi = {
   listOpenCodeCustomProviders(): Promise<OpenCodeCustomProvider[]> {
     return invokeCommand<OpenCodeCustomProvider[]>("list_opencode_custom_providers");
@@ -46,6 +50,16 @@ export const providersApi = {
   },
   setOrder(providerIds: string[]): Promise<string[]> {
     return invokeCommand<string[]>("set_provider_order", { providerIds });
+  },
+  getDisplayPreferences(): Promise<ProviderDisplayPreferences> {
+    return invokeCommand<ProviderDisplayPreferences>("get_provider_display_preferences");
+  },
+  setDisplayPreferences(
+    preferences: ProviderDisplayPreferences,
+  ): Promise<ProviderDisplayPreferences> {
+    return invokeCommand<ProviderDisplayPreferences>("set_provider_display_preferences", {
+      preferences,
+    });
   },
   getQuota(providerId: string): Promise<ProviderQuotaSnapshot> {
     return invokeCommand<ProviderQuotaSnapshot>("get_provider_quota", { providerId });
