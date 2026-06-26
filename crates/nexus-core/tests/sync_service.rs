@@ -470,14 +470,17 @@ async fn runs_local_file_copy_task_to_webdav() {
     assert_eq!(task.status, "ok");
     assert_ne!(task.last_run, "—");
     server.join().expect("join webdav server");
-    let requests = requests.lock().expect("lock request log");
-    assert!(requests[0].starts_with("MKCOL /webdav/agent-nexus-sync/ HTTP/1.1"));
-    assert!(requests[1].starts_with("MKCOL /webdav/agent-nexus-sync/config/ HTTP/1.1"));
-    assert!(requests[2].starts_with("MKCOL /webdav/agent-nexus-sync/config/warp/ HTTP/1.1"));
-    assert!(
-        requests[3].starts_with("PUT /webdav/agent-nexus-sync/config/warp/settings.toml HTTP/1.1")
-    );
-    assert!(requests[3].contains("theme = 'dark'"));
+    {
+        let requests = requests.lock().expect("lock request log");
+        assert!(requests[0].starts_with("MKCOL /webdav/agent-nexus-sync/ HTTP/1.1"));
+        assert!(requests[1].starts_with("MKCOL /webdav/agent-nexus-sync/config/ HTTP/1.1"));
+        assert!(requests[2].starts_with("MKCOL /webdav/agent-nexus-sync/config/warp/ HTTP/1.1"));
+        assert!(
+            requests[3]
+                .starts_with("PUT /webdav/agent-nexus-sync/config/warp/settings.toml HTTP/1.1")
+        );
+        assert!(requests[3].contains("theme = 'dark'"));
+    }
 
     let second_run = sync
         .run_due_scheduled_tasks(320)

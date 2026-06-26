@@ -308,18 +308,16 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         copilot_github_token_key = COPILOT_GITHUB_TOKEN_KEY,
         default_copilot_github_token = DEFAULT_COPILOT_GITHUB_TOKEN,
     ))
-    .or_else(|error| {
+    .inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     Ok(())
 }
 
 fn migrate_to_v2(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch("BEGIN;").or_else(|error| {
+    conn.execute_batch("BEGIN;").inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     let result = (|| -> AppResult<()> {
@@ -373,18 +371,16 @@ fn migrate_to_v3(conn: &Connection) -> AppResult<()> {
         COMMIT;
         "#,
     )
-    .or_else(|error| {
+    .inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     Ok(())
 }
 
 fn migrate_to_v4(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch("BEGIN;").or_else(|error| {
+    conn.execute_batch("BEGIN;").inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     let result = (|| -> AppResult<()> {
@@ -413,9 +409,8 @@ fn migrate_to_v4(conn: &Connection) -> AppResult<()> {
 }
 
 fn migrate_to_v5(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch("BEGIN;").or_else(|error| {
+    conn.execute_batch("BEGIN;").inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     let result = (|| -> AppResult<()> {
@@ -482,18 +477,16 @@ fn migrate_to_v6(conn: &Connection) -> AppResult<()> {
         COMMIT;
         "#,
     )
-    .or_else(|error| {
+    .inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     Ok(())
 }
 
 fn migrate_to_v7(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch("BEGIN;").or_else(|error| {
+    conn.execute_batch("BEGIN;").inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     let result = (|| -> AppResult<()> {
@@ -553,9 +546,8 @@ fn migrate_to_v7(conn: &Connection) -> AppResult<()> {
 }
 
 fn migrate_to_v8(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch("BEGIN;").or_else(|error| {
+    conn.execute_batch("BEGIN;").inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     let result = (|| -> AppResult<()> {
@@ -580,9 +572,8 @@ fn migrate_to_v8(conn: &Connection) -> AppResult<()> {
 }
 
 fn migrate_to_v9(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch("BEGIN;").or_else(|error| {
+    conn.execute_batch("BEGIN;").inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     let result = (|| -> AppResult<()> {
@@ -607,9 +598,8 @@ fn migrate_to_v9(conn: &Connection) -> AppResult<()> {
 }
 
 fn migrate_to_v10(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch("BEGIN;").or_else(|error| {
+    conn.execute_batch("BEGIN;").inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     let result = (|| -> AppResult<()> {
@@ -650,9 +640,8 @@ fn migrate_to_v11(conn: &Connection) -> AppResult<()> {
         COMMIT;
         "#,
     )
-    .or_else(|error| {
+    .inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     Ok(())
@@ -675,9 +664,8 @@ fn migrate_to_v12(conn: &Connection) -> AppResult<()> {
         COMMIT;
         "#,
     )
-    .or_else(|error| {
+    .inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     Ok(())
@@ -725,9 +713,8 @@ fn migrate_to_v13(conn: &Connection) -> AppResult<()> {
         COMMIT;
         "#,
     )
-    .or_else(|error| {
+    .inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     Ok(())
@@ -750,9 +737,8 @@ fn migrate_to_v14(conn: &Connection) -> AppResult<()> {
         COMMIT;
         "#,
     )
-    .or_else(|error| {
+    .inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
-        Err(error)
     })?;
 
     Ok(())
