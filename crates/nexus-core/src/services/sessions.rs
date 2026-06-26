@@ -520,7 +520,10 @@ async fn collect_remote_markdown_files(
     )];
 
     while let Some((relative_dir, segments)) = directories.pop() {
-        for entry in webdav::list_directory(&settings.url, &segments, auth).await? {
+        let Some(entries) = webdav::list_directory_if_exists(&settings.url, &segments, auth).await? else {
+            continue;
+        };
+        for entry in entries {
             if entry.is_collection {
                 let mut child_relative_dir = relative_dir.clone();
                 child_relative_dir.push(entry.name.clone());

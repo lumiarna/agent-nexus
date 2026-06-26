@@ -1,9 +1,11 @@
 use std::{
+    collections::HashMap,
     fs,
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
+    time::UNIX_EPOCH,
 };
 
 use rusqlite::{params, OptionalExtension, Row};
@@ -59,11 +61,14 @@ enum TaskRunStatus {
 
 type TransferFuture<'a> = Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>>;
 
+type FileStateMap = HashMap<String, (u64, i64)>;
+
 trait Transfer: Send + Sync {
     fn push_local_to_cloud<'a>(
         &'a self,
         task: &'a Task,
         settings: &'a WebdavSettings,
+        file_states: &'a FileStateMap,
     ) -> TransferFuture<'a>;
 }
 
@@ -74,8 +79,9 @@ impl Transfer for WebdavTransfer {
         &'a self,
         task: &'a Task,
         settings: &'a WebdavSettings,
+        file_states: &'a FileStateMap,
     ) -> TransferFuture<'a> {
-        Box::pin(push_local_to_cloud(task, settings))
+        Box::pin(push_local_to_cloud(task, settings, file_states))
     }
 }
 
@@ -504,14 +510,40 @@ impl TaskLifecycle {
         match (task.source_type.as_str(), task.target_type.as_str()) {
             ("Local", "Cloud") => {
                 let settings = self.valid_webdav_settings()?;
-                self.transfer.push_local_to_cloud(task, &settings).await?;
+                let file_states = {
+                    let conn = self.db.connection()?;
+                    load_file_state(&conn, &task.id)?
+                };
+                self.transfer
+                    .push_local_to_cloud(task, &settings, &file_states)
+                    .await?;
+                let source = resolve_local_path(&task.source)?;
+                if source.is_dir() {
+                    let conn = self.db.connection()?;
+                    refresh_file_state(&conn, &task.id, &source)?;
+                } else if source.is_file() {
+                    let conn = self.db.connection()?;
+                    save_single_file_state(&conn, &task.id, &source)?;
+                }
                 Ok(TaskRunStatus::Ok)
             }
             ("Cloud", "Local") => Err(AppError::Validation(
                 "Cloud to Local copy is not implemented yet".to_string(),
             )),
             ("Local", "Local") => {
-                copy_local_to_local(task)?;
+                let file_states = {
+                    let conn = self.db.connection()?;
+                    load_file_state(&conn, &task.id)?
+                };
+                copy_local_to_local(task, &file_states)?;
+                let source = resolve_local_path(&task.source)?;
+                if source.is_dir() {
+                    let conn = self.db.connection()?;
+                    refresh_file_state(&conn, &task.id, &source)?;
+                } else if source.is_file() {
+                    let conn = self.db.connection()?;
+                    save_single_file_state(&conn, &task.id, &source)?;
+                }
                 Ok(TaskRunStatus::Ok)
             }
             _ => Err(AppError::Validation(
@@ -625,14 +657,18 @@ fn normalize_task_path(raw: &str, label: &str) -> AppResult<String> {
     Ok(required_trimmed(raw, label)?.replace('\\', "/"))
 }
 
-async fn push_local_to_cloud(task: &Task, settings: &WebdavSettings) -> AppResult<()> {
+async fn push_local_to_cloud(
+    task: &Task,
+    settings: &WebdavSettings,
+    file_states: &FileStateMap,
+) -> AppResult<()> {
     let source = resolve_local_path(&task.source)?;
     let auth = webdav::auth_from_credentials(&settings.user, &settings.pass);
 
     if source.is_file() {
-        push_local_file_to_cloud(&source, &task.target, settings, &auth).await
+        push_local_file_to_cloud(&source, &task.target, settings, &auth, file_states).await
     } else if source.is_dir() {
-        push_local_directory_to_cloud(&source, &task.target, settings, &auth).await
+        push_local_directory_to_cloud(&source, &task.target, settings, &auth, file_states).await
     } else {
         Err(AppError::Validation(format!(
             "local source does not exist: {}",
@@ -646,6 +682,7 @@ async fn push_local_file_to_cloud(
     target: &str,
     settings: &WebdavSettings,
     auth: &webdav::WebdavAuth,
+    file_states: &FileStateMap,
 ) -> AppResult<()> {
     let mut file_segments = remote_segments(settings, target)?;
     if target.trim().ends_with('/') {
@@ -655,6 +692,16 @@ async fn push_local_file_to_cloud(
         return Err(AppError::Validation(
             "cloud file target must include a file path".to_string(),
         ));
+    }
+
+    let rel_path = required_file_name(source)?;
+    if let Some(&(stored_size, stored_mtime)) = file_states.get(&rel_path) {
+        let metadata = fs::metadata(source)?;
+        let current_size = metadata.len();
+        let current_mtime = file_mtime_epoch(source)?;
+        if stored_size == current_size && stored_mtime == current_mtime {
+            return Ok(());
+        }
     }
 
     let parent_segments = file_segments[..file_segments.len() - 1].to_vec();
@@ -668,11 +715,12 @@ async fn push_local_directory_to_cloud(
     target: &str,
     settings: &WebdavSettings,
     auth: &webdav::WebdavAuth,
+    file_states: &FileStateMap,
 ) -> AppResult<()> {
     let target_segments = remote_segments(settings, target)?;
     let mut directories = Vec::new();
     let mut files = Vec::new();
-    collect_local_directory_push(source, target_segments, &mut directories, &mut files)?;
+    collect_local_directory_push(source, target_segments, &mut directories, &mut files, file_states, source)?;
 
     for directory in directories {
         webdav::ensure_remote_directories(&settings.url, &directory, auth).await?;
@@ -691,6 +739,8 @@ fn collect_local_directory_push(
     target_segments: Vec<String>,
     directories: &mut Vec<Vec<String>>,
     files: &mut Vec<(PathBuf, Vec<String>)>,
+    file_states: &FileStateMap,
+    source_root: &Path,
 ) -> AppResult<()> {
     directories.push(target_segments.clone());
 
@@ -703,8 +753,23 @@ fn collect_local_directory_push(
         child_segments.push(required_file_name(&path)?);
         let metadata = fs::metadata(&path)?;
         if metadata.is_dir() {
-            collect_local_directory_push(&path, child_segments, directories, files)?;
+            collect_local_directory_push(&path, child_segments, directories, files, file_states, source_root)?;
         } else if metadata.is_file() {
+            let rel_path = path
+                .strip_prefix(source_root)
+                .map_err(|_| {
+                    AppError::Internal("failed to compute relative path for push".to_string())
+                })?
+                .to_string_lossy()
+                .replace('\\', "/");
+            let current_size = metadata.len();
+            let current_mtime = file_mtime_epoch(&path)?;
+
+            if let Some(&(stored_size, stored_mtime)) = file_states.get(&rel_path) {
+                if stored_size == current_size && stored_mtime == current_mtime {
+                    continue;
+                }
+            }
             files.push((path, child_segments));
         }
     }
@@ -726,7 +791,95 @@ fn remote_segments(settings: &WebdavSettings, cloud_path: &str) -> AppResult<Vec
     }
 }
 
-fn copy_local_to_local(task: &Task) -> AppResult<()> {
+fn file_mtime_epoch(path: &Path) -> AppResult<i64> {
+    let mtime = fs::metadata(path)?
+        .modified()
+        .map_err(|e| AppError::Internal(format!("failed to get mtime for {}: {e}", path.display())))?;
+    let secs = mtime
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| AppError::Internal(format!("invalid mtime for {}: {e}", path.display())))?;
+    Ok(secs.as_secs() as i64)
+}
+
+fn load_file_state(conn: &rusqlite::Connection, task_id: &str) -> AppResult<FileStateMap> {
+    let mut stmt = conn.prepare(
+        "SELECT rel_path, file_size, file_mtime FROM task_file_state WHERE task_id = ?1",
+    )?;
+    let rows = stmt.query_map([task_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            (row.get::<_, u64>(1)?, row.get::<_, i64>(2)?),
+        ))
+    })?;
+    let mut map = HashMap::new();
+    for row in rows {
+        let (key, value) = row?;
+        map.insert(key, value);
+    }
+    Ok(map)
+}
+
+fn refresh_file_state(conn: &rusqlite::Connection, task_id: &str, source_root: &Path) -> AppResult<()> {
+    conn.execute("DELETE FROM task_file_state WHERE task_id = ?1", [task_id])?;
+    if source_root.is_dir() {
+        let now = now_epoch_seconds()?;
+        insert_file_state_recursive(conn, task_id, source_root, source_root, now)?;
+    }
+    Ok(())
+}
+
+fn insert_file_state_recursive(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+    dir: &Path,
+    source_root: &Path,
+    now: i64,
+) -> AppResult<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            insert_file_state_recursive(conn, task_id, &path, source_root, now)?;
+        } else if path.is_file() {
+            let rel_path = path
+                .strip_prefix(source_root)
+                .map_err(|_| {
+                    AppError::Internal("failed to compute relative path for state".to_string())
+                })?
+                .to_string_lossy()
+                .replace('\\', "/");
+            let metadata = fs::metadata(&path)?;
+            let size = metadata.len() as i64;
+            let mtime = file_mtime_epoch(&path)?;
+            conn.execute(
+                "INSERT INTO task_file_state (task_id, rel_path, file_size, file_mtime, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![task_id, rel_path, size, mtime, now],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn save_single_file_state(conn: &rusqlite::Connection, task_id: &str, source: &Path) -> AppResult<()> {
+    let rel_path = required_file_name(source)?;
+    let metadata = fs::metadata(source)?;
+    let size = metadata.len() as i64;
+    let mtime = file_mtime_epoch(source)?;
+    let now = now_epoch_seconds()?;
+    conn.execute(
+        "INSERT INTO task_file_state (task_id, rel_path, file_size, file_mtime, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(task_id, rel_path) DO UPDATE SET
+             file_size = excluded.file_size,
+             file_mtime = excluded.file_mtime,
+             updated_at = excluded.updated_at",
+        params![task_id, rel_path, size, mtime, now],
+    )?;
+    Ok(())
+}
+
+fn copy_local_to_local(task: &Task, file_states: &FileStateMap) -> AppResult<()> {
     let source = resolve_local_path(&task.source)?;
     let target = resolve_local_path(&task.target)?;
 
@@ -738,9 +891,12 @@ fn copy_local_to_local(task: &Task) -> AppResult<()> {
     }
 
     if fs::metadata(&source)?.is_file() {
-        copy_local_file(&source, &target)?;
+        let rel_path = required_file_name(&source)?;
+        if !should_skip_file(&source, &rel_path, file_states)? {
+            copy_local_file(&source, &target)?;
+        }
     } else {
-        copy_local_directory(&source, &target)?;
+        copy_local_directory(&source, &target, file_states)?;
     }
     Ok(())
 }
@@ -754,18 +910,26 @@ fn should_skip_missing_session_backup_source(task: &Task) -> AppResult<bool> {
     Ok(!source.exists())
 }
 
-fn copy_local_directory(source: &Path, target: &Path) -> AppResult<()> {
+fn should_skip_file(source: &Path, rel_path: &str, file_states: &FileStateMap) -> AppResult<bool> {
+    if let Some(&(stored_size, stored_mtime)) = file_states.get(rel_path) {
+        let metadata = fs::metadata(source)?;
+        let current_size = metadata.len();
+        let current_mtime = file_mtime_epoch(source)?;
+        if stored_size == current_size && stored_mtime == current_mtime {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn copy_local_directory(source: &Path, target: &Path, file_states: &FileStateMap) -> AppResult<()> {
     let effective_target = if target.exists() && target.is_dir() {
         let name = required_file_name(source)?;
         target.join(name)
     } else {
         target.to_path_buf()
     };
-    if effective_target.exists() {
-        fs::remove_dir_all(&effective_target)?;
-    }
-    copy_directory_tree(source, &effective_target)?;
-    Ok(())
+    copy_directory_tree(source, &effective_target, file_states, source)
 }
 
 fn copy_local_file(source: &Path, target: &Path) -> AppResult<()> {
@@ -776,16 +940,31 @@ fn copy_local_file(source: &Path, target: &Path) -> AppResult<()> {
     Ok(())
 }
 
-fn copy_directory_tree(source: &Path, target: &Path) -> AppResult<()> {
+fn copy_directory_tree(
+    source: &Path,
+    target: &Path,
+    file_states: &FileStateMap,
+    source_root: &Path,
+) -> AppResult<()> {
     fs::create_dir_all(target)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let path = entry.path();
         let dest = target.join(entry.file_name());
-        if fs::metadata(&path)?.is_dir() {
-            copy_directory_tree(&path, &dest)?;
+        let metadata = fs::metadata(&path)?;
+        if metadata.is_dir() {
+            copy_directory_tree(&path, &dest, file_states, source_root)?;
         } else {
-            copy_local_file(&path, &dest)?;
+            let rel_path = path
+                .strip_prefix(source_root)
+                .map_err(|_| {
+                    AppError::Internal("failed to compute relative path for copy".to_string())
+                })?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if !should_skip_file(&path, &rel_path, file_states)? {
+                copy_local_file(&path, &dest)?;
+            }
         }
     }
     Ok(())
@@ -947,6 +1126,7 @@ mod tests {
             &'a self,
             task: &'a Task,
             settings: &'a WebdavSettings,
+            _file_states: &'a FileStateMap,
         ) -> TransferFuture<'a> {
             Box::pin(async move {
                 self.calls

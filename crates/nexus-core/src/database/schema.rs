@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 13;
+const CURRENT_SCHEMA_VERSION: i64 = 14;
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
 const NEW_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
@@ -66,6 +66,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 13 {
             migrate_to_v13(conn)?;
         }
+        if current < 14 {
+            migrate_to_v14(conn)?;
+        }
     }
 
     Ok(())
@@ -97,7 +100,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (13);
+        INSERT INTO schema_version (version) VALUES (14);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -240,6 +243,16 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (group_id) REFERENCES task_groups(id) ON DELETE CASCADE,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE task_file_state (
+            task_id TEXT NOT NULL,
+            rel_path TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            file_mtime INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (task_id, rel_path),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
         );
 
         CREATE TABLE settings (
@@ -709,6 +722,31 @@ fn migrate_to_v13(conn: &Connection) -> AppResult<()> {
             ON tasks(group_id, project_id)
             WHERE project_id IS NOT NULL;
         UPDATE schema_version SET version = 13;
+        COMMIT;
+        "#,
+    )
+    .or_else(|error| {
+        let _ = conn.execute("ROLLBACK", params![]);
+        Err(error)
+    })?;
+
+    Ok(())
+}
+
+fn migrate_to_v14(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        CREATE TABLE task_file_state (
+            task_id TEXT NOT NULL,
+            rel_path TEXT NOT NULL,
+            file_size INTEGER NOT NULL,
+            file_mtime INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (task_id, rel_path),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        UPDATE schema_version SET version = 14;
         COMMIT;
         "#,
     )

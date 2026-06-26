@@ -33,12 +33,30 @@ function Ensure-Directory([string] $Path) {
     New-Item -ItemType Directory -Force -Path $Path | Out-Null
 }
 
+function Get-FileSha256([string] $Path) {
+    $fullPath = (Resolve-Path -LiteralPath $Path).ProviderPath
+    $stream = [System.IO.File]::OpenRead($fullPath)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $bytes = $sha.ComputeHash($stream)
+        }
+        finally {
+            $sha.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+    return ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToUpperInvariant()
+}
+
 function Test-ExpectedHash([string] $Path, [string] $ExpectedSha256) {
     if (!(Test-Path -LiteralPath $Path)) {
         return $false
     }
 
-    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+    $actual = Get-FileSha256 -Path $Path
     return $actual -eq $ExpectedSha256
 }
 
@@ -94,7 +112,7 @@ function Ensure-SqliteArchive {
     Invoke-WebRequest -Uri $DownloadUrl -OutFile $ArchivePath -UseBasicParsing
 
     if (!(Test-ExpectedHash $ArchivePath $ExpectedArchiveSha256)) {
-        $actual = (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA256).Hash.ToUpperInvariant()
+        $actual = Get-FileSha256 -Path $ArchivePath
         throw "SQLite archive hash mismatch. Expected $ExpectedArchiveSha256 but got $actual."
     }
 }

@@ -19,7 +19,7 @@ if (process.platform !== "win32" && args[0] === "--setup-only") {
 const result =
   process.platform === "win32"
     ? spawnSync(
-        "powershell.exe",
+        "pwsh.exe",
         [
           "-NoProfile",
           "-ExecutionPolicy",

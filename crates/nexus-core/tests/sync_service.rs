@@ -2069,10 +2069,10 @@ async fn runs_local_to_local_directory_copy_embeds_into_existing_directory_targe
         fs::read_to_string(target_dir.join("c.txt")).expect("read c.txt unchanged"),
         "gamma"
     );
-    // 已存在的嵌入目录先送回收站再复制 —— stale.txt 应消失
+    // 增量复制不删除目标中已有但源中不存在的文件
     assert!(
-        !target_dir.join("source").join("stale.txt").exists(),
-        "stale embedded file should be removed before copy"
+        target_dir.join("source").join("stale.txt").exists(),
+        "stale embedded file should be preserved under incremental copy"
     );
 }
 
@@ -2114,4 +2114,81 @@ async fn runs_local_to_local_copy_rejects_missing_source_with_validation() {
         !target_file.exists(),
         "target must not be created on failure"
     );
+}
+
+#[tokio::test]
+async fn session_backup_skips_unchanged_files_and_pushes_only_changed() {
+    let (url, requests, server) = spawn_webdav_server(vec![
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+        http_response("201 Created"),
+    ]);
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "agent-nexus");
+    let sessions_dir = Path::new(&repo).join("__sessions");
+    fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+    fs::write(sessions_dir.join("a.md"), "# A\n").expect("write a");
+    fs::write(sessions_dir.join("b.md"), "# B\n").expect("write b");
+    projects.record_project(repo).expect("record project");
+    sync.save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
+        url,
+        user: "alice".to_string(),
+        pass: "secret".to_string(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+
+    let backup = sync
+        .list_session_backups()
+        .expect("list session backups")
+        .remove(0);
+
+    let task = sync.run_task(backup.task.id.clone()).await.expect("first run");
+    assert_eq!(task.status, "ok");
+    {
+        let reqs = requests.lock().expect("lock request log");
+        let put_count = reqs
+            .iter()
+            .filter(|r| r.starts_with("PUT "))
+            .count();
+        assert_eq!(put_count, 2, "first run should push both files");
+    }
+
+    let task2 = sync.run_task(backup.task.id.clone()).await.expect("second run");
+    assert_eq!(task2.status, "ok");
+    {
+        let reqs = requests.lock().expect("lock request log");
+        let put_count = reqs
+            .iter()
+            .filter(|r| r.starts_with("PUT "))
+            .count();
+        assert_eq!(put_count, 2, "second run should push zero new files");
+    }
+
+    fs::write(sessions_dir.join("a.md"), "# A modified\n").expect("modify a");
+
+    let task3 = sync.run_task(backup.task.id).await.expect("third run");
+    assert_eq!(task3.status, "ok");
+    {
+        let reqs = requests.lock().expect("lock request log");
+        let put_count = reqs
+            .iter()
+            .filter(|r| r.starts_with("PUT "))
+            .count();
+        assert_eq!(put_count, 3, "third run should push only the changed file");
+    }
+
+    server.join().expect("join webdav server");
 }

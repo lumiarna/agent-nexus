@@ -166,6 +166,18 @@ pub async fn list_directory(
     parse_multistatus(&url, &body)
 }
 
+pub async fn list_directory_if_exists(
+    base_url: &str,
+    segments: &[String],
+    auth: &WebdavAuth,
+) -> AppResult<Option<Vec<WebdavEntry>>> {
+    match list_directory(base_url, segments, auth).await {
+        Ok(entries) => Ok(Some(entries)),
+        Err(AppError::Internal(message)) if message.contains("404 Not Found") => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 pub async fn get_bytes(
     base_url: &str,
     segments: &[String],

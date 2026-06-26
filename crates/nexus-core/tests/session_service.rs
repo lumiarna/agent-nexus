@@ -295,6 +295,38 @@ async fn scan_cloud_sessions_reuses_cached_metadata_for_unchanged_files() {
     assert_eq!(get_count, 1);
 }
 
+#[tokio::test]
+async fn scan_cloud_sessions_returns_empty_when_remote_directory_is_missing() {
+    let (url, requests, server) = spawn_webdav_server(vec![
+        http_response("404 Not Found", ""),
+    ]);
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db.clone());
+    let sessions = SessionService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "agent-nexus");
+    projects.record_project(repo).expect("record project");
+    sync.save_webdav_settings(WebdavSettingsInput {
+        url,
+        user: String::new(),
+        pass: String::new(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+
+    let rows = sessions
+        .scan_cloud_sessions()
+        .await
+        .expect("scan cloud sessions should not fail on missing remote directory");
+
+    assert!(rows.is_empty());
+
+    server.join().expect("join webdav server");
+    let requests = requests.lock().expect("lock request log");
+    assert!(requests[0].starts_with("PROPFIND"));
+}
+
 #[cfg(unix)]
 #[test]
 fn scan_local_sessions_does_not_follow_directory_symlinks() {
