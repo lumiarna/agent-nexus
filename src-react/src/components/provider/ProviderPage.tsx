@@ -19,13 +19,22 @@ import { toast } from "sonner";
 import { Button, IconButton } from "@/components/ui/button";
 import { Dot, Input } from "@/components/ui/primitives";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
-import { Segmented } from "@/components/ui/segmented";
+import { Chip, Segmented } from "@/components/ui/segmented";
+import { Select } from "@/components/ui/select";
 import { Toggle } from "@/components/ui/toggle";
 import { ScreenScroll } from "@/components/shell/screen";
 import {
   formatProviderQuotaDisplay,
   isQuotaPaceAlert,
 } from "@/components/provider/quotaDisplay";
+import {
+  DEFAULT_QUOTA_REFRESH_MINUTES,
+  QUOTA_REFRESH_PRESETS,
+  WINDOW_ALIGN_CRON_PRESETS,
+  isWindowAlignActive,
+  quotaRefreshIntervalMs,
+  windowAlignCronHuman,
+} from "@/components/provider/providerSchedule";
 import { providersApi } from "@/lib/api/providers";
 import {
   fallbackAgentCapabilities,
@@ -39,8 +48,11 @@ import {
   useProviderDisplayPreferencesQuery,
   useProviderOrderQuery,
   useProviderQuotaQueries,
+  useProviderScheduleSettingsQueries,
+  useProviderTriggerModelsQuery,
   useReorderProvidersMutation,
   useSetProviderDisplayPreferencesMutation,
+  useSetProviderScheduleSettingsMutation,
 } from "@/lib/query/providers";
 import { palette, quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
@@ -232,6 +244,10 @@ export function ProviderPage() {
   const [opencodeGoSaving, setOpencodeGoSaving] = useState(false);
   const [providerApiKey, setProviderApiKey] = useState("");
   const [providerApiKeySaving, setProviderApiKeySaving] = useState(false);
+  const [quotaRefreshMinutes, setQuotaRefreshMinutes] = useState(DEFAULT_QUOTA_REFRESH_MINUTES);
+  const [windowAlignCron, setWindowAlignCron] = useState("");
+  const [windowAlignModelId, setWindowAlignModelId] = useState<string | null>(null);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [trayMetric, setTrayMetric] = useState<TrayMetric>("Remaining");
   const [colCount, setColCount] = useState(1);
@@ -239,10 +255,25 @@ export function ProviderPage() {
     () => providerCatalog.map((provider) => provider.id),
     [providerCatalog],
   );
-  const quotaResults = useProviderQuotaQueries(providerIds);
+  const scheduleResults = useProviderScheduleSettingsQueries(providerIds);
+  const scheduleByProvider = Object.fromEntries(
+    providerIds.map((providerId, index) => [providerId, scheduleResults[index]?.data]),
+  );
+  const refreshMsByProvider = Object.fromEntries(
+    providerIds.map((providerId) => [
+      providerId,
+      quotaRefreshIntervalMs(
+        scheduleByProvider[providerId]?.quotaRefreshMinutes ?? DEFAULT_QUOTA_REFRESH_MINUTES,
+      ),
+    ]),
+  );
+  const quotaResults = useProviderQuotaQueries(providerIds, refreshMsByProvider);
   const quotaQueries = Object.fromEntries(
     providerIds.map((providerId, index) => [providerId, quotaResults[index]]),
   );
+  const setProviderScheduleSettings = useSetProviderScheduleSettingsMutation();
+  const triggerModelsQuery = useProviderTriggerModelsQuery(configId, !!configId);
+  const openSchedule = configId ? scheduleByProvider[configId] : undefined;
   const displayProviders = providerCatalog.map((provider) => {
     const quota = quotaQueries[provider.id]?.data;
     return quota ? mergeProviderQuota(provider, quota) : provider;
@@ -347,6 +378,13 @@ export function ProviderPage() {
     };
   }, [configId]);
 
+  useEffect(() => {
+    if (!configId) return;
+    setQuotaRefreshMinutes(openSchedule?.quotaRefreshMinutes ?? DEFAULT_QUOTA_REFRESH_MINUTES);
+    setWindowAlignCron(openSchedule?.windowAlignCron ?? "");
+    setWindowAlignModelId(openSchedule?.windowAlignModelId ?? null);
+  }, [configId, openSchedule]);
+
   const isAnyRefreshing =
     Object.values(quotaQueries).some((q) => q.isFetching) ||
     Object.values(refreshing).some(Boolean);
@@ -439,6 +477,15 @@ export function ProviderPage() {
   const visible = ordered.filter((p) => cardVisible[p.id] !== false);
   const hidden = ordered.filter((p) => cardVisible[p.id] === false);
   const cfg = configId ? displayProviders.find((p) => p.id === configId) ?? null : null;
+  const triggerSupported = triggerModelsQuery.data?.supported !== false;
+  const triggerModels = triggerModelsQuery.data?.models ?? [];
+  const modelOptions =
+    windowAlignModelId && !triggerModels.some((model) => model.id === windowAlignModelId)
+      ? [
+          { id: windowAlignModelId, displayName: `${windowAlignModelId} (unavailable)` },
+          ...triggerModels,
+        ]
+      : triggerModels;
   const columns: Provider[][] = Array.from({ length: colCount }, () => []);
   visible.forEach((p, i) => columns[i % colCount].push(p));
 
@@ -714,12 +761,12 @@ export function ProviderPage() {
         />
       </div>
 
-      <Modal open={!!cfg} onClose={() => setConfigId(null)}>
+      <Modal open={!!cfg} onClose={() => setConfigId(null)} className="max-h-[90vh]">
         {cfg ? (
           <>
             <ModalHeader
               title={`Configure ${cfg.name}`}
-              subtitle="Observation params & display preferences · not a credential manager"
+              subtitle="Refresh cadence, window alignment & display preferences · not a credential manager"
               onClose={() => setConfigId(null)}
             />
             <div className="flex flex-col gap-[22px] px-[22px] py-5">
@@ -849,6 +896,91 @@ export function ProviderPage() {
                     global setting — configured above the cards on this page. Currently <b className="text-[#6a6055]">{trayMetric}</b>.
                 </div>
               </div>
+
+              <div>
+                <div className="mb-3 text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
+                  Quota refresh
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {QUOTA_REFRESH_PRESETS.map((preset) => (
+                    <Chip
+                      key={preset.minutes}
+                      active={quotaRefreshMinutes === preset.minutes}
+                      onClick={() => setQuotaRefreshMinutes(preset.minutes)}
+                    >
+                      {preset.label}
+                    </Chip>
+                  ))}
+                </div>
+                <div className="mt-2.5 text-[11px] text-[#b3a999]">
+                  How often this card polls {cfg.name} for fresh quota numbers.
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-1 text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
+                  Window alignment
+                </div>
+                <div className="mb-3 text-[11px] leading-[1.5] text-[#a99a89]">
+                  Fire a minimal request at set times so the rolling quota window resets on
+                  your schedule. Set both a time and a model to turn it on — this makes a
+                  real, billable call.
+                </div>
+                {!triggerSupported ? (
+                  <div className="rounded-[12px] border border-nexus-border bg-nexus-bg px-[14px] py-[13px] text-[12px] leading-[1.5] text-[#8a7a68]">
+                    Coming soon for {cfg.name} — window alignment is not implemented for this
+                    provider yet.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-[13px]">
+                    <div>
+                      <Input
+                        className="font-mono"
+                        placeholder="0 5,10,15,20 * * *"
+                        value={windowAlignCron}
+                        onChange={(e) => setWindowAlignCron(e.target.value)}
+                      />
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {WINDOW_ALIGN_CRON_PRESETS.map((preset) => (
+                          <Chip
+                            key={preset.expr}
+                            mono
+                            active={windowAlignCron === preset.expr}
+                            onClick={() => setWindowAlignCron(preset.expr)}
+                          >
+                            {preset.expr}
+                          </Chip>
+                        ))}
+                      </div>
+                      <div className="mt-2.5 text-[11px] text-[#b3a999]">
+                        {windowAlignCronHuman(windowAlignCron)}
+                      </div>
+                    </div>
+                    <div className="block">
+                      <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">
+                        Trigger model
+                      </div>
+                      <Select
+                        value={windowAlignModelId ?? ""}
+                        onChange={(value) => setWindowAlignModelId(value || null)}
+                        options={modelOptions.map((model) => ({
+                          value: model.id,
+                          label: model.displayName,
+                        }))}
+                        placeholder={
+                          triggerModelsQuery.isFetching ? "Loading models…" : "Select a model"
+                        }
+                        disabled={triggerModelsQuery.isFetching}
+                      />
+                      <div className="mt-[5px] text-[11px] text-[#b3a999]">
+                        {isWindowAlignActive(windowAlignCron, windowAlignModelId)
+                          ? "Active — alignment fires on the schedule above."
+                          : "Inactive — set both a time and a model to enable."}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <ModalFooter>
               <Button variant="subtle" onClick={() => setConfigId(null)}>
@@ -856,9 +988,29 @@ export function ProviderPage() {
               </Button>
               <Button
                 variant="primary"
-                disabled={copilotTokenSaving || opencodeGoSaving || providerApiKeySaving}
+                disabled={
+                  scheduleSaving || copilotTokenSaving || opencodeGoSaving || providerApiKeySaving
+                }
                 onClick={async () => {
                   const n = cfg.name;
+                  if (isTauriRuntime()) {
+                    setScheduleSaving(true);
+                    try {
+                      await setProviderScheduleSettings.mutateAsync({
+                        providerId: cfg.id,
+                        settings: {
+                          quotaRefreshMinutes,
+                          windowAlignCron: windowAlignCron.trim(),
+                          windowAlignModelId,
+                        },
+                      });
+                    } catch {
+                      toast.error("Failed to save schedule settings");
+                      setScheduleSaving(false);
+                      return;
+                    }
+                    setScheduleSaving(false);
+                  }
                   if (cfg.id === "copilot") {
                     setCopilotTokenSaving(true);
                     try {
@@ -910,7 +1062,7 @@ export function ProviderPage() {
                   toast(`Saved preferences for ${n}`);
                 }}
               >
-                {copilotTokenSaving || opencodeGoSaving || providerApiKeySaving
+                {scheduleSaving || copilotTokenSaving || opencodeGoSaving || providerApiKeySaving
                   ? "Saving..."
                   : "Save"}
               </Button>

@@ -41,6 +41,27 @@ export interface ProviderDisplayPreferences {
   cardVisibility: string[];
 }
 
+export interface ProviderScheduleSettings {
+  /** Front-end quota poll cadence, in minutes. */
+  quotaRefreshMinutes: number;
+  /** Back-end window-alignment cron; "" means off. */
+  windowAlignCron: string;
+  /** Model the alignment request uses; null/"" means off. */
+  windowAlignModelId: string | null;
+}
+
+export interface ProviderTriggerModel {
+  id: string;
+  displayName: string;
+}
+
+export interface ProviderTriggerCapability {
+  /** Whether the back-end implements window alignment for this provider. */
+  supported: boolean;
+  /** Dynamically listed models; empty when unsupported. */
+  models: ProviderTriggerModel[];
+}
+
 export const providersApi = {
   listOpenCodeCustomProviders(): Promise<OpenCodeCustomProvider[]> {
     return invokeCommand<OpenCodeCustomProvider[]>("list_opencode_custom_providers");
@@ -86,5 +107,24 @@ export const providersApi = {
     params: ProviderConnectionParams,
   ): Promise<void> {
     return invokeCommand<void>("set_provider_connection_params", { providerId, params });
+  },
+  getProviderScheduleSettings(providerId: string): Promise<ProviderScheduleSettings> {
+    return invokeCommand<ProviderScheduleSettings>("get_provider_schedule_settings", {
+      providerId,
+    });
+  },
+  setProviderScheduleSettings(
+    providerId: string,
+    settings: ProviderScheduleSettings,
+  ): Promise<ProviderScheduleSettings> {
+    return invokeCommand<ProviderScheduleSettings>("set_provider_schedule_settings", {
+      providerId,
+      settings,
+    });
+  },
+  listProviderTriggerModels(providerId: string): Promise<ProviderTriggerCapability> {
+    return invokeCommand<ProviderTriggerCapability>("list_provider_trigger_models", {
+      providerId,
+    });
   },
 };

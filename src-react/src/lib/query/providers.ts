@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { providersApi } from "@/lib/api/providers";
+import { providersApi, type ProviderScheduleSettings } from "@/lib/api/providers";
 import { isTauriRuntime } from "@/lib/runtime";
 
 export const providerKeys = {
@@ -8,6 +8,10 @@ export const providerKeys = {
   displayPreferences: ["providers", "display-preferences"] as const,
   order: ["providers", "order"] as const,
   quota: (providerId: string) => ["providers", providerId, "quota"] as const,
+  scheduleSettings: (providerId: string) =>
+    ["providers", providerId, "schedule-settings"] as const,
+  triggerModels: (providerId: string) =>
+    ["providers", providerId, "trigger-models"] as const,
 };
 
 export const PROVIDER_QUOTA_REFETCH_INTERVAL_MS = 5 * 60 * 1000;
@@ -72,13 +76,53 @@ export function useProviderQuotaQuery(providerId: string) {
   });
 }
 
-export function useProviderQuotaQueries(providerIds: readonly string[]) {
+export function useProviderQuotaQueries(
+  providerIds: readonly string[],
+  refreshMsByProvider?: Record<string, number>,
+) {
   return useQueries({
     queries: providerIds.map((providerId) => ({
       queryKey: providerKeys.quota(providerId),
       queryFn: () => providersApi.getQuota(providerId),
       enabled: isTauriRuntime(),
-      ...providerQuotaRefreshOptions,
+      refetchInterval: refreshMsByProvider?.[providerId] ?? PROVIDER_QUOTA_REFETCH_INTERVAL_MS,
+      refetchIntervalInBackground: true,
     })),
+  });
+}
+
+export function useProviderScheduleSettingsQueries(providerIds: readonly string[]) {
+  return useQueries({
+    queries: providerIds.map((providerId) => ({
+      queryKey: providerKeys.scheduleSettings(providerId),
+      queryFn: () => providersApi.getProviderScheduleSettings(providerId),
+      enabled: isTauriRuntime(),
+    })),
+  });
+}
+
+export function useProviderTriggerModelsQuery(providerId: string | null, open: boolean) {
+  return useQuery({
+    queryKey: providerKeys.triggerModels(providerId ?? ""),
+    queryFn: () => providersApi.listProviderTriggerModels(providerId as string),
+    enabled: isTauriRuntime() && open && !!providerId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useSetProviderScheduleSettingsMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      providerId,
+      settings,
+    }: {
+      providerId: string;
+      settings: ProviderScheduleSettings;
+    }) => providersApi.setProviderScheduleSettings(providerId, settings),
+    onSuccess: (settings, { providerId }) => {
+      queryClient.setQueryData(providerKeys.scheduleSettings(providerId), settings);
+    },
   });
 }

@@ -10,6 +10,7 @@
     "types": ["node"]
   },
   "include": [
+    "src/components/provider/providerSchedule.ts",
     "src/components/sync/pathDisplay.ts",
     "src/components/sync/schedule.ts",
     "src/components/sync/systemRecords.ts",
