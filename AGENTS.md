@@ -1,18 +1,15 @@
 ## Docs
 
-### 必读
+请先阅读 `CONTEXT.md` 和 `GOTCHAS.md`。
 
-- `CONTEXT.md`
-- `GOTCHAS.md`
+### 设计文档
+
 - `docs/design/Business Requirement.md`
 - `docs/design/Architecture Design.md`
 - `docs/design/Database Schema.md`
-
-### 按需读取
-
 - `docs/adr/`
 
-## Code
+## 代码位置
 
 - `src-react/`
 - `src-tauri/`
