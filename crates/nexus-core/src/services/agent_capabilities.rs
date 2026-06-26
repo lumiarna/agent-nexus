@@ -100,7 +100,7 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
         }),
         provider: Some(ProviderSurface {
             provider_id: "copilot",
-            credential_hint: Some("$GITHUB_TOKEN"),
+            credential_hint: Some("settings.COPILOT_GITHUB_TOKEN"),
         }),
     },
     AgentCapabilitySurface {

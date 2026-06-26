@@ -59,7 +59,7 @@ fn defines_agent_capability_surfaces_in_canonical_order() {
             .provider
             .expect("copilot provider surface")
             .credential_hint,
-        Some("$GITHUB_TOKEN")
+        Some("settings.COPILOT_GITHUB_TOKEN")
     );
 
     let codex = agent_by_name("CodeX").expect("codex capability");

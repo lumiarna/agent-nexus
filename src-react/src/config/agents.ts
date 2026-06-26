@@ -80,7 +80,7 @@ export const AGENTS = [
     color: "#5a7894",
     projectSkillDir: ".github/skills",
     providerId: "copilot",
-    authFile: "$GITHUB_TOKEN",
+    authFile: "settings.COPILOT_GITHUB_TOKEN",
     surfaces: ["skill", "prompt", "provider"],
     dirs: [
       { key: "COPILOT_CONFIG_DIR", value: "~/.github" },

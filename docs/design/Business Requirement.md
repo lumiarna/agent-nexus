@@ -46,7 +46,7 @@
 - CodeX
 	- Quota 数据来源：`${CODEX_CONFIG_DIR}`
 - Copilot
-	- Quota 数据来源：`${OPENCODE_AUTH_FILE}`/`${GITHUB_TOKEN}`/`${GH_TOKEN}`
+	- Quota 数据来源：`${OPENCODE_AUTH_FILE}`（`github-copilot.access` 或 `github-copilot.key`）；用户可在 Settings 填 `COPILOT_GITHUB_TOKEN` 优先使用
 - OpenCode Go
 	- Quota 数据来源：手动填写 `opencode_workspace_id` & `opencode_auth_cookie`
 - MiniMax Token Plan CN

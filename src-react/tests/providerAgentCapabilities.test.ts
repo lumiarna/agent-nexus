@@ -40,7 +40,7 @@ const capabilities = [
     configDir: "~/.github",
     skill: null,
     prompt: null,
-    provider: { providerId: "copilot", credentialHint: "$GITHUB_TOKEN" },
+    provider: { providerId: "copilot", credentialHint: "settings.COPILOT_GITHUB_TOKEN" },
   },
 ] satisfies AgentCapabilitySurface[];
 
@@ -92,7 +92,7 @@ test("agent-backed provider rows derive identity and credentials from capability
       {
         id: "copilot",
         name: "Copilot",
-        credential: "$GITHUB_TOKEN",
+        credential: "settings.COPILOT_GITHUB_TOKEN",
         isAgent: true,
         needsParams: false,
       },
