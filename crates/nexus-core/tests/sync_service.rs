@@ -95,6 +95,33 @@ fn http_response(status: &str) -> String {
     format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
 }
 
+fn http_get_response(body: &str) -> String {
+    let len = body.len();
+    format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body}")
+}
+
+fn http_multistatus_response(entries: &[(&str, bool, Option<u64>, Option<&str>)]) -> String {
+    let mut body = String::from(r#"<?xml version="1.0"?><multistatus xmlns="DAV:">"#);
+    for (href, is_collection, content_length, last_modified) in entries {
+        body.push_str("<response><href>");
+        body.push_str(href);
+        body.push_str("</href><propstat><prop>");
+        if *is_collection {
+            body.push_str("<resourcetype><collection/></resourcetype>");
+        }
+        if let Some(len) = content_length {
+            body.push_str(&format!("<getcontentlength>{len}</getcontentlength>"));
+        }
+        if let Some(lm) = last_modified {
+            body.push_str(&format!("<getlastmodified>{lm}</getlastmodified>"));
+        }
+        body.push_str("</prop></propstat></response>");
+    }
+    body.push_str("</multistatus>");
+    let len = body.len();
+    format!("HTTP/1.1 207 Multi-Status\r\nContent-Type: text/xml; charset=utf-8\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body}")
+}
+
 fn spawn_webdav_server(
     responses: Vec<String>,
 ) -> (String, Arc<Mutex<Vec<String>>>, JoinHandle<()>) {
@@ -2190,5 +2217,103 @@ async fn session_backup_skips_unchanged_files_and_pushes_only_changed() {
         assert_eq!(put_count, 3, "third run should push only the changed file");
     }
 
+    server.join().expect("join webdav server");
+}
+
+#[tokio::test]
+async fn runs_cloud_to_local_file_pull_task() {
+    let (url, _requests, server) = spawn_webdav_server(vec![
+        http_get_response("theme = 'dark'\n"),
+    ]);
+    let root = TempDir::new().expect("create temp dir");
+    let target_file = root.path().join("settings.toml");
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    sync.save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
+        url,
+        user: "alice".to_string(),
+        pass: "secret".to_string(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Restore".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Cloud".to_string(),
+                source: "config/warp/settings.toml".to_string(),
+                target_type: "Local".to_string(),
+                target: target_file.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create cloud pull task");
+
+    let task = sync
+        .run_task(created.tasks[0].id.clone())
+        .await
+        .expect("run cloud pull task");
+
+    assert_eq!(task.status, "ok");
+    assert!(target_file.exists(), "target file should be created");
+    assert_eq!(
+        fs::read_to_string(&target_file).expect("read pulled target"),
+        "theme = 'dark'\n"
+    );
+    server.join().expect("join webdav server");
+}
+
+#[tokio::test]
+async fn runs_cloud_to_local_directory_pull_task() {
+    let (url, _requests, server) = spawn_webdav_server(vec![
+        http_multistatus_response(&[
+            ("/webdav/agent-nexus-sync/config/warp/", true, None, None),
+            ("/webdav/agent-nexus-sync/config/warp/a.txt", false, Some(5), Some("Sun, 06 Nov 1994 08:49:37 GMT")),
+            ("/webdav/agent-nexus-sync/config/warp/b.txt", false, Some(4), Some("Sun, 06 Nov 1994 08:49:38 GMT")),
+        ]),
+        http_get_response("alpha"),
+        http_get_response("beta"),
+    ]);
+    let root = TempDir::new().expect("create temp dir");
+    let target_dir = root.path().join("warp");
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db);
+    sync.save_webdav_settings(nexus_core::services::sync::WebdavSettingsInput {
+        url,
+        user: "alice".to_string(),
+        pass: "secret".to_string(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Restore Dir".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Cloud".to_string(),
+                source: "config/warp/".to_string(),
+                target_type: "Local".to_string(),
+                target: target_dir.to_string_lossy().into_owned(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create cloud pull dir task");
+
+    let task = sync
+        .run_task(created.tasks[0].id.clone())
+        .await
+        .expect("run cloud pull dir task");
+
+    assert_eq!(task.status, "ok");
+    assert!(target_dir.is_dir(), "target dir should be created");
+    assert_eq!(
+        fs::read_to_string(target_dir.join("a.txt")).expect("read pulled a.txt"),
+        "alpha"
+    );
+    assert_eq!(
+        fs::read_to_string(target_dir.join("b.txt")).expect("read pulled b.txt"),
+        "beta"
+    );
     server.join().expect("join webdav server");
 }

@@ -70,6 +70,13 @@ trait Transfer: Send + Sync {
         settings: &'a WebdavSettings,
         file_states: &'a FileStateMap,
     ) -> TransferFuture<'a>;
+
+    fn pull_cloud_to_local<'a>(
+        &'a self,
+        task: &'a Task,
+        settings: &'a WebdavSettings,
+        file_states: &'a FileStateMap,
+    ) -> TransferFuture<'a>;
 }
 
 struct WebdavTransfer;
@@ -82,6 +89,15 @@ impl Transfer for WebdavTransfer {
         file_states: &'a FileStateMap,
     ) -> TransferFuture<'a> {
         Box::pin(push_local_to_cloud(task, settings, file_states))
+    }
+
+    fn pull_cloud_to_local<'a>(
+        &'a self,
+        task: &'a Task,
+        settings: &'a WebdavSettings,
+        file_states: &'a FileStateMap,
+    ) -> TransferFuture<'a> {
+        Box::pin(pull_cloud_to_local(task, settings, file_states))
     }
 }
 
@@ -527,9 +543,25 @@ impl TaskLifecycle {
                 }
                 Ok(TaskRunStatus::Ok)
             }
-            ("Cloud", "Local") => Err(AppError::Validation(
-                "Cloud to Local copy is not implemented yet".to_string(),
-            )),
+            ("Cloud", "Local") => {
+                let settings = self.valid_webdav_settings()?;
+                let file_states = {
+                    let conn = self.db.connection()?;
+                    load_file_state(&conn, &task.id)?
+                };
+                self.transfer
+                    .pull_cloud_to_local(task, &settings, &file_states)
+                    .await?;
+                let source = resolve_local_path(&task.target)?;
+                if source.is_dir() {
+                    let conn = self.db.connection()?;
+                    refresh_file_state(&conn, &task.id, &source)?;
+                } else if source.is_file() {
+                    let conn = self.db.connection()?;
+                    save_single_file_state(&conn, &task.id, &source)?;
+                }
+                Ok(TaskRunStatus::Ok)
+            }
             ("Local", "Local") => {
                 let file_states = {
                     let conn = self.db.connection()?;
@@ -674,6 +706,48 @@ async fn push_local_to_cloud(
             "local source does not exist: {}",
             task.source
         )))
+    }
+}
+
+async fn pull_cloud_to_local(
+    task: &Task,
+    settings: &WebdavSettings,
+    _file_states: &FileStateMap,
+) -> AppResult<()> {
+    let auth = webdav::auth_from_credentials(&settings.user, &settings.pass);
+
+    if task.source.ends_with('/') {
+        let source_segments = remote_segments(settings, &task.source)?;
+        let entries = webdav::list_directory(&settings.url, &source_segments, &auth).await?;
+        let target_root = resolve_local_path(&task.target)?;
+        fs::create_dir_all(&target_root)?;
+        for entry in entries {
+            let mut child_segments = source_segments.clone();
+            child_segments.push(entry.name.clone());
+            let child_target = target_root.join(&entry.name);
+            if entry.is_collection {
+                fs::create_dir_all(&child_target)?;
+                let child_task = Task {
+                    source: task.source.clone() + &entry.name + "/",
+                    target: child_target.to_string_lossy().into_owned(),
+                    ..task.clone()
+                };
+                Box::pin(pull_cloud_to_local(&child_task, settings, _file_states)).await?;
+            } else {
+                let bytes = webdav::get_bytes(&settings.url, &child_segments, &auth).await?;
+                fs::write(&child_target, bytes)?;
+            }
+        }
+        Ok(())
+    } else {
+        let source_segments = remote_segments(settings, &task.source)?;
+        let bytes = webdav::get_bytes(&settings.url, &source_segments, &auth).await?;
+        let target = resolve_local_path(&task.target)?;
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&target, bytes)?;
+        Ok(())
     }
 }
 
@@ -1136,6 +1210,21 @@ mod tests {
                 Ok(())
             })
         }
+
+        fn pull_cloud_to_local<'a>(
+            &'a self,
+            task: &'a Task,
+            settings: &'a WebdavSettings,
+            _file_states: &'a FileStateMap,
+        ) -> TransferFuture<'a> {
+            Box::pin(async move {
+                self.calls
+                    .lock()
+                    .expect("lock transfer calls")
+                    .push((task.target.clone(), settings.remote_root.clone()));
+                Ok(())
+            })
+        }
     }
 
     #[tokio::test]
@@ -1181,6 +1270,52 @@ mod tests {
         assert_eq!(
             *transfer.calls.lock().expect("lock transfer calls"),
             vec![("~/source.txt".to_string(), "agent-nexus-sync".to_string())],
+        );
+    }
+
+    #[tokio::test]
+    async fn cloud_to_local_copy_runs_through_transfer_seam() {
+        let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+        {
+            let conn = db.connection().expect("open db connection");
+            conn.execute(
+                "UPDATE settings SET value = 'https://dav.example.com/root/' WHERE key = 'webdav_url'",
+                [],
+            )
+            .expect("set webdav url");
+            conn.execute(
+                "UPDATE settings SET value = 'agent-nexus-sync' WHERE key = 'webdav_remote_root'",
+                [],
+            )
+            .expect("set webdav remote root");
+        }
+        let transfer = Arc::new(RecordingTransfer::default());
+        let lifecycle = TaskLifecycle {
+            db,
+            transfer: transfer.clone(),
+        };
+        let task = Task {
+            id: "task-2".to_string(),
+            direction: "Pull".to_string(),
+            action: "Copy".to_string(),
+            source_type: "Cloud".to_string(),
+            source: "backup/source.txt".to_string(),
+            target_type: "Local".to_string(),
+            target: "~/restored.txt".to_string(),
+            schedule: "manual".to_string(),
+            last_run: "—".to_string(),
+            status: "never".to_string(),
+            link_state: "present".to_string(),
+        };
+
+        lifecycle
+            .run_task_operation(&task)
+            .await
+            .expect("run through transfer seam");
+
+        assert_eq!(
+            *transfer.calls.lock().expect("lock transfer calls"),
+            vec![("~/restored.txt".to_string(), "agent-nexus-sync".to_string())],
         );
     }
 }
