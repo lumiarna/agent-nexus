@@ -2,20 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  if (
-    error &&
-    typeof error === "object" &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-  return "Unexpected error";
-}
+import { getErrorMessage } from "./getErrorMessage";
 
 export interface SingleValueConfigModalProps {
   open: boolean;
@@ -72,7 +59,7 @@ export function SingleValueConfigModal({
       onClose();
       toast(value ? messages.set(canonical) : messages.cleared);
     } catch (error) {
-      toast(errorMessage(error));
+      toast(getErrorMessage(error));
     }
   }
 

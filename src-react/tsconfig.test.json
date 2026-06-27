@@ -10,6 +10,7 @@
     "types": ["node"]
   },
   "include": [
+    "src/components/project/projectInteractions.ts",
     "src/components/project/stringListEdit.ts",
     "src/components/provider/providerSchedule.ts",
     "src/components/sync/pathDisplay.ts",

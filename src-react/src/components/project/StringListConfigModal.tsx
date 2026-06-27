@@ -3,21 +3,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { cn } from "@/lib/utils";
+import { getErrorMessage } from "./getErrorMessage";
 import { resolveAdd, resolveRemove } from "./stringListEdit";
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  if (
-    error &&
-    typeof error === "object" &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-  return "Unexpected error";
-}
 
 export interface StringListConfigModalProps {
   open: boolean;
@@ -100,7 +87,7 @@ export function StringListConfigModal({
       setInput("");
       toast(messages.added(outcome.value));
     } catch (error) {
-      toast(errorMessage(error));
+      toast(getErrorMessage(error));
     }
   }
 
@@ -109,7 +96,7 @@ export function StringListConfigModal({
       await onRemove(resolveRemove(value, items));
       toast(messages.removed(value));
     } catch (error) {
-      toast(errorMessage(error));
+      toast(getErrorMessage(error));
     }
   }
 
