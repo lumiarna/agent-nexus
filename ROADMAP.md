@@ -3,7 +3,6 @@
 - Sync Task，已经有删除线了，不需要再显示 Missing 字样（和 Project 面对齐）
 - Sync Task Group 排序未保存
 - 支持 Disable Skill (实现方式：备份到 Cloud，然后删除本地文件)
-- 支持为 Project 设置自定义 Skills 目录（此时 Agent 矩阵隐藏），并允许勾选传播至 Global
 - 支持隐藏 Agent
 - 支持 Qoder
 - 验证 Claude Code 窗口对齐
@@ -11,3 +10,7 @@
 - .claudeignore 也加入检测
 - 确定日志保留策略，例如保留 30 天或限制总大小；否则长期轮询 Provider quota 会让 app data 里的日志持续增长
 - Sync 时间为 UTC，前端本地化；Provider 窗口对齐时间为本地时间
+- 窗口对齐
+  - 手动触发按钮
+  - 显示上次触发时间和结果
+  - 模型选择器会超出窗口外（可能修完上面两个就自动好了）
