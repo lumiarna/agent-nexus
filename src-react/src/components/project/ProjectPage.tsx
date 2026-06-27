@@ -26,6 +26,8 @@ import { Card, Dot } from "@/components/ui/primitives";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Segmented } from "@/components/ui/segmented";
 import { SkillRow } from "@/components/skill/SkillRow";
+import { SingleValueConfigModal } from "@/components/project/SingleValueConfigModal";
+import { StringListConfigModal } from "@/components/project/StringListConfigModal";
 import { ScreenScroll } from "@/components/shell/screen";
 import { AGENTS } from "@/config/agents";
 import { promptsApi } from "@/lib/api/prompts";
@@ -259,11 +261,8 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const [deleteAck, setDeleteAck] = useState(false);
   const [addPath, setAddPath] = useState("");
   const [customDirsOpen, setCustomDirsOpen] = useState(false);
-  const [customDirInput, setCustomDirInput] = useState("");
   const [extraFilesOpen, setExtraFilesOpen] = useState(false);
-  const [extraFileInput, setExtraFileInput] = useState("");
   const [sessionDirOpen, setSessionDirOpen] = useState(false);
-  const [sessionDirInput, setSessionDirInput] = useState("");
   const addKey = deriveProjectKey(addPath);
 
   useEffect(() => {
@@ -424,91 +423,6 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
     try {
       await setSkillDisabled.mutateAsync({ id: skill.id, disabled: !skill.disabled });
       toast(!skill.disabled ? "Model invocation disabled" : "Model invocation enabled");
-    } catch (error) {
-      toast(getErrorMessage(error));
-    }
-  }
-
-  async function addCustomSkillsDir() {
-    const dir = customDirInput.trim();
-    if (!dir || !dp) return;
-    const existing = dp.customSkillsDirs ?? [];
-    if (existing.includes(dir)) {
-      toast("Directory already added");
-      return;
-    }
-
-    try {
-      await setCustomSkillsDirs.mutateAsync({ projectId: dp.id, dirs: [...existing, dir] });
-      setCustomDirInput("");
-      toast(`Added custom skills dir · ${dir}`);
-    } catch (error) {
-      toast(getErrorMessage(error));
-    }
-  }
-
-  async function removeCustomSkillsDir(dir: string) {
-    if (!dp) return;
-    const existing = dp.customSkillsDirs ?? [];
-
-    try {
-      await setCustomSkillsDirs.mutateAsync({
-        projectId: dp.id,
-        dirs: existing.filter((d) => d !== dir),
-      });
-      toast(`Removed custom skills dir · ${dir}`);
-    } catch (error) {
-      toast(getErrorMessage(error));
-    }
-  }
-
-  async function addExtraPromptFile() {
-    const file = extraFileInput.trim();
-    if (!file || !dp) return;
-    if (!matchesPromptGlob(file)) {
-      toast("File must match AGENTS*.md or CLAUDE*.md");
-      return;
-    }
-    const existing = dp.extraPromptFiles ?? [];
-    if (existing.includes(file)) {
-      toast("File already added");
-      return;
-    }
-
-    try {
-      await setExtraPromptFiles.mutateAsync({ projectId: dp.id, files: [...existing, file] });
-      setExtraFileInput("");
-      toast(`Added extra prompt file · ${file}`);
-    } catch (error) {
-      toast(getErrorMessage(error));
-    }
-  }
-
-  async function removeExtraPromptFile(file: string) {
-    if (!dp) return;
-    const existing = dp.extraPromptFiles ?? [];
-
-    try {
-      await setExtraPromptFiles.mutateAsync({
-        projectId: dp.id,
-        files: existing.filter((f) => f !== file),
-      });
-      toast(`Removed extra prompt file · ${file}`);
-    } catch (error) {
-      toast(getErrorMessage(error));
-    }
-  }
-
-  async function submitSessionsDir() {
-    if (!dp) return;
-    const dir = sessionDirInput.trim();
-
-    try {
-      const project = await setSessionsDir.mutateAsync({ projectId: dp.id, dir });
-      setSessionDirOpen(false);
-      toast(
-        dir ? `Session dir set · ${project.sessionsDir}` : "Session dir restored to default",
-      );
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -891,10 +805,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               </span>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => {
-                    setCustomDirInput("skills");
-                    setCustomDirsOpen(true);
-                  }}
+                  onClick={() => setCustomDirsOpen(true)}
                   className="text-[11px] font-semibold text-nexus-accent hover:underline"
                 >
                   Custom skills dirs
@@ -957,10 +868,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               </span>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => {
-                    setExtraFileInput("");
-                    setExtraFilesOpen(true);
-                  }}
+                  onClick={() => setExtraFilesOpen(true)}
                   className="text-[11px] font-semibold text-nexus-accent hover:underline"
                 >
                   Custom prompt files
@@ -1047,12 +955,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                   Session
                 </span>
                 <button
-                  onClick={() => {
-                    setSessionDirInput(
-                      dp.sessionsDir && dp.sessionsDir !== DEFAULT_SESSIONS_DIR ? dp.sessionsDir : "",
-                    );
-                    setSessionDirOpen(true);
-                  }}
+                  onClick={() => setSessionDirOpen(true)}
                   className="text-[11px] font-semibold text-nexus-accent hover:underline"
                 >
                   Configure session dir
@@ -1221,235 +1124,123 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
 
       {/* Custom skills dirs modal */}
       {dp ? (
-      <Modal
-        open={customDirsOpen}
-        onClose={() => setCustomDirsOpen(false)}
-        className="max-h-[88vh] w-[560px]"
-      >
-        <ModalHeader
+        <StringListConfigModal
+          open={customDirsOpen}
+          onClose={() => setCustomDirsOpen(false)}
           title="Project custom skills dirs"
           subtitle="Extra scan sources alongside the fixed Agent project skills dirs"
+          items={dp.customSkillsDirs ?? []}
+          onAdd={(dirs) => setCustomSkillsDirs.mutateAsync({ projectId: dp.id, dirs })}
+          onRemove={(dirs) => setCustomSkillsDirs.mutateAsync({ projectId: dp.id, dirs })}
+          placeholder="skills  ·  .nexus/skills  ·  /abs/path/to/skills"
+          addLabel="Add dir"
+          initialInput="skills"
+          busy={setCustomSkillsDirs.isPending}
+          messages={{
+            added: (dir) => `Added custom skills dir · ${dir}`,
+            removed: (dir) => `Removed custom skills dir · ${dir}`,
+            duplicate: "Directory already added",
+          }}
+          emptyHint="No custom skills dirs. Relative paths resolve against the Project root."
+          renderBadge={(dir) => {
+            const external = /^(~|\/|[A-Za-z]:[\\/])/.test(dir);
+            return (
+              <span
+                className="flex-none rounded-[5px] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em]"
+                style={{
+                  color: external ? "#9a6f0a" : "#5f7a3e",
+                  background: external ? "#f7eccb" : "#e9eed8",
+                }}
+              >
+                {external ? "External" : "In repo"}
+              </span>
+            );
+          }}
+          help={
+            <>
+              Each dir is scanned for real Skill folders (containing{" "}
+              <span className="font-mono">SKILL.md</span>) as Project custom sources — they show no
+              Agent Matrix and can be propagated to Global. A dir that resolves to a fixed Agent
+              project skills dir is rejected. Removing a dir drops its custom Skills on the next
+              scan; managed Global placements fall back to none.
+            </>
+          }
         />
-        <div className="flex flex-col gap-4 px-[22px] py-5">
-          <div className="flex gap-2">
-            <input
-              value={customDirInput}
-              onChange={(event) => setCustomDirInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !setCustomSkillsDirs.isPending) {
-                  void addCustomSkillsDir();
-                }
-              }}
-              placeholder="skills  ·  .nexus/skills  ·  /abs/path/to/skills"
-              className="min-w-0 flex-1 rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055] outline-none focus:border-nexus-accent"
-            />
-            <Button
-              variant="secondary"
-              size="sm"
-              className="rounded-[10px]"
-              onClick={() => void addCustomSkillsDir()}
-              disabled={setCustomSkillsDirs.isPending || !customDirInput.trim()}
-            >
-              {setCustomSkillsDirs.isPending ? "Saving..." : "Add dir"}
-            </Button>
-          </div>
-
-          <div className="flex flex-col gap-0.5 overflow-hidden rounded-[12px] border border-nexus-border">
-            {(dp.customSkillsDirs ?? []).length === 0 ? (
-              <div className="px-3.5 py-[11px] text-[12px] text-[#b3a999]">
-                No custom skills dirs. Relative paths resolve against the Project root.
-              </div>
-            ) : (
-              (dp.customSkillsDirs ?? []).map((dir, i) => {
-                const external = /^(~|\/|[A-Za-z]:[\\/])/.test(dir);
-                return (
-                  <div
-                    key={dir}
-                    className={cn(
-                      "flex items-center justify-between gap-3 px-3.5 py-[11px]",
-                      i > 0 && "border-t border-[#f3eee5]",
-                    )}
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-nexus-body">
-                        {dir}
-                      </span>
-                      <span
-                        className="flex-none rounded-[5px] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em]"
-                        style={{
-                          color: external ? "#9a6f0a" : "#5f7a3e",
-                          background: external ? "#f7eccb" : "#e9eed8",
-                        }}
-                      >
-                        {external ? "External" : "In repo"}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => void removeCustomSkillsDir(dir)}
-                      disabled={setCustomSkillsDirs.isPending}
-                      className="flex-none text-[11px] font-semibold text-nexus-crit hover:underline disabled:cursor-wait disabled:opacity-60"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          <div className="rounded-[11px] border border-nexus-border bg-nexus-bg px-3.5 py-[11px] text-[11.5px] leading-[1.55] text-[#8a7a68]">
-            Each dir is scanned for real Skill folders (containing <span className="font-mono">SKILL.md</span>)
-            as Project custom sources — they show no Agent Matrix and can be propagated to Global.
-            A dir that resolves to a fixed Agent project skills dir is rejected. Removing a dir drops
-            its custom Skills on the next scan; managed Global placements fall back to none.
-          </div>
-        </div>
-        <ModalFooter>
-          <Button variant="subtle" onClick={() => setCustomDirsOpen(false)}>
-            Close
-          </Button>
-        </ModalFooter>
-      </Modal>
       ) : null}
 
       {/* Extra prompt files modal */}
       {dp ? (
-      <Modal
-        open={extraFilesOpen}
-        onClose={() => setExtraFilesOpen(false)}
-        className="max-h-[88vh] w-[560px]"
-      >
-        <ModalHeader
+        <StringListConfigModal
+          open={extraFilesOpen}
+          onClose={() => setExtraFilesOpen(false)}
           title="Project extra prompt files"
           subtitle="Extra Prompt files scanned alongside the primary AGENTS.md / CLAUDE.md"
+          items={dp.extraPromptFiles ?? []}
+          onAdd={(files) => setExtraPromptFiles.mutateAsync({ projectId: dp.id, files })}
+          onRemove={(files) => setExtraPromptFiles.mutateAsync({ projectId: dp.id, files })}
+          validate={(file) =>
+            matchesPromptGlob(file) ? null : "File must match AGENTS*.md or CLAUDE*.md"
+          }
+          placeholder="AGENTS.local.md  ·  docs/CLAUDE.md"
+          addLabel="Add file"
+          busy={setExtraPromptFiles.isPending}
+          messages={{
+            added: (file) => `Added extra prompt file · ${file}`,
+            removed: (file) => `Removed extra prompt file · ${file}`,
+            duplicate: "File already added",
+          }}
+          emptyHint="No extra prompt files. Paths resolve against the Project root."
+          renderBadge={(file) => {
+            const owner = PROMPT_FILE_GLOBS.find((g) =>
+              g.re.test(file.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? ""),
+            )?.agent;
+            return owner ? (
+              <span className="flex-none rounded-[5px] bg-[#e9eed8] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#5f7a3e]">
+                {owner}
+              </span>
+            ) : null;
+          }}
+          help={
+            <>
+              Each file&apos;s name must match an Agent prompt-file glob —{" "}
+              <span className="font-mono">AGENTS*.md</span> (Generic Agent) or{" "}
+              <span className="font-mono">CLAUDE*.md</span> (Claude Code). The matching Agent
+              becomes the Source Agent; files that match neither are rejected. This widens the
+              Prompt scan inside an existing Agent namespace — it does not create a new source.
+            </>
+          }
         />
-        <div className="flex flex-col gap-4 px-[22px] py-5">
-          <div className="flex gap-2">
-            <input
-              value={extraFileInput}
-              onChange={(event) => setExtraFileInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !setExtraPromptFiles.isPending) {
-                  void addExtraPromptFile();
-                }
-              }}
-              placeholder="AGENTS.local.md  ·  docs/CLAUDE.md"
-              className="min-w-0 flex-1 rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055] outline-none focus:border-nexus-accent"
-            />
-            <Button
-              variant="secondary"
-              size="sm"
-              className="rounded-[10px]"
-              onClick={() => void addExtraPromptFile()}
-              disabled={setExtraPromptFiles.isPending || !extraFileInput.trim()}
-            >
-              {setExtraPromptFiles.isPending ? "Saving..." : "Add file"}
-            </Button>
-          </div>
-
-          <div className="flex flex-col gap-0.5 overflow-hidden rounded-[12px] border border-nexus-border">
-            {(dp.extraPromptFiles ?? []).length === 0 ? (
-              <div className="px-3.5 py-[11px] text-[12px] text-[#b3a999]">
-                No extra prompt files. Paths resolve against the Project root.
-              </div>
-            ) : (
-              (dp.extraPromptFiles ?? []).map((file, i) => {
-                const owner = PROMPT_FILE_GLOBS.find((g) => g.re.test(
-                  file.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "",
-                ))?.agent;
-                return (
-                  <div
-                    key={file}
-                    className={cn(
-                      "flex items-center justify-between gap-3 px-3.5 py-[11px]",
-                      i > 0 && "border-t border-[#f3eee5]",
-                    )}
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-nexus-body">
-                        {file}
-                      </span>
-                      {owner ? (
-                        <span className="flex-none rounded-[5px] bg-[#e9eed8] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#5f7a3e]">
-                          {owner}
-                        </span>
-                      ) : null}
-                    </div>
-                    <button
-                      onClick={() => void removeExtraPromptFile(file)}
-                      disabled={setExtraPromptFiles.isPending}
-                      className="flex-none text-[11px] font-semibold text-nexus-crit hover:underline disabled:cursor-wait disabled:opacity-60"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          <div className="rounded-[11px] border border-nexus-border bg-nexus-bg px-3.5 py-[11px] text-[11.5px] leading-[1.55] text-[#8a7a68]">
-            Each file's name must match an Agent prompt-file glob —{" "}
-            <span className="font-mono">AGENTS*.md</span> (Generic Agent) or{" "}
-            <span className="font-mono">CLAUDE*.md</span> (Claude Code). The matching Agent
-            becomes the Source Agent; files that match neither are rejected. This widens the
-            Prompt scan inside an existing Agent namespace — it does not create a new source.
-          </div>
-        </div>
-        <ModalFooter>
-          <Button variant="subtle" onClick={() => setExtraFilesOpen(false)}>
-            Close
-          </Button>
-        </ModalFooter>
-      </Modal>
       ) : null}
 
       {/* Session dir modal */}
       {dp ? (
-      <Modal
-        open={sessionDirOpen}
-        onClose={() => setSessionDirOpen(false)}
-        className="w-[480px]"
-      >
-        <ModalHeader
+        <SingleValueConfigModal
+          open={sessionDirOpen}
+          onClose={() => setSessionDirOpen(false)}
           title="Configure session dir"
           subtitle="Override the single Session Directory for this Project"
+          label="Session directory"
+          initialValue={
+            dp.sessionsDir && dp.sessionsDir !== DEFAULT_SESSIONS_DIR ? dp.sessionsDir : ""
+          }
+          placeholder={DEFAULT_SESSIONS_DIR}
+          onSubmit={async (dir) => {
+            const project = await setSessionsDir.mutateAsync({ projectId: dp.id, dir });
+            return project.sessionsDir;
+          }}
+          busy={setSessionsDir.isPending}
+          messages={{
+            set: (canonical) => `Session dir set · ${canonical}`,
+            cleared: "Session dir restored to default",
+          }}
+          help={
+            <>
+              A Project always has exactly one Session Directory — this is a deliberate constraint,
+              not an MVP limit. Relative paths resolve against the Project root. Leave empty to
+              restore the default <span className="font-mono">{DEFAULT_SESSIONS_DIR}</span>.
+            </>
+          }
         />
-        <div className="flex flex-col gap-4 px-[22px] py-5">
-          <div>
-            <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">Session directory</div>
-            <input
-              value={sessionDirInput}
-              onChange={(event) => setSessionDirInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !setSessionsDir.isPending) {
-                  void submitSessionsDir();
-                }
-              }}
-              placeholder={DEFAULT_SESSIONS_DIR}
-              className="w-full rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055] outline-none focus:border-nexus-accent"
-              autoFocus
-            />
-          </div>
-          <div className="rounded-[11px] border border-nexus-border bg-nexus-bg px-3.5 py-[11px] text-[11.5px] leading-[1.55] text-[#8a7a68]">
-            A Project always has exactly one Session Directory — this is a deliberate constraint,
-            not an MVP limit. Relative paths resolve against the Project root. Leave empty to
-            restore the default <span className="font-mono">{DEFAULT_SESSIONS_DIR}</span>.
-          </div>
-        </div>
-        <ModalFooter>
-          <Button variant="subtle" onClick={() => setSessionDirOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => void submitSessionsDir()}
-            disabled={setSessionsDir.isPending}
-          >
-            {setSessionsDir.isPending ? "Saving..." : "Save"}
-          </Button>
-        </ModalFooter>
-      </Modal>
       ) : null}
 
       {/* Git Base Folders modal */}
