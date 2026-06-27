@@ -41,7 +41,9 @@ impl<'a> ClaudeAccessToken<'a> {
                 .iter()
                 .any(|scope| scope == REQUIRED_SCOPE)
         {
-            return Err(ClaudeAuthError::MissingScope { credentials });
+            return Err(ClaudeAuthError::MissingScope {
+                credentials: Box::new(credentials),
+            });
         }
 
         let mut access_token = credentials.access_token.clone();
@@ -50,7 +52,10 @@ impl<'a> ClaudeAccessToken<'a> {
                 Ok(Some(refreshed)) => access_token = refreshed.access_token,
                 Ok(None) => {}
                 Err(error) => {
-                    return Err(ClaudeAuthError::RefreshFailed { credentials, error });
+                    return Err(ClaudeAuthError::RefreshFailed {
+                        credentials: Box::new(credentials),
+                        error,
+                    });
                 }
             }
         }
@@ -78,11 +83,11 @@ impl<'a> ClaudeAccessToken<'a> {
         let refreshed = refresh_and_persist_result(credentials, self.usage_transport)
             .await
             .map_err(|error| ClaudeAuthError::RefreshFailed {
-                credentials: credentials.clone(),
+                credentials: Box::new(credentials.clone()),
                 error,
             })?
             .ok_or_else(|| ClaudeAuthError::RefreshRejected {
-                credentials: credentials.clone(),
+                credentials: Box::new(credentials.clone()),
             })?;
 
         call(refreshed.access_token).await
@@ -103,14 +108,14 @@ fn read_credentials(
 pub(crate) enum ClaudeAuthError {
     NoCreds,
     MissingScope {
-        credentials: ClaudeCodeCredentials,
+        credentials: Box<ClaudeCodeCredentials>,
     },
     RefreshFailed {
-        credentials: ClaudeCodeCredentials,
+        credentials: Box<ClaudeCodeCredentials>,
         error: ProviderQuotaPollError,
     },
     RefreshRejected {
-        credentials: ClaudeCodeCredentials,
+        credentials: Box<ClaudeCodeCredentials>,
     },
     Terminal(String),
 }

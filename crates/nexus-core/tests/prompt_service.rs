@@ -234,7 +234,10 @@ fn scans_extra_prompt_file_under_its_glob_agent_and_distributes_with_stem_swap()
             .expect("enable Claude Code target");
 
         assert_eq!(enabled.cells["Claude Code"], "target");
-        assert!(claude_target.exists(), "stem-swapped target file should exist");
+        assert!(
+            claude_target.exists(),
+            "stem-swapped target file should exist"
+        );
         assert_file_distribution_tracks_source_writes(&extra_source, &claude_target);
 
         // The project now reports the extra prompt in its aggregate count.
@@ -245,7 +248,10 @@ fn scans_extra_prompt_file_under_its_glob_agent_and_distributes_with_stem_swap()
             .find(|p| p.id == project.id)
             .expect("project still listed");
         assert_eq!(reloaded.prompts, 1);
-        assert_eq!(reloaded.extra_prompt_files, vec!["AGENTS.local.md".to_string()]);
+        assert_eq!(
+            reloaded.extra_prompt_files,
+            vec!["AGENTS.local.md".to_string()]
+        );
     });
 }
 

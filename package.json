@@ -8,6 +8,8 @@
     "build": "pnpm --dir src-react build",
     "typecheck": "pnpm --dir src-react typecheck",
     "rust:test": "node scripts/with-sqlite.mjs cargo test -p nexus-core",
+    "rust:fmt": "node scripts/with-sqlite.mjs cargo fmt --all -- --check",
+    "rust:lint": "node scripts/with-sqlite.mjs cargo clippy --workspace --all-targets -- -D warnings",
     "sqlite:setup": "node scripts/with-sqlite.mjs --setup-only",
     "tauri": "node scripts/with-sqlite.mjs tauri"
   },

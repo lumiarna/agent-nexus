@@ -122,7 +122,7 @@ fn snapshot_from_auth_error(error: ClaudeAuthError) -> ProviderQuotaSnapshot {
         ClaudeAuthError::NoCreds => status(ProviderQuotaStatus::NoCreds, "not found"),
         ClaudeAuthError::Terminal(_) => status(ProviderQuotaStatus::Failed, &message),
         ClaudeAuthError::MissingScope { credentials } => {
-            let ClaudeCodeCredentials { plan, source, .. } = credentials;
+            let ClaudeCodeCredentials { plan, source, .. } = *credentials;
             ProviderQuotaSnapshot {
                 provider_id: PROVIDER_ID.to_string(),
                 status: ProviderQuotaStatus::Failed,
@@ -134,10 +134,10 @@ fn snapshot_from_auth_error(error: ClaudeAuthError) -> ProviderQuotaSnapshot {
             }
         }
         ClaudeAuthError::RefreshFailed { credentials, error } => {
-            derive_snapshot(credentials, Err(error))
+            derive_snapshot(*credentials, Err(error))
         }
         ClaudeAuthError::RefreshRejected { credentials } => {
-            derive_snapshot(credentials, Err(ProviderQuotaPollError::AuthRequired))
+            derive_snapshot(*credentials, Err(ProviderQuotaPollError::AuthRequired))
         }
     }
 }

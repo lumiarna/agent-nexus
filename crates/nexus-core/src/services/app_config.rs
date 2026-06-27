@@ -190,13 +190,12 @@ impl AppConfigService {
             return Ok(ProviderDisplayPreferences::default());
         }
 
-        let preferences = serde_json::from_str::<ProviderDisplayPreferences>(&raw).map_err(
-            |error| {
+        let preferences =
+            serde_json::from_str::<ProviderDisplayPreferences>(&raw).map_err(|error| {
                 AppError::Validation(format!(
                     "invalid provider display preferences setting: {error}"
                 ))
-            },
-        )?;
+            })?;
         Ok(ProviderDisplayPreferences {
             card_visibility: normalize_provider_order(preferences.card_visibility)?,
         })
@@ -219,9 +218,12 @@ impl AppConfigService {
             return Ok(AgentDisplayPreferences::default());
         }
 
-        let preferences = serde_json::from_str::<AgentDisplayPreferences>(&raw).map_err(|error| {
-            AppError::Validation(format!("invalid agent display preferences setting: {error}"))
-        })?;
+        let preferences =
+            serde_json::from_str::<AgentDisplayPreferences>(&raw).map_err(|error| {
+                AppError::Validation(format!(
+                    "invalid agent display preferences setting: {error}"
+                ))
+            })?;
         Ok(AgentDisplayPreferences {
             disabled: normalize_agent_names(preferences.disabled)?,
         })

@@ -103,7 +103,10 @@ impl MatrixSource for PromptMatrixSource<'_> {
 
     fn target_path_for(&self, agent: &AgentCapabilitySurface) -> AppResult<Option<PathBuf>> {
         let source_agent = agent_by_name(self.source.source_agent).ok_or_else(|| {
-            AppError::Validation(format!("unknown source agent: {}", self.source.source_agent))
+            AppError::Validation(format!(
+                "unknown source agent: {}",
+                self.source.source_agent
+            ))
         })?;
         prompt_target_path(
             &self.source.scope,
@@ -619,9 +622,7 @@ fn prompt_target_path(
             let file_name = rel
                 .file_name()
                 .and_then(|name| name.to_str())
-                .ok_or_else(|| {
-                    AppError::Validation("prompt file has no file name".to_string())
-                })?;
+                .ok_or_else(|| AppError::Validation("prompt file has no file name".to_string()))?;
             let suffix = file_name
                 .strip_prefix(source_stem)
                 .and_then(|rest| rest.strip_suffix(".md"))

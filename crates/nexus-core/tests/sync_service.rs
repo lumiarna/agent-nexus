@@ -1017,7 +1017,11 @@ fn group_schedule_bulk_applies_to_copy_tasks_and_re_overrides_per_task_schedule(
         .expect("apply group schedule");
     let groups = sync.list_task_groups().expect("list task groups");
     for task in &groups[0].tasks {
-        let expected = if task.action == "Copy" { "0 * * * *" } else { "manual" };
+        let expected = if task.action == "Copy" {
+            "0 * * * *"
+        } else {
+            "manual"
+        };
         assert_eq!(task.schedule, expected);
     }
 
@@ -1039,7 +1043,11 @@ fn group_schedule_bulk_applies_to_copy_tasks_and_re_overrides_per_task_schedule(
         .expect("re-apply group schedule");
     let groups = sync.list_task_groups().expect("list task groups");
     for task in &groups[0].tasks {
-        let expected = if task.action == "Copy" { "0 5 * * *" } else { "manual" };
+        let expected = if task.action == "Copy" {
+            "0 5 * * *"
+        } else {
+            "manual"
+        };
         assert_eq!(task.schedule, expected);
     }
 }

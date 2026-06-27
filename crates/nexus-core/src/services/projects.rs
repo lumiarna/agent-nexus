@@ -240,7 +240,11 @@ impl ProjectService {
 
         let agent_dirs: HashSet<String> = agent_capability_surfaces()
             .iter()
-            .filter_map(|agent| agent.skill.map(|skill| normalize_custom_dir(skill.project_dir)))
+            .filter_map(|agent| {
+                agent
+                    .skill
+                    .map(|skill| normalize_custom_dir(skill.project_dir))
+            })
             .collect();
 
         let mut seen = HashSet::new();
@@ -360,11 +364,7 @@ impl ProjectService {
 
     /// Override the Project Session Directory. An empty input restores the default
     /// `__sessions` template. Session Directory stays single-valued by design.
-    pub fn set_project_sessions_dir(
-        &self,
-        project_id: String,
-        dir: String,
-    ) -> AppResult<Project> {
+    pub fn set_project_sessions_dir(&self, project_id: String, dir: String) -> AppResult<Project> {
         let id = project_id.trim();
         if id.is_empty() {
             return Err(AppError::Validation("project id is required".to_string()));
@@ -678,7 +678,9 @@ fn matches_prompt_glob(file: &str) -> bool {
     if !base.ends_with(".md") {
         return false;
     }
-    prompt_file_stems().iter().any(|stem| base.starts_with(stem))
+    prompt_file_stems()
+        .iter()
+        .any(|stem| base.starts_with(stem))
 }
 
 /// Prompt-file stems derived from each Agent's primary project prompt file

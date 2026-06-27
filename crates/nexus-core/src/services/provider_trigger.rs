@@ -1044,7 +1044,7 @@ fn claude_rate_limit_rejection_message(headers: &reqwest::header::HeaderMap) -> 
 
 fn unix_seconds_to_local_label(epoch_seconds: i64) -> Option<String> {
     let datetime = OffsetDateTime::from_unix_timestamp(epoch_seconds).ok()?;
-    Some(datetime.format(&Rfc3339).ok()?)
+    datetime.format(&Rfc3339).ok()
 }
 
 fn provider_trigger_log_context(
@@ -1235,7 +1235,7 @@ mod tests {
 
     #[test]
     fn claude_trigger_model_rank_prefers_haiku_for_window_alignment() {
-        let mut models = vec![
+        let mut models = [
             "claude-sonnet-4-6",
             "claude-opus-4-8",
             "claude-haiku-4-5-20251001",

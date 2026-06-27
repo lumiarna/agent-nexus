@@ -122,7 +122,9 @@ fn rejects_extra_prompt_file_that_collides_with_a_primary_prompt() {
         .set_project_extra_prompt_files(recorded.id, vec!["CLAUDE.md".to_string()])
         .expect_err("primary prompt file must be rejected");
     assert!(
-        error.to_string().contains("auto-discovered primary prompt file"),
+        error
+            .to_string()
+            .contains("auto-discovered primary prompt file"),
         "unexpected error: {error}"
     );
 }

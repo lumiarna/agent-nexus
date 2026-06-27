@@ -81,5 +81,7 @@ pub fn set_provider_display_preferences(
     state: State<'_, AppState>,
     preferences: ProviderDisplayPreferences,
 ) -> AppResult<ProviderDisplayPreferences> {
-    state.app_config.set_provider_display_preferences(&preferences)
+    state
+        .app_config
+        .set_provider_display_preferences(&preferences)
 }

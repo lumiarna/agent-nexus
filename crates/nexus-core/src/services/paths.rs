@@ -180,14 +180,15 @@ mod tests {
         let previous_appdata = env::var_os("APPDATA");
         env::remove_var("APPDATA");
 
-        let error =
-            resolve_local_path("%APPDATA%/Zed/settings.json").expect_err("missing APPDATA");
+        let error = resolve_local_path("%APPDATA%/Zed/settings.json").expect_err("missing APPDATA");
 
         match previous_appdata {
             Some(value) => env::set_var("APPDATA", value),
             None => env::remove_var("APPDATA"),
         }
-        assert!(error.to_string().contains("APPDATA environment variable is not set"));
+        assert!(error
+            .to_string()
+            .contains("APPDATA environment variable is not set"));
     }
 
     #[cfg(windows)]
