@@ -617,7 +617,7 @@ export function SyncPage() {
   const sessionBackupsQuery = useSessionBackupsQuery();
   const deleteProjectSymlinkMutation = useDeleteProjectSymlinkMutation();
   const templates = TASK_TEMPLATES;
-  const [openSec, setOpenSec] = useState({ skill: false, prompt: false, backup: false });
+  const [openSec, setOpenSec] = useState({ backup: false });
   // Task Groups are expanded by default (primary work area); a group is collapsed only when its
   // id is explicitly set to false here.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -944,28 +944,6 @@ export function SyncPage() {
   }
 
   const sessionBackupGroup = sessionBackupsToTaskGroup(sessionBackupsQuery.data ?? []);
-  const sysSections: {
-    key: keyof typeof openSec;
-    title: string;
-    managedBy: string;
-    count: string;
-    empty: string;
-  }[] = [
-    {
-      key: "skill",
-      title: "Skill Distribution",
-      managedBy: "Managed by Skill",
-      count: "0 records",
-      empty: "No Skill Distribution records generated yet.",
-    },
-    {
-      key: "prompt",
-      title: "Prompt Distribution",
-      managedBy: "Managed by Prompt",
-      count: "0 records",
-      empty: "No Prompt Distribution records generated yet.",
-    },
-  ];
 
   return (
     <>
@@ -1146,41 +1124,11 @@ export function SyncPage() {
             System-managed records
           </h2>
           <span className="text-[11px] text-[#c3b9a8]">
-            Default behaviors · generated from Skill / Prompt / Session — collapsed by default
+            Default behaviors · generated from Session — collapsed by default
           </span>
         </div>
 
         <div className="mt-3 flex flex-col gap-2.5">
-          {sysSections.map((sec) => {
-            const open = openSec[sec.key];
-            return (
-              <div key={sec.key} className="overflow-hidden rounded-[14px] border border-nexus-border bg-nexus-sand2">
-                <div
-                  onClick={() => setOpenSec((s) => ({ ...s, [sec.key]: !s[sec.key] }))}
-                  className="flex cursor-pointer items-center gap-[11px] px-[18px] py-[13px] hover:bg-[#f4ede1]"
-                >
-                  <span
-                    className="inline-block text-[10px] text-[#a99a89] transition-transform"
-                    style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
-                  >
-                    ▸
-                  </span>
-                  <span className="text-[13.5px] font-bold text-[#6a6055]">{sec.title}</span>
-                  <span className="rounded-[6px] bg-[rgba(157,122,100,.12)] px-2 py-0.5 text-[10px] font-bold text-nexus-accent">
-                    {sec.managedBy}
-                  </span>
-                  <span className="ml-auto text-[11.5px] text-[#b3a999]">{sec.count}</span>
-                </div>
-	                {open ? (
-	                  <div className="border-t border-nexus-border bg-nexus-card">
-	                    <div className="px-[18px] py-5 text-[12px] text-[#b3a999]">
-	                      {sec.empty}
-	                    </div>
-	                  </div>
-	                ) : null}
-              </div>
-            );
-          })}
           <div className="overflow-hidden rounded-[14px] border border-nexus-border bg-nexus-sand2">
             <div
               onClick={() => setOpenSec((state) => ({ ...state, backup: !state.backup }))}
