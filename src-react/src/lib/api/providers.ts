@@ -48,6 +48,9 @@ export interface ProviderScheduleSettings {
   windowAlignCron: string;
   /** Model the alignment request uses; null/"" means off. */
   windowAlignModelId: string | null;
+  windowAlignLastAttemptAt?: number | null;
+  windowAlignLastStatus?: "never" | "success" | "retryable_failed" | "terminal_failed";
+  windowAlignLastError?: string | null;
 }
 
 export interface ProviderTriggerModel {
@@ -125,6 +128,15 @@ export const providersApi = {
   listProviderTriggerModels(providerId: string): Promise<ProviderTriggerCapability> {
     return invokeCommand<ProviderTriggerCapability>("list_provider_trigger_models", {
       providerId,
+    });
+  },
+  runProviderWindowAlignment(
+    providerId: string,
+    modelId: string,
+  ): Promise<ProviderScheduleSettings> {
+    return invokeCommand<ProviderScheduleSettings>("run_provider_window_alignment", {
+      providerId,
+      modelId,
     });
   },
 };

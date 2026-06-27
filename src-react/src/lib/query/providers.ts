@@ -126,3 +126,15 @@ export function useSetProviderScheduleSettingsMutation() {
     },
   });
 }
+
+export function useRunProviderWindowAlignmentMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ providerId, modelId }: { providerId: string; modelId: string }) =>
+      providersApi.runProviderWindowAlignment(providerId, modelId),
+    onSuccess: (settings, { providerId }) => {
+      queryClient.setQueryData(providerKeys.scheduleSettings(providerId), settings);
+    },
+  });
+}

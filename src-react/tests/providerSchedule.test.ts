@@ -8,6 +8,8 @@ import {
   isWindowAlignActive,
   quotaRefreshIntervalMs,
   windowAlignCronHuman,
+  windowAlignLastAttemptLabel,
+  windowAlignStatusLabel,
 } from "../src/components/provider/providerSchedule.js";
 
 test("quota refresh defaults to five minutes with interval presets", () => {
@@ -52,4 +54,13 @@ test("window alignment requires both a cron and a model to be active", () => {
   assert.equal(isWindowAlignActive("", "claude-haiku-4-5-20251001"), false);
   assert.equal(isWindowAlignActive("0 9 * * *", ""), false);
   assert.equal(isWindowAlignActive("0 9 * * *", null), false);
+});
+
+test("window alignment last run labels show empty and known statuses", () => {
+  assert.equal(windowAlignLastAttemptLabel(null), "Never triggered");
+  assert.match(windowAlignLastAttemptLabel(1_787_936_400), /\d{2}/);
+  assert.equal(windowAlignStatusLabel("success"), "Success");
+  assert.equal(windowAlignStatusLabel("retryable_failed"), "Temporary failure");
+  assert.equal(windowAlignStatusLabel("terminal_failed"), "Failed");
+  assert.equal(windowAlignStatusLabel("never"), "No result yet");
 });
