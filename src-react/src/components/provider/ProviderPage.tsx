@@ -15,10 +15,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { RefreshCw, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { Button, IconButton } from "@/components/ui/button";
-import { Dot, Input } from "@/components/ui/primitives";
+import { Dot } from "@/components/ui/primitives";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Chip, Segmented } from "@/components/ui/segmented";
-import { Select } from "@/components/ui/select";
 import { Toggle } from "@/components/ui/toggle";
 import { ScreenScroll } from "@/components/shell/screen";
 import {
@@ -28,12 +27,7 @@ import {
 import {
   DEFAULT_QUOTA_REFRESH_MINUTES,
   QUOTA_REFRESH_PRESETS,
-  WINDOW_ALIGN_CRON_PRESETS,
-  isWindowAlignActive,
   quotaRefreshIntervalMs,
-  windowAlignCronHuman,
-  windowAlignLastAttemptLabel,
-  windowAlignStatusLabel,
 } from "@/components/provider/providerSchedule";
 import {
   fallbackAgentCapabilities,
@@ -54,6 +48,7 @@ import { palette, quotaColor, statusInfo, type ProviderUiStatus } from "@/lib/to
 import { cn } from "@/lib/utils";
 import type { Provider, TrayMetric } from "@/types";
 import type { ProviderQuotaSnapshot } from "@/lib/api/providers";
+import { WindowAlignmentSection } from "./WindowAlignmentSection";
 import { connectionFormFor } from "./connection/registry";
 import { getErrorMessage } from "./getErrorMessage";
 import { useProviderDisplayPrefs } from "./useProviderDisplayPrefs";
@@ -634,113 +629,20 @@ export function ProviderPage() {
                 </div>
               </div>
 
-              <div>
-                <div className="mb-1 text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
-                  Window alignment
-                </div>
-                <div className="mb-3 text-[11px] leading-[1.5] text-[#a99a89]">
-                  Fire a minimal request at set times so the rolling quota window resets on
-                  your schedule. Set both a time and a model to turn it on — this makes a
-                  real, billable call.
-                </div>
-                {!triggerSupported ? (
-                  <div className="rounded-[12px] border border-nexus-border bg-nexus-bg px-[14px] py-[13px] text-[12px] leading-[1.5] text-[#8a7a68]">
-                    Coming soon for {cfg.name} — window alignment is not implemented for this
-                    provider yet.
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-[13px]">
-                    <div>
-                      <Input
-                        className="font-mono"
-                        placeholder="0 5,10,15,20 * * *"
-                        value={windowAlignCron}
-                        onChange={(e) => setWindowAlignCron(e.target.value)}
-                      />
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {WINDOW_ALIGN_CRON_PRESETS.map((preset) => (
-                          <Chip
-                            key={preset.expr}
-                            mono
-                            active={windowAlignCron === preset.expr}
-                            onClick={() => setWindowAlignCron(preset.expr)}
-                          >
-                            {preset.expr}
-                          </Chip>
-                        ))}
-                      </div>
-                      <div className="mt-2.5 text-[11px] text-[#b3a999]">
-                        {windowAlignCronHuman(windowAlignCron)}
-                      </div>
-                    </div>
-                    <div className="block">
-                      <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">
-                        Trigger model
-                      </div>
-                      <Select
-                        value={windowAlignModelId ?? ""}
-                        onChange={(value) => setWindowAlignModelId(value || null)}
-                        options={modelOptions.map((model) => ({
-                          value: model.id,
-                          label:
-                            model.displayName === model.id
-                              ? model.id
-                              : `${model.displayName} · ${model.id}`,
-                        }))}
-                        placeholder={
-                          triggerModelsQuery.isFetching ? "Loading models…" : "Select a model"
-                        }
-                        disabled={triggerModelsQuery.isFetching}
-                      />
-                      <div className="mt-[5px] text-[11px] text-[#b3a999]">
-                        {isWindowAlignActive(windowAlignCron, windowAlignModelId)
-                          ? "Active — alignment fires on the schedule above."
-                          : "Inactive — set both a time and a model to enable."}
-                      </div>
-                    </div>
-                    <div className="rounded-[12px] border border-nexus-border bg-nexus-bg px-[14px] py-[13px]">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-[12px] font-semibold text-[#6a6055]">
-                            Manual trigger
-                          </div>
-                          <div className="mt-[5px] text-[11px] text-[#b3a999]">
-                            Last:{" "}
-                            <span className="font-medium text-[#7a6f60]">
-                              {windowAlignLastAttemptLabel(
-                                openSchedule?.windowAlignLastAttemptAt,
-                              )}
-                            </span>{" "}
-                            ·{" "}
-                            <span className="font-medium text-[#7a6f60]">
-                              {windowAlignStatusLabel(openSchedule?.windowAlignLastStatus)}
-                            </span>
-                          </div>
-                          {openSchedule?.windowAlignLastError ? (
-                            <div className="mt-[5px] overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-[#b75548]">
-                              {openSchedule.windowAlignLastError}
-                            </div>
-                          ) : null}
-                        </div>
-                        <Button
-                          variant="subtle"
-                          size="sm"
-                          className="flex-none px-3"
-                          disabled={
-                            windowAlignTriggering ||
-                            !!quotaQueries[cfg.id]?.isFetching ||
-                            triggerModelsQuery.isFetching ||
-                            !windowAlignModelId?.trim()
-                          }
-                          onClick={() => void triggerWindowAlignmentNow(cfg.id, windowAlignModelId)}
-                        >
-                          {windowAlignTriggering ? "Triggering..." : "Trigger now"}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <WindowAlignmentSection
+                providerName={cfg.name}
+                supported={triggerSupported}
+                cron={windowAlignCron}
+                onCronChange={setWindowAlignCron}
+                modelId={windowAlignModelId}
+                onModelChange={setWindowAlignModelId}
+                modelOptions={modelOptions}
+                modelsLoading={triggerModelsQuery.isFetching}
+                schedule={openSchedule}
+                triggering={windowAlignTriggering}
+                quotaFetching={!!quotaQueries[cfg.id]?.isFetching}
+                onTriggerNow={() => void triggerWindowAlignmentNow(cfg.id, windowAlignModelId)}
+              />
             </div>
             <ModalFooter>
               <Button variant="subtle" onClick={() => setConfigId(null)}>
