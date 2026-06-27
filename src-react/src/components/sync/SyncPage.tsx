@@ -413,7 +413,7 @@ function TaskTable({
       >
         <div>Direction</div>
         <div className="col-span-6">Source</div>
-        <div className="col-start-8">Action</div>
+        <div className="col-start-8 text-center">Action</div>
         <div className="col-span-6">Target</div>
         <div className="col-span-2 text-right">Manage</div>
       </div>
@@ -497,7 +497,7 @@ function TaskGroupRow({
           {task.source}
         </span>
       </div>
-      <div className="col-start-8 flex items-center" title={task.action}>
+      <div className="col-start-8 flex items-center justify-center" title={task.action}>
         <ActionBadge action={task.action} />
       </div>
       <div className="col-span-6 flex min-w-0 items-center gap-1.5">
@@ -981,7 +981,7 @@ export function SyncPage() {
           >
             <div className="col-span-2">Source Project</div>
             <div className="col-span-5">Source Path</div>
-            <div className="col-start-8">Action</div>
+            <div className="col-start-8 text-center">Action</div>
             <div className="col-span-2">Target Project</div>
             <div className="col-span-5">Target Path</div>
             <div className="text-right">Manage</div>
@@ -1020,7 +1020,7 @@ export function SyncPage() {
                     </span>
                     <CopyPathButton path={link.sourcePath} />
                   </div>
-                  <div className="col-start-8" title={link.linkType}>
+                  <div className="col-start-8 flex items-center justify-center" title={link.linkType}>
                     <ActionBadge action={link.linkType} />
                   </div>
                   <div className="col-span-2 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px] font-bold text-nexus-body">

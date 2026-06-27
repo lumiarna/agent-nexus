@@ -92,13 +92,16 @@ function SortableProjectRow({ id, onClick, stale, children }: SortableProjectRow
   );
 }
 
-/** A list asset cell: a count chip with up to two lines of small detail beside
- *  it, then `+N` when the detail overflows. */
+/** A list asset cell. The count chip sits in a centered `auto` track flanked by
+ *  two equal `1fr` spacers, so chips line up vertically across rows (and stay
+ *  centered in the column) no matter how much detail follows. Up to two lines of
+ *  small detail flow into the right spacer, then `+N` when the detail overflows. */
 function AssetCell({ n, lines }: { n: number; lines: string[] }) {
   const shown = lines.slice(0, 2);
   const extra = lines.length - shown.length;
   return (
-    <div className="flex min-w-0 items-center gap-2">
+    <div className="grid items-center gap-2" style={{ gridTemplateColumns: "1fr auto 1fr" }}>
+      <div />
       <span className="flex-none rounded-[7px] bg-nexus-bg px-[9px] py-[5px] text-[12px] font-extrabold text-nexus-body">
         {n}
       </span>
@@ -114,7 +117,9 @@ function AssetCell({ n, lines }: { n: number; lines: string[] }) {
           ))}
           {extra > 0 ? <span className="text-[10px] text-[#c3b9a8]">+{extra}</span> : null}
         </div>
-      ) : null}
+      ) : (
+        <div />
+      )}
     </div>
   );
 }
@@ -230,9 +235,9 @@ export function ProjectListView({
         >
           <div />
           <div>Project</div>
-          <div>Skill</div>
-          <div>Prompt</div>
-          <div>Session</div>
+          <div className="text-center">Skill</div>
+          <div className="text-center">Prompt</div>
+          <div className="text-center">Session</div>
           <div />
         </div>
 
