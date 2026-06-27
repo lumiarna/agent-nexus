@@ -759,8 +759,14 @@ impl ClaudeCodeQuotaAdapter {
 
         let mut access_token = credentials.access_token.clone();
         if is_token_expiring_soon(credentials.expires_at) {
-            if let Some(refreshed) = refresh_and_persist(&credentials, usage_transport).await {
-                access_token = refreshed.access_token.clone();
+            match refresh_and_persist_result(&credentials, usage_transport).await {
+                Ok(Some(refreshed)) => {
+                    access_token = refreshed.access_token.clone();
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return derive_claude_code_snapshot(credentials, Err(error));
+                }
             }
         }
 
@@ -2198,14 +2204,22 @@ async fn refresh_and_persist(
     credentials: &ClaudeCodeCredentials,
     usage_transport: &dyn ProviderUsageTransport,
 ) -> Option<ClaudeOAuthRefreshResponse> {
-    let refresh_token = credentials.refresh_token.as_deref()?;
-    match usage_transport.claude_code_refresh(refresh_token).await {
-        Ok(refreshed) => {
-            persist_refreshed_credentials(credentials, &refreshed);
-            Some(refreshed)
-        }
-        Err(_) => None,
-    }
+    refresh_and_persist_result(credentials, usage_transport)
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn refresh_and_persist_result(
+    credentials: &ClaudeCodeCredentials,
+    usage_transport: &dyn ProviderUsageTransport,
+) -> Result<Option<ClaudeOAuthRefreshResponse>, ProviderQuotaPollError> {
+    let Some(refresh_token) = credentials.refresh_token.as_deref() else {
+        return Ok(None);
+    };
+    let refreshed = usage_transport.claude_code_refresh(refresh_token).await?;
+    persist_refreshed_credentials(credentials, &refreshed);
+    Ok(Some(refreshed))
 }
 
 fn persist_refreshed_credentials(
@@ -2949,4 +2963,158 @@ pub(crate) enum ProviderQuotaPollError {
     AuthRequired,
     #[error("{0}")]
     Request(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    use super::*;
+
+    struct StaticCredentialSource {
+        claude_credentials: Option<ClaudeCodeCredentials>,
+    }
+
+    impl ProviderCredentialSource for StaticCredentialSource {
+        fn claude_code_credentials(
+            &self,
+            _app_config: &AppConfigService,
+        ) -> AppResult<Option<ClaudeCodeCredentials>> {
+            Ok(self.claude_credentials.clone())
+        }
+
+        fn codex_credentials(
+            &self,
+            _app_config: &AppConfigService,
+        ) -> AppResult<Option<CodexCredentials>> {
+            Ok(None)
+        }
+
+        fn copilot_token(&self, _app_config: &AppConfigService) -> AppResult<Option<String>> {
+            Ok(None)
+        }
+
+        fn opencode_go_credentials(
+            &self,
+            _app_config: &AppConfigService,
+        ) -> AppResult<Option<OpenCodeGoCredentials>> {
+            Ok(None)
+        }
+
+        fn configured_provider_credentials(
+            &self,
+            _app_config: &AppConfigService,
+            _config: &'static ConfiguredProviderQuotaConfig,
+        ) -> AppResult<Option<ConfiguredProviderCredentials>> {
+            Ok(None)
+        }
+
+        fn opencode_custom_providers(&self) -> AppResult<Vec<OpenCodeCustomProviderCredentials>> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct FailingClaudeRefreshTransport {
+        usage_calls: Arc<AtomicUsize>,
+    }
+
+    impl ProviderUsageTransport for FailingClaudeRefreshTransport {
+        fn claude_code_usage<'a>(&'a self, _access_token: &'a str) -> ClaudeCodeUsageFuture<'a> {
+            self.usage_calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                Err(ProviderQuotaPollError::Request(
+                    "usage should not be called".to_string(),
+                ))
+            })
+        }
+
+        fn claude_code_refresh<'a>(
+            &'a self,
+            _refresh_token: &'a str,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<ClaudeOAuthRefreshResponse, ProviderQuotaPollError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async { Err(ProviderQuotaPollError::AuthRequired) })
+        }
+
+        fn codex_usage<'a>(
+            &'a self,
+            _access_token: &'a str,
+            _account_id: Option<&'a str>,
+        ) -> CodexUsageFuture<'a> {
+            Box::pin(async { unreachable!("codex usage is not part of this test") })
+        }
+
+        fn copilot_usage<'a>(&'a self, _token: &'a str) -> CopilotUsageFuture<'a> {
+            Box::pin(async { unreachable!("copilot usage is not part of this test") })
+        }
+
+        fn opencode_go_page<'a>(
+            &'a self,
+            _workspace_id: &'a str,
+            _auth_cookie: &'a str,
+        ) -> OpenCodeGoPageFuture<'a> {
+            Box::pin(async { unreachable!("opencode go usage is not part of this test") })
+        }
+
+        fn configured_provider_usage<'a>(
+            &'a self,
+            _config: &'static ConfiguredProviderQuotaConfig,
+            _api_key: &'a str,
+        ) -> ConfiguredProviderUsageFuture<'a> {
+            Box::pin(async { unreachable!("configured provider usage is not part of this test") })
+        }
+
+        fn opencode_custom_provider_usage<'a>(
+            &'a self,
+            _credentials: &'a OpenCodeCustomProviderCredentials,
+        ) -> OpenCodeCustomProviderUsageFuture<'a> {
+            Box::pin(async { unreachable!("custom provider usage is not part of this test") })
+        }
+    }
+
+    #[tokio::test]
+    async fn claude_quota_stops_before_usage_when_expiring_token_refresh_fails() {
+        let db = Arc::new(crate::database::Database::open_in_memory().expect("open test db"));
+        let app_config = AppConfigService::new(db);
+        let usage_calls = Arc::new(AtomicUsize::new(0));
+        let credentials = ClaudeCodeCredentials {
+            access_token: "old-access-token".to_string(),
+            refresh_token: Some("rejected-refresh-token".to_string()),
+            expires_at: Some(0),
+            scopes: vec!["user:profile".to_string()],
+            plan: Some("Claude".to_string()),
+            source: "test credentials".to_string(),
+            credentials_path: None,
+            keychain_account: None,
+            raw: serde_json::json!({
+                "claudeAiOauth": {
+                    "accessToken": "old-access-token",
+                    "refreshToken": "rejected-refresh-token",
+                    "expiresAt": 0
+                }
+            }),
+        };
+        let credential_source = StaticCredentialSource {
+            claude_credentials: Some(credentials),
+        };
+        let usage_transport = FailingClaudeRefreshTransport {
+            usage_calls: usage_calls.clone(),
+        };
+
+        let snapshot = ClaudeCodeQuotaAdapter
+            .quota_snapshot(&app_config, &credential_source, &usage_transport)
+            .await;
+
+        assert_eq!(snapshot.status, ProviderQuotaStatus::Expired);
+        assert_eq!(snapshot.credential.as_deref(), Some("test credentials"));
+        assert_eq!(usage_calls.load(Ordering::SeqCst), 0);
+    }
 }
