@@ -1,11 +1,9 @@
 use std::{
-    collections::HashMap,
     fs,
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
-    time::UNIX_EPOCH,
 };
 
 use rusqlite::{params, OptionalExtension, Row};
@@ -28,10 +26,11 @@ use crate::{
 };
 
 use super::{
-    normalize_webdav_settings, read_webdav_settings, render_project_template, CreateTaskGroupInput,
-    CreateTaskInput, SessionBackup, Task, TaskGroup, WebdavSettings, WebdavSettingsInput,
-    SESSION_BACKUP_GROUP_ID, SESSION_BACKUP_SCHEDULE, SESSION_BACKUP_SOURCE_TEMPLATE,
-    SESSION_BACKUP_SYSTEM_KIND, SESSION_BACKUP_TARGET_TEMPLATE,
+    file_state::{FileState, FileStateMap},
+    normalize_webdav_settings, read_webdav_settings,
+    session_backup_reconciler::SessionBackupReconciler,
+    CreateTaskGroupInput, CreateTaskInput, SessionBackup, Task, TaskGroup, WebdavSettings,
+    WebdavSettingsInput, SESSION_BACKUP_GROUP_ID,
 };
 
 #[derive(Clone)]
@@ -57,8 +56,6 @@ enum TaskRunStatus {
 }
 
 type TransferFuture<'a> = Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>>;
-
-type FileStateMap = HashMap<String, (u64, i64)>;
 
 trait Transfer: Send + Sync {
     fn push_local_to_cloud<'a>(
@@ -151,7 +148,9 @@ impl TaskLifecycle {
     }
 
     pub(super) fn list_session_backups(&self) -> AppResult<Vec<SessionBackup>> {
-        self.reconcile_session_backups()?;
+        let reconciler = SessionBackupReconciler::new(self.db.as_ref());
+        reconciler.reconcile()?;
+
         let conn = self.db.connection()?;
         let mut stmt = conn.prepare(
             r#"
@@ -193,85 +192,6 @@ impl TaskLifecycle {
         })?;
 
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    fn reconcile_session_backups(&self) -> AppResult<()> {
-        let now = now_epoch_seconds()?;
-        let mut conn = self.db.connection()?;
-        let tx = conn.transaction()?;
-        tx.execute(
-            r#"
-            INSERT INTO task_groups (id, name, system_kind, created_at, updated_at)
-            VALUES (?1, 'Session Backup', ?2, ?3, ?3)
-            ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                system_kind = excluded.system_kind,
-                updated_at = excluded.updated_at
-            "#,
-            params![SESSION_BACKUP_GROUP_ID, SESSION_BACKUP_SYSTEM_KIND, now],
-        )?;
-
-        let projects = {
-            let mut stmt = tx.prepare("SELECT id, path, key FROM projects")?;
-            let rows = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-
-        for (project_id, project_dir, project_key) in projects {
-            let project_dir = project_dir.trim_end_matches('/');
-            let source =
-                render_project_template(SESSION_BACKUP_SOURCE_TEMPLATE, project_dir, &project_key)?;
-            let target =
-                render_project_template(SESSION_BACKUP_TARGET_TEMPLATE, project_dir, &project_key)?;
-            tx.execute(
-                r#"
-                INSERT INTO tasks (
-                    id, group_id, direction, action, source_type, source, target_type, target,
-                    schedule, sort_index, last_status, project_id, created_at, updated_at
-                )
-                VALUES (?1, ?2, 'Push', 'Copy', 'Local', ?3, 'Cloud', ?4,
-                        ?5, 0, 'never', ?6, ?7, ?7)
-                ON CONFLICT(id) DO UPDATE SET
-                    group_id = excluded.group_id,
-                    direction = excluded.direction,
-                    action = excluded.action,
-                    source_type = excluded.source_type,
-                    source = excluded.source,
-                    target_type = excluded.target_type,
-                    target = excluded.target,
-                    project_id = excluded.project_id,
-                    updated_at = excluded.updated_at
-                "#,
-                params![
-                    format!("session-backup:{project_id}"),
-                    SESSION_BACKUP_GROUP_ID,
-                    source,
-                    target,
-                    SESSION_BACKUP_SCHEDULE,
-                    project_id,
-                    now,
-                ],
-            )?;
-        }
-
-        tx.execute(
-            r#"
-            DELETE FROM tasks
-            WHERE group_id = ?1
-              AND (project_id IS NULL OR NOT EXISTS (
-                  SELECT 1 FROM projects WHERE projects.id = tasks.project_id
-              ))
-            "#,
-            [SESSION_BACKUP_GROUP_ID],
-        )?;
-        tx.commit()?;
-        Ok(())
     }
 
     pub(super) fn create_task_group(&self, input: CreateTaskGroupInput) -> AppResult<TaskGroup> {
@@ -472,7 +392,11 @@ impl TaskLifecycle {
     /// Bulk-apply one schedule to every Copy task in the group. This is the "group schedule":
     /// re-applying it overrides any per-task schedules (last write wins). Non-Copy tasks own no
     /// schedule and are left untouched.
-    pub(super) fn update_group_schedule(&self, group_id: String, schedule: String) -> AppResult<()> {
+    pub(super) fn update_group_schedule(
+        &self,
+        group_id: String,
+        schedule: String,
+    ) -> AppResult<()> {
         let group_id = required_trimmed(&group_id, "task group id")?.to_string();
         let schedule = normalize_task_schedule(&schedule, "Copy")?;
         let now = now_epoch_seconds()?;
@@ -523,7 +447,9 @@ impl TaskLifecycle {
         &self,
         now_epoch_seconds: i64,
     ) -> AppResult<Vec<Task>> {
-        self.reconcile_session_backups()?;
+        let reconciler = SessionBackupReconciler::new(self.db.as_ref());
+        reconciler.reconcile()?;
+
         let minute_start = now_epoch_seconds - now_epoch_seconds.rem_euclid(60);
         let scheduled_tasks = {
             let conn = self.db.connection()?;
@@ -572,54 +498,39 @@ impl TaskLifecycle {
                 let settings = self.valid_webdav_settings()?;
                 let file_states = {
                     let conn = self.db.connection()?;
-                    load_file_state(&conn, &task.id)?
+                    FileState::load(&conn, &task.id)?
                 };
                 self.transfer
                     .push_local_to_cloud(task, &settings, &file_states)
                     .await?;
                 let source = resolve_local_path(&task.source)?;
-                if source.is_dir() {
-                    let conn = self.db.connection()?;
-                    refresh_file_state(&conn, &task.id, &source)?;
-                } else if source.is_file() {
-                    let conn = self.db.connection()?;
-                    save_single_file_state(&conn, &task.id, &source)?;
-                }
+                let conn = self.db.connection()?;
+                FileState::record(&conn, &task.id, &source)?;
                 Ok(TaskRunStatus::Ok)
             }
             ("Cloud", "Local") => {
                 let settings = self.valid_webdav_settings()?;
                 let file_states = {
                     let conn = self.db.connection()?;
-                    load_file_state(&conn, &task.id)?
+                    FileState::load(&conn, &task.id)?
                 };
                 self.transfer
                     .pull_cloud_to_local(task, &settings, &file_states)
                     .await?;
                 let source = resolve_local_path(&task.target)?;
-                if source.is_dir() {
-                    let conn = self.db.connection()?;
-                    refresh_file_state(&conn, &task.id, &source)?;
-                } else if source.is_file() {
-                    let conn = self.db.connection()?;
-                    save_single_file_state(&conn, &task.id, &source)?;
-                }
+                let conn = self.db.connection()?;
+                FileState::record(&conn, &task.id, &source)?;
                 Ok(TaskRunStatus::Ok)
             }
             ("Local", "Local") => {
                 let file_states = {
                     let conn = self.db.connection()?;
-                    load_file_state(&conn, &task.id)?
+                    FileState::load(&conn, &task.id)?
                 };
                 copy_local_to_local(task, &file_states)?;
                 let source = resolve_local_path(&task.source)?;
-                if source.is_dir() {
-                    let conn = self.db.connection()?;
-                    refresh_file_state(&conn, &task.id, &source)?;
-                } else if source.is_file() {
-                    let conn = self.db.connection()?;
-                    save_single_file_state(&conn, &task.id, &source)?;
-                }
+                let conn = self.db.connection()?;
+                FileState::record(&conn, &task.id, &source)?;
                 Ok(TaskRunStatus::Ok)
             }
             _ => Err(AppError::Validation(
@@ -842,13 +753,8 @@ async fn push_local_file_to_cloud(
     }
 
     let rel_path = required_file_name(source)?;
-    if let Some(&(stored_size, stored_mtime)) = file_states.get(&rel_path) {
-        let metadata = fs::metadata(source)?;
-        let current_size = metadata.len();
-        let current_mtime = file_mtime_epoch(source)?;
-        if stored_size == current_size && stored_mtime == current_mtime {
-            return Ok(());
-        }
+    if FileState::should_skip(source, &rel_path, file_states)? {
+        return Ok(());
     }
 
     let parent_segments = file_segments[..file_segments.len() - 1].to_vec();
@@ -939,13 +845,8 @@ fn collect_local_directory_push(
                 })?
                 .to_string_lossy()
                 .replace('\\', "/");
-            let current_size = metadata.len();
-            let current_mtime = file_mtime_epoch(&path)?;
-
-            if let Some(&(stored_size, stored_mtime)) = file_states.get(&rel_path) {
-                if stored_size == current_size && stored_mtime == current_mtime {
-                    continue;
-                }
+            if FileState::should_skip(&path, &rel_path, file_states)? {
+                continue;
             }
             files.push((path, child_segments));
         }
@@ -968,102 +869,6 @@ fn remote_segments(settings: &WebdavSettings, cloud_path: &str) -> AppResult<Vec
     }
 }
 
-fn file_mtime_epoch(path: &Path) -> AppResult<i64> {
-    let mtime = fs::metadata(path)?.modified().map_err(|e| {
-        AppError::Internal(format!("failed to get mtime for {}: {e}", path.display()))
-    })?;
-    let secs = mtime
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| AppError::Internal(format!("invalid mtime for {}: {e}", path.display())))?;
-    Ok(secs.as_secs() as i64)
-}
-
-fn load_file_state(conn: &rusqlite::Connection, task_id: &str) -> AppResult<FileStateMap> {
-    let mut stmt = conn.prepare(
-        "SELECT rel_path, file_size, file_mtime FROM task_file_state WHERE task_id = ?1",
-    )?;
-    let rows = stmt.query_map([task_id], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            (row.get::<_, u64>(1)?, row.get::<_, i64>(2)?),
-        ))
-    })?;
-    let mut map = HashMap::new();
-    for row in rows {
-        let (key, value) = row?;
-        map.insert(key, value);
-    }
-    Ok(map)
-}
-
-fn refresh_file_state(
-    conn: &rusqlite::Connection,
-    task_id: &str,
-    source_root: &Path,
-) -> AppResult<()> {
-    conn.execute("DELETE FROM task_file_state WHERE task_id = ?1", [task_id])?;
-    if source_root.is_dir() {
-        let now = now_epoch_seconds()?;
-        insert_file_state_recursive(conn, task_id, source_root, source_root, now)?;
-    }
-    Ok(())
-}
-
-fn insert_file_state_recursive(
-    conn: &rusqlite::Connection,
-    task_id: &str,
-    dir: &Path,
-    source_root: &Path,
-    now: i64,
-) -> AppResult<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            insert_file_state_recursive(conn, task_id, &path, source_root, now)?;
-        } else if path.is_file() {
-            let rel_path = path
-                .strip_prefix(source_root)
-                .map_err(|_| {
-                    AppError::Internal("failed to compute relative path for state".to_string())
-                })?
-                .to_string_lossy()
-                .replace('\\', "/");
-            let metadata = fs::metadata(&path)?;
-            let size = metadata.len() as i64;
-            let mtime = file_mtime_epoch(&path)?;
-            conn.execute(
-                "INSERT INTO task_file_state (task_id, rel_path, file_size, file_mtime, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![task_id, rel_path, size, mtime, now],
-            )?;
-        }
-    }
-    Ok(())
-}
-
-fn save_single_file_state(
-    conn: &rusqlite::Connection,
-    task_id: &str,
-    source: &Path,
-) -> AppResult<()> {
-    let rel_path = required_file_name(source)?;
-    let metadata = fs::metadata(source)?;
-    let size = metadata.len() as i64;
-    let mtime = file_mtime_epoch(source)?;
-    let now = now_epoch_seconds()?;
-    conn.execute(
-        "INSERT INTO task_file_state (task_id, rel_path, file_size, file_mtime, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(task_id, rel_path) DO UPDATE SET
-             file_size = excluded.file_size,
-             file_mtime = excluded.file_mtime,
-             updated_at = excluded.updated_at",
-        params![task_id, rel_path, size, mtime, now],
-    )?;
-    Ok(())
-}
-
 fn copy_local_to_local(task: &Task, file_states: &FileStateMap) -> AppResult<()> {
     let source = resolve_local_path(&task.source)?;
     let target = resolve_local_path(&task.target)?;
@@ -1077,7 +882,7 @@ fn copy_local_to_local(task: &Task, file_states: &FileStateMap) -> AppResult<()>
 
     if fs::metadata(&source)?.is_file() {
         let rel_path = required_file_name(&source)?;
-        if !should_skip_file(&source, &rel_path, file_states)? {
+        if !FileState::should_skip(&source, &rel_path, file_states)? {
             copy_local_file(&source, &target)?;
         }
     } else {
@@ -1093,18 +898,6 @@ fn should_skip_missing_session_backup_source(task: &Task) -> AppResult<bool> {
 
     let source = resolve_local_path(&task.source)?;
     Ok(!source.exists())
-}
-
-fn should_skip_file(source: &Path, rel_path: &str, file_states: &FileStateMap) -> AppResult<bool> {
-    if let Some(&(stored_size, stored_mtime)) = file_states.get(rel_path) {
-        let metadata = fs::metadata(source)?;
-        let current_size = metadata.len();
-        let current_mtime = file_mtime_epoch(source)?;
-        if stored_size == current_size && stored_mtime == current_mtime {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 fn copy_local_directory(source: &Path, target: &Path, file_states: &FileStateMap) -> AppResult<()> {
@@ -1147,7 +940,7 @@ fn copy_directory_tree(
                 })?
                 .to_string_lossy()
                 .replace('\\', "/");
-            if !should_skip_file(&path, &rel_path, file_states)? {
+            if !FileState::should_skip(&path, &rel_path, file_states)? {
                 copy_local_file(&path, &dest)?;
             }
         }

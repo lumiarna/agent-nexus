@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+mod file_state;
+mod session_backup_reconciler;
 mod task_lifecycle;
 
 use rusqlite::{params, OptionalExtension};
@@ -182,7 +184,8 @@ impl SyncService {
     }
 
     pub fn update_group_schedule(&self, group_id: String, schedule: String) -> AppResult<()> {
-        self.task_lifecycle.update_group_schedule(group_id, schedule)
+        self.task_lifecycle
+            .update_group_schedule(group_id, schedule)
     }
 }
 
