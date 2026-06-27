@@ -87,6 +87,23 @@ pub fn update_group_schedule(
 }
 
 #[tauri::command]
+pub fn reorder_task_groups(
+    state: State<'_, AppState>,
+    group_ids: Vec<String>,
+) -> AppResult<Vec<TaskGroup>> {
+    state.sync.reorder_task_groups(group_ids)
+}
+
+#[tauri::command]
+pub fn reorder_tasks(
+    state: State<'_, AppState>,
+    group_id: String,
+    task_ids: Vec<String>,
+) -> AppResult<TaskGroup> {
+    state.sync.reorder_tasks(group_id, task_ids)
+}
+
+#[tauri::command]
 pub async fn run_task(state: State<'_, AppState>, id: String) -> AppResult<Task> {
     state.sync.run_task(id).await
 }

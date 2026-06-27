@@ -68,4 +68,10 @@ export const syncApi = {
   runTask(id: string): Promise<TaskGroup["tasks"][number]> {
     return invokeCommand<TaskGroup["tasks"][number]>("run_task", { id });
   },
+  reorderTaskGroups(groupIds: string[]): Promise<TaskGroup[]> {
+    return invokeCommand<TaskGroup[]>("reorder_task_groups", { groupIds });
+  },
+  reorderTasks(groupId: string, taskIds: string[]): Promise<TaskGroup> {
+    return invokeCommand<TaskGroup>("reorder_tasks", { groupId, taskIds });
+  },
 };

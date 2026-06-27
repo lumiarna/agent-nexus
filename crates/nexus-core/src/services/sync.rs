@@ -187,6 +187,14 @@ impl SyncService {
         self.task_lifecycle
             .update_group_schedule(group_id, schedule)
     }
+
+    pub fn reorder_task_groups(&self, group_ids: Vec<String>) -> AppResult<Vec<TaskGroup>> {
+        self.task_lifecycle.reorder_task_groups(group_ids)
+    }
+
+    pub fn reorder_tasks(&self, group_id: String, task_ids: Vec<String>) -> AppResult<TaskGroup> {
+        self.task_lifecycle.reorder_tasks(group_id, task_ids)
+    }
 }
 
 fn render_project_template(

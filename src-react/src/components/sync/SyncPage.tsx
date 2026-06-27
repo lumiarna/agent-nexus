@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -39,6 +41,8 @@ import {
   useCreateTaskGroupMutation,
   useDeleteTaskGroupMutation,
   useDeleteTaskMutation,
+  useReorderTaskGroupsMutation,
+  useReorderTasksMutation,
   useRunTaskMutation,
   useSessionBackupsQuery,
   useTaskGroupsQuery,
@@ -243,6 +247,47 @@ function SortableTask({ groupId, taskId, children }: {
   return <>{children(sortable)}</>;
 }
 
+/** Lightweight floating copy rendered inside DragOverlay while a group is dragged. Only the
+ *  header is drawn — the heavy task table is omitted so the dragged element tracks the cursor
+ *  without re-transforming a large subtree every frame. */
+function GroupDragOverlay({ group }: { group: TaskGroup }) {
+  return (
+    <div className="overflow-hidden rounded-[18px] border border-nexus-accent bg-nexus-card shadow-[0_8px_28px_rgba(50,40,25,.16)]">
+      <div className="flex flex-wrap items-center gap-[11px] px-5 py-[15px]">
+        <span className="text-[13px] leading-none tracking-[-1px] text-[#cabfae]">⠿</span>
+        <div className="text-[14.5px] font-extrabold text-nexus-ink">{group.name}</div>
+        <span className="text-[11px] text-[#b3a999]">
+          {group.tasks.length} {group.tasks.length === 1 ? "task" : "tasks"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Lightweight floating copy rendered inside DragOverlay while a task row is dragged. */
+function TaskDragOverlay({ task }: { task: Task }) {
+  return (
+    <div className="flex items-center gap-3 rounded-[12px] border border-nexus-accent bg-nexus-card px-5 py-3 shadow-[0_8px_28px_rgba(50,40,25,.16)]">
+      <span className="text-[12px] leading-none tracking-[-1px] text-[#d4c9b6]">⠿</span>
+      <span
+        className="text-[9.5px] font-bold uppercase tracking-[.03em]"
+        style={{ color: directionColor(task.direction) }}
+      >
+        {directionLabel(task.direction)}
+      </span>
+      <LocationTag type={task.sourceType} />
+      <span className="min-w-0 max-w-[220px] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
+        {task.source}
+      </span>
+      <ActionBadge action={task.action} />
+      <LocationTag type={task.targetType} />
+      <span className="min-w-0 max-w-[220px] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#8a8073]">
+        {task.target || "—"}
+      </span>
+    </div>
+  );
+}
+
 /** Run group action — mirrors the Refresh button's feedback: disabled + spinner + label swap
  *  while its group runs, so a click is never silent during the (potentially slow) serial run. */
 function RunGroupButton({ running, onRun }: { running: boolean; onRun: () => void }) {
@@ -302,7 +347,7 @@ function TaskGroupCard({
       )}
       style={{
         transform: sortable ? CSS.Transform.toString(sortable.transform) : undefined,
-        transition: sortable?.transition,
+        transition: sortable?.isDragging ? undefined : sortable?.transition,
       }}
       {...(sortable?.attributes ?? {})}
     >
@@ -468,7 +513,7 @@ function TaskGroupRow({
       style={{
         gridTemplateColumns: GRID16,
         transform: sortable ? CSS.Transform.toString(sortable.transform) : undefined,
-        transition: sortable?.transition,
+        transition: sortable?.isDragging ? undefined : sortable?.transition,
       }}
       {...(sortable?.attributes ?? {})}
     >
@@ -564,6 +609,8 @@ export function SyncPage() {
   const deleteTaskGroupMutation = useDeleteTaskGroupMutation();
   const addTaskMutation = useAddTaskMutation();
   const runTaskMutation = useRunTaskMutation();
+  const reorderTaskGroupsMutation = useReorderTaskGroupsMutation();
+  const reorderTasksMutation = useReorderTasksMutation();
   const updateTaskScheduleMutation = useUpdateTaskScheduleMutation();
   const updateGroupScheduleMutation = useUpdateGroupScheduleMutation();
   const projectSymlinksQuery = useProjectSymlinksQuery();
@@ -586,6 +633,9 @@ export function SyncPage() {
   const [addError, setAddError] = useState<string | null>(null);
   const [platform, setPlatform] = useState<HostPlatform>("unknown");
   const [runningGroupId, setRunningGroupId] = useState<string | null>(null);
+  const [activeDrag, setActiveDrag] = useState<
+    { type: "group"; group: TaskGroup } | { type: "task"; task: Task } | null
+  >(null);
   const supportsJunction = platform === "windows";
   const projectSymlinks = projectSymlinksQuery.data ?? [];
   const projectSymlinkError = projectSymlinksQuery.error
@@ -614,25 +664,47 @@ export function SyncPage() {
     );
   }
 
+  // Optimistically reorder the cache for instant feedback, persist the new order to the backend,
+  // then roll back to the pre-drag snapshot if persistence fails.
   function reorderGroups(fromId: string, toId: string) {
     if (!fromId || fromId === toId) return;
-    updateTaskGroups((gs) => {
-      const fi = gs.findIndex((g) => g.id === fromId);
-      const ti = gs.findIndex((g) => g.id === toId);
-      if (fi < 0 || ti < 0) return gs;
-      return arrayMove(gs, fi, ti);
-    });
+    const fi = groups.findIndex((g) => g.id === fromId);
+    const ti = groups.findIndex((g) => g.id === toId);
+    if (fi < 0 || ti < 0) return;
+    const next = arrayMove(groups, fi, ti);
+    const snapshot = groups;
+    updateTaskGroups(() => next);
+    reorderTaskGroupsMutation.mutate(
+      next.map((g) => g.id),
+      {
+        onSuccess: () => toast("Group order saved"),
+        onError: (error) => {
+          updateTaskGroups(() => snapshot);
+          toast(getErrorMessage(error));
+        },
+      },
+    );
   }
   function reorderTask(groupId: string, fromId: string, toId: string) {
     if (!fromId || fromId === toId) return;
+    const group = groups.find((g) => g.id === groupId);
+    if (!group) return;
+    const fi = group.tasks.findIndex((t) => t.id === fromId);
+    const ti = group.tasks.findIndex((t) => t.id === toId);
+    if (fi < 0 || ti < 0) return;
+    const nextTasks = arrayMove(group.tasks, fi, ti);
     updateTaskGroups((gs) =>
-      gs.map((g) => {
-        if (g.id !== groupId) return g;
-        const fi = g.tasks.findIndex((t) => t.id === fromId);
-        const ti = g.tasks.findIndex((t) => t.id === toId);
-        if (fi < 0 || ti < 0) return g;
-        return { ...g, tasks: arrayMove(g.tasks, fi, ti) };
-      }),
+      gs.map((g) => (g.id === groupId ? { ...g, tasks: nextTasks } : g)),
+    );
+    reorderTasksMutation.mutate(
+      { groupId, taskIds: nextTasks.map((t) => t.id) },
+      {
+        onSuccess: () => toast("Task order saved"),
+        onError: (error) => {
+          updateTaskGroups((gs) => gs.map((g) => (g.id === groupId ? group : g)));
+          toast(getErrorMessage(error));
+        },
+      },
     );
   }
 
@@ -640,7 +712,21 @@ export function SyncPage() {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
 
+  function handleDragStart(e: DragStartEvent) {
+    const data = e.active.data.current;
+    if (data?.type === "group") {
+      const group = groups.find((g) => g.id === e.active.id);
+      if (group) setActiveDrag({ type: "group", group });
+    } else if (data?.type === "task") {
+      const task = groups
+        .find((g) => g.id === data.groupId)
+        ?.tasks.find((t) => t.id === data.taskId);
+      if (task) setActiveDrag({ type: "task", task });
+    }
+  }
+
   function handleDragEnd(e: DragEndEvent) {
+    setActiveDrag(null);
     const { active, over } = e;
     if (!over || active.id === over.id) return;
     const a = active.data.current;
@@ -916,7 +1002,9 @@ export function SyncPage() {
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
+              onDragCancel={() => setActiveDrag(null)}
             >
               <SortableContext
                 items={groups.map((g) => g.id)}
@@ -943,6 +1031,13 @@ export function SyncPage() {
                   </SortableTaskGroup>
                 ))}
               </SortableContext>
+              <DragOverlay>
+                {activeDrag?.type === "group" ? (
+                  <GroupDragOverlay group={activeDrag.group} />
+                ) : activeDrag?.type === "task" ? (
+                  <TaskDragOverlay task={activeDrag.task} />
+                ) : null}
+              </DragOverlay>
             </DndContext>
           ) : null}
           {!taskGroupsQuery.isLoading && groups.length === 0 ? (

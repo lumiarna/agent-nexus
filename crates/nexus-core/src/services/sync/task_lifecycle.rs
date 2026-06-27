@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     future::Future,
     path::{Path, PathBuf},
@@ -421,6 +422,99 @@ impl TaskLifecycle {
             params![group_id, schedule, now],
         )?;
         Ok(())
+    }
+
+    /// Persist a new top-to-bottom order for the user's task groups by writing each group's
+    /// position into `sort_index`. The order must list every non-system group exactly once.
+    pub(super) fn reorder_task_groups(&self, group_ids: Vec<String>) -> AppResult<Vec<TaskGroup>> {
+        let group_ids = normalize_order(group_ids, "task group")?;
+        let mut conn = self.db.connection()?;
+        let tx = conn.transaction()?;
+
+        let mut stmt = tx.prepare("SELECT id FROM task_groups WHERE system_kind IS NULL")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let existing_ids = rows.collect::<Result<HashSet<_>, _>>()?;
+        drop(stmt);
+
+        if group_ids.len() != existing_ids.len() {
+            return Err(AppError::Validation(
+                "task group order must include every group exactly once".to_string(),
+            ));
+        }
+        for id in &group_ids {
+            if !existing_ids.contains(id) {
+                return Err(AppError::Validation(format!(
+                    "task group order contains unknown group id: {id}"
+                )));
+            }
+        }
+
+        let now = now_epoch_seconds()?;
+        for (index, id) in group_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE task_groups SET sort_index = ?2, updated_at = ?3 WHERE id = ?1",
+                params![id, index as i64, now],
+            )?;
+        }
+        tx.commit()?;
+        drop(conn);
+        self.list_task_groups()
+    }
+
+    /// Persist a new order for the tasks within one group. The order must list every task in
+    /// the group exactly once.
+    pub(super) fn reorder_tasks(
+        &self,
+        group_id: String,
+        task_ids: Vec<String>,
+    ) -> AppResult<TaskGroup> {
+        let group_id = required_trimmed(&group_id, "task group id")?.to_string();
+        let task_ids = normalize_order(task_ids, "task")?;
+        let mut conn = self.db.connection()?;
+        let tx = conn.transaction()?;
+
+        let group_exists = tx
+            .query_row("SELECT 1 FROM task_groups WHERE id = ?1", [&group_id], |_| {
+                Ok(())
+            })
+            .optional()?
+            .is_some();
+        if !group_exists {
+            return Err(AppError::Validation("task group not found".to_string()));
+        }
+
+        let mut stmt = tx.prepare("SELECT id FROM tasks WHERE group_id = ?1")?;
+        let rows = stmt.query_map([&group_id], |row| row.get::<_, String>(0))?;
+        let existing_ids = rows.collect::<Result<HashSet<_>, _>>()?;
+        drop(stmt);
+
+        if task_ids.len() != existing_ids.len() {
+            return Err(AppError::Validation(
+                "task order must include every task in the group exactly once".to_string(),
+            ));
+        }
+        for id in &task_ids {
+            if !existing_ids.contains(id) {
+                return Err(AppError::Validation(format!(
+                    "task order contains unknown task id: {id}"
+                )));
+            }
+        }
+
+        let now = now_epoch_seconds()?;
+        for (index, id) in task_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE tasks SET sort_index = ?2, updated_at = ?3 WHERE id = ?1",
+                params![id, index as i64, now],
+            )?;
+        }
+        tx.commit()?;
+        drop(conn);
+
+        self.list_task_groups()?
+            .into_iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| AppError::Internal("reordered task group was not found".to_string()))
     }
 
     pub(super) async fn run_task(&self, id: String) -> AppResult<Task> {
@@ -1006,6 +1100,28 @@ fn list_tasks_for_group(conn: &rusqlite::Connection, group_id: &str) -> AppResul
         task.link_state = derive_link_state(&task.action, &task.target_type, &task.target);
     }
     Ok(tasks)
+}
+
+/// Trim a caller-supplied id ordering and reject empty or duplicate ids. `label` names the
+/// entity for error messages (e.g. "task" → "task order contains duplicate id: …").
+fn normalize_order(ids: Vec<String>, label: &str) -> AppResult<Vec<String>> {
+    let mut normalized = Vec::with_capacity(ids.len());
+    let mut seen = HashSet::with_capacity(ids.len());
+    for id in ids {
+        let id = id.trim().to_string();
+        if id.is_empty() {
+            return Err(AppError::Validation(format!(
+                "{label} order contains an empty id"
+            )));
+        }
+        if !seen.insert(id.clone()) {
+            return Err(AppError::Validation(format!(
+                "{label} order contains duplicate id: {id}"
+            )));
+        }
+        normalized.push(id);
+    }
+    Ok(normalized)
 }
 
 fn list_scheduled_copy_tasks(conn: &rusqlite::Connection) -> AppResult<Vec<Task>> {

@@ -124,6 +124,29 @@ export function useRunTaskMutation() {
   });
 }
 
+export function useReorderTaskGroupsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (groupIds: string[]) => syncApi.reorderTaskGroups(groupIds),
+    onSuccess: (groups) => {
+      queryClient.setQueryData<TaskGroup[]>(syncKeys.taskGroups, groups);
+    },
+  });
+}
+
+export function useReorderTasksMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, taskIds }: { groupId: string; taskIds: string[] }) =>
+      syncApi.reorderTasks(groupId, taskIds),
+    onSuccess: (group) => {
+      queryClient.setQueryData<TaskGroup[]>(syncKeys.taskGroups, (groups) =>
+        groups?.map((g) => (g.id === group.id ? group : g)),
+      );
+    },
+  });
+}
+
 function replaceTask(groups: TaskGroup[] | undefined, updated: Task): TaskGroup[] | undefined {
   return groups?.map((group) => ({
     ...group,

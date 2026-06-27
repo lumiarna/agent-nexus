@@ -2436,3 +2436,121 @@ async fn runs_cloud_to_local_directory_pull_task() {
     );
     server.join().expect("join webdav server");
 }
+
+/// Create a local link task group with one task per `(source, target)` pair. Returns the group id.
+fn create_link_group(sync: &SyncService, name: &str, links: &[(&Path, &Path)]) -> String {
+    let tasks = links
+        .iter()
+        .map(|(source, target)| CreateTaskInput {
+            action: LINK_ACTION.to_string(),
+            source_type: "Local".to_string(),
+            source: source.to_string_lossy().into_owned(),
+            target_type: "Local".to_string(),
+            target: target.to_string_lossy().into_owned(),
+            schedule: "manual".to_string(),
+        })
+        .collect();
+    sync.create_task_group(CreateTaskGroupInput {
+        name: name.to_string(),
+        tasks,
+    })
+    .expect("create link task group")
+    .id
+}
+
+#[test]
+fn reorder_task_groups_persists_new_order() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db, request_logger());
+    let root = TempDir::new().expect("create temp dir");
+
+    let make = |name: &str| {
+        let source = root.path().join(format!("{name}-src"));
+        fs::create_dir_all(&source).expect("create source dir");
+        let target = root.path().join(format!("{name}-link"));
+        create_link_group(&sync, name, &[(source.as_path(), target.as_path())])
+    };
+    let alpha = make("alpha");
+    let beta = make("beta");
+    let gamma = make("gamma");
+
+    sync.reorder_task_groups(vec![gamma.clone(), alpha.clone(), beta.clone()])
+        .expect("reorder task groups");
+
+    let order: Vec<String> = sync
+        .list_task_groups()
+        .expect("list task groups")
+        .into_iter()
+        .map(|group| group.id)
+        .collect();
+    assert_eq!(order, vec![gamma, alpha, beta]);
+}
+
+#[test]
+fn reorder_task_groups_rejects_incomplete_order() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db, request_logger());
+    let root = TempDir::new().expect("create temp dir");
+    let source = root.path().join("src");
+    fs::create_dir_all(&source).expect("create source dir");
+    let target = root.path().join("link");
+    let only = create_link_group(&sync, "only", &[(source.as_path(), target.as_path())]);
+
+    let result = sync.reorder_task_groups(vec![only, "missing".to_string()]);
+    assert!(result.is_err(), "order with unknown ids must be rejected");
+}
+
+#[test]
+fn reorder_tasks_persists_new_order_within_group() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db, request_logger());
+    let root = TempDir::new().expect("create temp dir");
+
+    let link = |name: &str| {
+        let source = root.path().join(format!("{name}-src"));
+        fs::create_dir_all(&source).expect("create source dir");
+        (source, root.path().join(format!("{name}-link")))
+    };
+    let (a_src, a_dst) = link("a");
+    let (b_src, b_dst) = link("b");
+    let (c_src, c_dst) = link("c");
+    let group_id = create_link_group(
+        &sync,
+        "group",
+        &[
+            (a_src.as_path(), a_dst.as_path()),
+            (b_src.as_path(), b_dst.as_path()),
+            (c_src.as_path(), c_dst.as_path()),
+        ],
+    );
+
+    let task_ids: Vec<String> = sync
+        .list_task_groups()
+        .expect("list task groups")
+        .into_iter()
+        .find(|group| group.id == group_id)
+        .expect("group exists")
+        .tasks
+        .into_iter()
+        .map(|task| task.id)
+        .collect();
+
+    let reversed: Vec<String> = task_ids.iter().rev().cloned().collect();
+    let updated = sync
+        .reorder_tasks(group_id.clone(), reversed.clone())
+        .expect("reorder tasks");
+    let updated_order: Vec<String> = updated.tasks.iter().map(|task| task.id.clone()).collect();
+    assert_eq!(updated_order, reversed);
+
+    let persisted: Vec<String> = sync
+        .list_task_groups()
+        .expect("list task groups")
+        .into_iter()
+        .find(|group| group.id == group_id)
+        .expect("group exists")
+        .tasks
+        .into_iter()
+        .map(|task| task.id)
+        .collect();
+    assert_eq!(persisted, reversed);
+}
