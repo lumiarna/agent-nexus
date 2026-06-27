@@ -72,6 +72,8 @@ pub fn run() {
             commands::providers::set_provider_order,
             commands::providers::set_provider_schedule_settings,
             commands::app_config::get_copilot_github_token,
+            commands::app_config::get_disabled_agents,
+            commands::app_config::set_disabled_agents,
             commands::app_config::get_opencode_go_connection_params,
             commands::app_config::get_provider_connection_params,
             commands::app_config::get_provider_display_preferences,

@@ -3,7 +3,8 @@ use tauri::State;
 use nexus_core::{
     error::AppResult,
     services::app_config::{
-        OpenCodeGoConnectionParams, ProviderConnectionParams, ProviderDisplayPreferences,
+        AgentDisplayPreferences, OpenCodeGoConnectionParams, ProviderConnectionParams,
+        ProviderDisplayPreferences,
     },
 };
 
@@ -53,6 +54,19 @@ pub fn set_provider_connection_params(
     state
         .app_config
         .set_provider_connection_params(&provider_id, &params)
+}
+
+#[tauri::command]
+pub fn get_disabled_agents(state: State<'_, AppState>) -> AppResult<AgentDisplayPreferences> {
+    state.app_config.get_agent_display_preferences()
+}
+
+#[tauri::command]
+pub fn set_disabled_agents(
+    state: State<'_, AppState>,
+    preferences: AgentDisplayPreferences,
+) -> AppResult<AgentDisplayPreferences> {
+    state.app_config.set_agent_display_preferences(&preferences)
 }
 
 #[tauri::command]

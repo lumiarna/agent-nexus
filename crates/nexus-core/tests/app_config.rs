@@ -3,8 +3,9 @@ use std::{path::PathBuf, sync::Arc};
 use nexus_core::{
     database::Database,
     services::app_config::{
-        AppConfigService, OpenCodeGoConnectionParams, ProviderConnectionParams,
-        ProviderDisplayPreferences, CLAUDE_CONFIG_DIR_KEY, CODEX_CONFIG_DIR_KEY,
+        AgentDisplayPreferences, AppConfigService, OpenCodeGoConnectionParams,
+        ProviderConnectionParams, ProviderDisplayPreferences, CLAUDE_CONFIG_DIR_KEY,
+        CODEX_CONFIG_DIR_KEY,
     },
 };
 
@@ -163,6 +164,52 @@ fn provider_display_preferences_round_trip_through_settings() {
             card_visibility: vec!["copilot".to_string(), "claude".to_string()],
         },
     );
+}
+
+#[test]
+fn agent_display_preferences_round_trip_through_settings() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = AppConfigService::new(db);
+
+    assert_eq!(
+        service
+            .get_agent_display_preferences()
+            .expect("read default agent display preferences"),
+        AgentDisplayPreferences::default(),
+    );
+
+    assert_eq!(
+        service
+            .set_agent_display_preferences(&AgentDisplayPreferences {
+                disabled: vec!["Copilot".to_string(), "OpenCode".to_string()],
+            })
+            .expect("save agent display preferences"),
+        AgentDisplayPreferences {
+            disabled: vec!["Copilot".to_string(), "OpenCode".to_string()],
+        },
+    );
+
+    assert_eq!(
+        service
+            .get_agent_display_preferences()
+            .expect("read saved agent display preferences"),
+        AgentDisplayPreferences {
+            disabled: vec!["Copilot".to_string(), "OpenCode".to_string()],
+        },
+    );
+}
+
+#[test]
+fn set_agent_display_preferences_rejects_unknown_agent() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = AppConfigService::new(db);
+
+    let error = service
+        .set_agent_display_preferences(&AgentDisplayPreferences {
+            disabled: vec!["claude".to_string()],
+        })
+        .expect_err("unknown agent name must be rejected");
+    assert!(error.to_string().contains("unknown agent"));
 }
 
 #[test]

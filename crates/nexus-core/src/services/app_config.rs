@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     database::Database,
     error::{AppError, AppResult},
+    services::agent_capabilities::agent_by_name,
     services::paths::{path_to_string, resolve_local_path},
 };
 
@@ -23,6 +24,7 @@ const MINIMAX_TOKEN_PLAN_CN_API_KEY_KEY: &str = "PROVIDER_API_KEY_MINIMAX_TOKEN"
 const DEEPSEEK_API_KEY_KEY: &str = "PROVIDER_API_KEY_DEEPSEEK";
 const OPENROUTER_API_KEY_KEY: &str = "PROVIDER_API_KEY_OPENROUTER";
 const PROVIDER_CARD_VISIBILITY_KEY: &str = "PROVIDER_CARD_VISIBILITY";
+const DISABLED_AGENTS_KEY: &str = "DISABLED_AGENTS";
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +43,15 @@ pub struct ProviderConnectionParams {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderDisplayPreferences {
     pub card_visibility: Vec<String>,
+}
+
+/// User preference for which Agents are disabled. A disabled Agent is dropped
+/// from the Skill / Prompt Agent Matrix and the assets it sources are hidden;
+/// its `Agent Capability Surface` still exists. Names are canonical Agent names.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDisplayPreferences {
+    pub disabled: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -202,6 +213,31 @@ impl AppConfigService {
         Ok(normalized)
     }
 
+    pub fn get_agent_display_preferences(&self) -> AppResult<AgentDisplayPreferences> {
+        let raw = self.read_setting(DISABLED_AGENTS_KEY)?.unwrap_or_default();
+        if raw.trim().is_empty() {
+            return Ok(AgentDisplayPreferences::default());
+        }
+
+        let preferences = serde_json::from_str::<AgentDisplayPreferences>(&raw).map_err(|error| {
+            AppError::Validation(format!("invalid agent display preferences setting: {error}"))
+        })?;
+        Ok(AgentDisplayPreferences {
+            disabled: normalize_agent_names(preferences.disabled)?,
+        })
+    }
+
+    pub fn set_agent_display_preferences(
+        &self,
+        preferences: &AgentDisplayPreferences,
+    ) -> AppResult<AgentDisplayPreferences> {
+        let normalized = AgentDisplayPreferences {
+            disabled: normalize_agent_names(preferences.disabled.clone())?,
+        };
+        self.write_json_setting(DISABLED_AGENTS_KEY, &normalized)?;
+        Ok(normalized)
+    }
+
     fn write_json_setting<T: Serialize>(&self, key: &str, value: &T) -> AppResult<()> {
         let conn = self.db.connection()?;
         let value = serde_json::to_string(value)
@@ -242,6 +278,30 @@ fn normalize_provider_order(provider_ids: Vec<String>) -> AppResult<Vec<String>>
             )));
         }
         normalized.push(provider_id.to_string());
+    }
+
+    Ok(normalized)
+}
+
+fn normalize_agent_names(names: Vec<String>) -> AppResult<Vec<String>> {
+    let mut normalized = Vec::with_capacity(names.len());
+
+    for name in names {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::Validation(
+                "disabled agents cannot contain empty names".to_string(),
+            ));
+        }
+        if agent_by_name(name).is_none() {
+            return Err(AppError::Validation(format!("unknown agent: {name}")));
+        }
+        if normalized.iter().any(|existing| existing == name) {
+            return Err(AppError::Validation(format!(
+                "disabled agents contains duplicate: {name}"
+            )));
+        }
+        normalized.push(name.to_string());
     }
 
     Ok(normalized)

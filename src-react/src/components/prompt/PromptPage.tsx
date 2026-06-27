@@ -14,6 +14,7 @@ import { promptsApi } from "@/lib/api/prompts";
 import { AGENTS } from "@/config/agents";
 import { useProjectsQuery } from "@/lib/query/projects";
 import { usePromptsQuery, useSetPromptTargetMutation } from "@/lib/query/prompts";
+import { useDisabledAgents, useEnabledAgents } from "@/lib/query/agentPreferences";
 import { isTauriRuntime } from "@/lib/runtime";
 import { srcAgentOf } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
@@ -46,6 +47,8 @@ export function PromptPage() {
   const promptsQuery = usePromptsQuery();
   const projectsQuery = useProjectsQuery();
   const setPromptTarget = useSetPromptTargetMutation();
+  const enabledAgents = useEnabledAgents();
+  const disabledAgents = useDisabledAgents();
   const [scope, setScope] = useState<Scope>("global");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -133,6 +136,11 @@ export function PromptPage() {
       : p.scope !== "project",
   );
   if (q) set = set.filter((p) => p.content.toLowerCase().includes(q));
+  // Hide Prompts sourced by a disabled Agent.
+  set = set.filter((p) => !disabledAgents.has(srcAgentOf(p.cells)));
+  const matrixAgents = isProj
+    ? PROJECT_PROMPT_AGENTS.filter((agent) => !disabledAgents.has(agent))
+    : enabledAgents;
 
   let emptyTitle = "";
   let emptyBody = "";
@@ -250,7 +258,7 @@ export function PromptPage() {
               </div>
               <AgentMatrixCells
                 cells={p.cells}
-                agents={isProj ? PROJECT_PROMPT_AGENTS : undefined}
+                agents={matrixAgents}
                 onToggle={(a) => void toggleCell(p, a)}
               />
               <div className="flex flex-col items-end gap-[5px]">

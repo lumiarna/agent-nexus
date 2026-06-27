@@ -18,6 +18,8 @@ interface SkillRowProps {
   mode: "global" | "project";
   /** Owning Project name — used in the Project custom source tooltip. */
   projectName?: string;
+  /** Enabled Agents in canonical order — narrows the rendered matrix columns. */
+  agents?: AgentName[];
   onToggleCell: (agent: AgentName) => void;
   onToggleDmi: () => void;
   /** Enable Global propagation for a Project custom Skill via the chosen entry Agent. */
@@ -37,15 +39,19 @@ const DEFAULT_GLOBAL_ENTRY: AgentName = "Generic Agent";
  *  on the Global Skill page. */
 function PropagateToGlobal({
   skill,
+  agents,
   onPropagate,
   onUnpropagate,
 }: {
   skill: Skill;
+  /** Enabled Agents — disabled Agents are dropped from the target chips. */
+  agents?: AgentName[];
   onPropagate?: (entryAgent: AgentName) => void;
   onUnpropagate?: () => void;
 }) {
   const propagated = hasGlobalPlacement(skill.cells);
-  const targets = targetAgentsOf(skill.cells);
+  const enabled = agents ? new Set(agents) : null;
+  const targets = targetAgentsOf(skill.cells).filter((a) => !enabled || enabled.has(a));
 
   return (
     <div className="flex flex-col items-center gap-1.5">
@@ -86,6 +92,7 @@ export function SkillRow({
   skill,
   mode,
   projectName,
+  agents,
   onToggleCell,
   onToggleDmi,
   onPropagateGlobal,
@@ -119,12 +126,14 @@ export function SkillRow({
       {isCustom && mode === "project" ? (
         <PropagateToGlobal
           skill={skill}
+          agents={agents}
           onPropagate={onPropagateGlobal}
           onUnpropagate={onUnpropagateGlobal}
         />
       ) : (
         <AgentMatrixCells
           cells={skill.cells}
+          agents={agents}
           onToggle={onToggleCell}
           sourceless={isCustom}
         />

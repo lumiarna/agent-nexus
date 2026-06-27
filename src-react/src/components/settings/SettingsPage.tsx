@@ -11,7 +11,13 @@ import {
 } from "@/lib/query/sync";
 import { fallbackAgentCapabilities } from "@/lib/agentCapabilities";
 import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
+import {
+  useDisabledAgents,
+  useSetDisabledAgentsMutation,
+} from "@/lib/query/agentPreferences";
 import { AgentLogo } from "@/components/ui/agent-logo";
+import { Toggle } from "@/components/ui/toggle";
+import { cn } from "@/lib/utils";
 import type { AgentName } from "@/types";
 
 type WebdavStatus = "ok" | "testing" | "untested";
@@ -42,6 +48,8 @@ export function SettingsPage() {
   const agentCapabilitiesQuery = useAgentCapabilitiesQuery();
   const saveWebdavSettingsMutation = useSaveWebdavSettingsMutation();
   const testWebdavConnectionMutation = useTestWebdavConnectionMutation();
+  const disabledAgents = useDisabledAgents();
+  const setDisabledAgents = useSetDisabledAgentsMutation();
   const [url, setUrl] = useState("");
   const [user, setUser] = useState("");
   const [pass, setPass] = useState("");
@@ -77,6 +85,20 @@ export function SettingsPage() {
     }
   }
 
+  async function toggleAgentEnabled(name: AgentName) {
+    const next = new Set(disabledAgents);
+    const willDisable = !next.has(name);
+    if (willDisable) next.add(name);
+    else next.delete(name);
+
+    try {
+      await setDisabledAgents.mutateAsync({ disabled: [...next] });
+      toast(willDisable ? `${name} disabled` : `${name} enabled`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
   async function saveWebdav() {
     try {
       const saved = await saveWebdavSettingsMutation.mutateAsync({
@@ -106,7 +128,7 @@ export function SettingsPage() {
       </button>
       <h1 className="m-0 text-[23px] font-extrabold tracking-[-.02em] text-nexus-ink">Settings</h1>
       <p className="mt-1.5 text-[13px] text-[#9a8f80]">
-        Global configuration · WebDAV, taskbar surface, and agent config roots
+        Global configuration · WebDAV, taskbar surface, and agents
       </p>
 
       {/* WebDAV */}
@@ -205,19 +227,25 @@ export function SettingsPage() {
         </div>
       </Card>
 
-      {/* Agent config roots */}
+      {/* Agent */}
       <Card className="mt-4 p-[22px]">
         <div className="flex flex-wrap items-center gap-2.5">
-          <h2 className="m-0 text-[15px] font-extrabold text-nexus-ink">Agent config roots</h2>
+          <h2 className="m-0 text-[15px] font-extrabold text-nexus-ink">Agent</h2>
           <span className="text-[11px] text-[#b3a999]">
-            Where Skill &amp; Prompt placements are written · backend capability order
+            Config roots where Skill &amp; Prompt placements are written · disable to drop
+            an Agent from the Agent Matrix
           </span>
         </div>
         <div className="mt-4 flex flex-col gap-3">
-          {agents.map((a) => (
+          {agents.map((a) => {
+            const disabled = disabledAgents.has(a.name as AgentName);
+            return (
             <div
               key={a.name}
-              className="rounded-[14px] border border-nexus-panel bg-nexus-sand2 px-4 py-3.5"
+              className={cn(
+                "rounded-[14px] border border-nexus-panel bg-nexus-sand2 px-4 py-3.5",
+                disabled && "opacity-55",
+              )}
             >
               <div className="flex items-center gap-[9px]">
                 <span
@@ -227,7 +255,21 @@ export function SettingsPage() {
                   <AgentLogo agent={a.name as AgentName} className="h-3.5 w-3.5" />
                 </span>
                 <span className="text-[13.5px] font-bold text-nexus-ink">{a.name}</span>
-
+                {disabled ? (
+                  <span className="text-[10px] font-semibold uppercase tracking-[.04em] text-[#b3a999]">
+                    Disabled
+                  </span>
+                ) : null}
+                <span className="ml-auto inline-flex items-center gap-2">
+                  <span className="text-[10px] text-[#b3a999]">
+                    {disabled ? "Off" : "On"}
+                  </span>
+                  <Toggle
+                    checked={!disabled}
+                    title={disabled ? "Enable agent" : "Disable agent"}
+                    onChange={() => void toggleAgentEnabled(a.name as AgentName)}
+                  />
+                </span>
               </div>
               <div className="mt-[11px] grid grid-cols-4 gap-3">
                 {agentDirs(a).map((d) => (
@@ -245,7 +287,8 @@ export function SettingsPage() {
                 ))}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </Card>
     </ScreenScroll>

@@ -14,8 +14,9 @@ import {
   useSetSkillTargetMutation,
   useSkillsQuery,
 } from "@/lib/query/skills";
+import { useDisabledAgents, useEnabledAgents } from "@/lib/query/agentPreferences";
 import { isTauriRuntime } from "@/lib/runtime";
-import { hasGlobalPlacement, isProjectCustomSkill, targetAgentsOf } from "@/lib/tokens";
+import { hasGlobalPlacement, isProjectCustomSkill, srcAgentOf, targetAgentsOf } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type { AgentName, Skill } from "@/types";
 
@@ -41,6 +42,8 @@ export function SkillPage() {
   const projectsQuery = useProjectsQuery();
   const setSkillTarget = useSetSkillTargetMutation();
   const setSkillDisabled = useSetSkillDisabledMutation();
+  const enabledAgents = useEnabledAgents();
+  const disabledAgents = useDisabledAgents();
   const [scope, setScope] = useState<Scope>("global");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -171,6 +174,11 @@ export function SkillPage() {
       : k.scope === "global" || (isProjectCustomSkill(k) && hasGlobalPlacement(k.cells)),
   );
   if (q) set = set.filter((k) => k.name.toLowerCase().includes(q) || k.desc.toLowerCase().includes(q));
+  // Hide Skills sourced by a disabled Agent; Project custom Skills have no
+  // Source Agent and stay visible.
+  set = set.filter(
+    (k) => isProjectCustomSkill(k) || !disabledAgents.has(k.sourceAgent ?? srcAgentOf(k.cells)),
+  );
 
   let emptyTitle = "";
   let emptyBody = "";
@@ -278,6 +286,7 @@ export function SkillPage() {
               skill={k}
               mode={isProj ? "project" : "global"}
               projectName={k.projectId ? projects.find((p) => p.id === k.projectId)?.name : undefined}
+              agents={enabledAgents}
               onToggleCell={(a) => void toggleCell(k, a)}
               onToggleDmi={() => void toggleDmi(k)}
               onPropagateGlobal={(entry) => void propagateGlobal(k, entry)}
