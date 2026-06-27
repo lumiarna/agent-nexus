@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -56,6 +57,12 @@ struct OutboundRequestLogRecord {
     result: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_headers: Option<BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_metadata: Option<BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_body_excerpt: Option<String>,
 }
 
 impl OutboundRequestLogger {
@@ -111,6 +118,9 @@ impl OutboundRequestLogger {
                     duration_ms,
                     result,
                     error: None,
+                    response_headers: selected_response_headers(response.headers()),
+                    request_metadata: None,
+                    response_body_excerpt: None,
                 })
                 .map_err(OutboundRequestError::Log)?;
                 Ok(response)
@@ -130,11 +140,41 @@ impl OutboundRequestLogger {
                     duration_ms,
                     result: "transport_error",
                     error: Some(message),
+                    response_headers: None,
+                    request_metadata: None,
+                    response_body_excerpt: None,
                 })
                 .map_err(OutboundRequestError::Log)?;
                 Err(OutboundRequestError::Http(error))
             }
         }
+    }
+
+    pub fn write_http_response_detail(
+        &self,
+        context: OutboundRequestContext,
+        status: reqwest::StatusCode,
+        headers: &reqwest::header::HeaderMap,
+        body: &str,
+        request_metadata: Option<BTreeMap<String, String>>,
+    ) -> AppResult<()> {
+        self.write_record(OutboundRequestLogRecord {
+            ts: timestamp(),
+            category: context.category,
+            operation: context.operation,
+            provider_id: context.provider_id,
+            method: context.method,
+            host: host(&context.url),
+            final_url: None,
+            url: redact_url(&context.url),
+            status: Some(status.as_u16()),
+            duration_ms: 0,
+            result: "http_detail",
+            error: None,
+            response_headers: selected_response_headers(headers),
+            request_metadata,
+            response_body_excerpt: Some(body_excerpt(body)),
+        })
     }
 
     fn write_record(&self, record: OutboundRequestLogRecord) -> AppResult<()> {
@@ -157,6 +197,34 @@ impl OutboundRequestLogger {
         writeln!(file, "{line}")?;
         Ok(())
     }
+}
+
+fn selected_response_headers(
+    headers: &reqwest::header::HeaderMap,
+) -> Option<BTreeMap<String, String>> {
+    let mut selected = BTreeMap::new();
+    for (name, value) in headers {
+        let name = name.as_str();
+        if !should_log_response_header(name) {
+            continue;
+        }
+        if let Ok(value) = value.to_str() {
+            selected.insert(name.to_string(), value.chars().take(500).collect());
+        }
+    }
+    (!selected.is_empty()).then_some(selected)
+}
+
+fn should_log_response_header(name: &str) -> bool {
+    name.starts_with("anthropic-ratelimit-")
+        || matches!(
+            name,
+            "retry-after" | "request-id" | "x-request-id" | "cf-ray"
+        )
+}
+
+fn body_excerpt(body: &str) -> String {
+    body.chars().take(1200).collect()
 }
 
 fn timestamp() -> String {

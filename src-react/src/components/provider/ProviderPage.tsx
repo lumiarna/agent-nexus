@@ -996,7 +996,10 @@ export function ProviderPage() {
                         onChange={(value) => setWindowAlignModelId(value || null)}
                         options={modelOptions.map((model) => ({
                           value: model.id,
-                          label: model.displayName,
+                          label:
+                            model.displayName === model.id
+                              ? model.id
+                              : `${model.displayName} · ${model.id}`,
                         }))}
                         placeholder={
                           triggerModelsQuery.isFetching ? "Loading models…" : "Select a model"
@@ -1039,6 +1042,7 @@ export function ProviderPage() {
                           className="flex-none px-3"
                           disabled={
                             windowAlignTriggering ||
+                            !!quotaQueries[cfg.id]?.isFetching ||
                             triggerModelsQuery.isFetching ||
                             !windowAlignModelId?.trim()
                           }

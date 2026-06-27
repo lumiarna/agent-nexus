@@ -1,12 +1,15 @@
 use std::{
+    collections::BTreeMap,
+    collections::HashSet,
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::{
     database::Database,
@@ -26,12 +29,15 @@ use crate::{
 };
 
 const DEFAULT_QUOTA_REFRESH_MINUTES: i64 = 5;
-const WINDOW_ALIGN_PROMPT: &str = "hi";
+const WINDOW_ALIGN_PROMPT: &str = ".";
 const WINDOW_ALIGN_RETRY_SECONDS: i64 = 5 * 60;
 const PROVIDER_WINDOW_SECONDS: i64 = 5 * 60 * 60;
 const CLAUDE_CODE_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 const CLAUDE_CODE_MODELS_URL: &str = "https://api.anthropic.com/v1/models";
 const CLAUDE_CODE_ALIAS: &str = "claude-code";
+const CLAUDE_UNIFIED_STATUS_HEADER: &str = "anthropic-ratelimit-unified-status";
+const CLAUDE_UNIFIED_CLAIM_HEADER: &str = "anthropic-ratelimit-unified-representative-claim";
+const CLAUDE_UNIFIED_RESET_HEADER: &str = "anthropic-ratelimit-unified-reset";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +107,7 @@ trait ProviderTriggerRunner: Send + Sync {
 pub struct ProviderTriggerService {
     db: Arc<Database>,
     runner: Arc<dyn ProviderTriggerRunner>,
+    in_flight: Arc<Mutex<HashSet<String>>>,
 }
 
 impl ProviderTriggerService {
@@ -112,12 +119,17 @@ impl ProviderTriggerService {
         Self {
             db,
             runner: Arc::new(ClaudeCodeTriggerRunner::new(app_config, request_logger)),
+            in_flight: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
     #[cfg(test)]
     fn with_runner(db: Arc<Database>, runner: Arc<dyn ProviderTriggerRunner>) -> Self {
-        Self { db, runner }
+        Self {
+            db,
+            runner,
+            in_flight: Arc::new(Mutex::new(HashSet::new())),
+        }
     }
 
     pub fn get_provider_schedule_settings(
@@ -247,6 +259,9 @@ impl ProviderTriggerService {
                 continue;
             }
 
+            let Some(_run_guard) = self.try_begin_window_alignment(&row.provider_id)? else {
+                continue;
+            };
             let result = self.runner.trigger(&row.provider_id, model_id).await;
             match result {
                 Ok(outcome) => {
@@ -306,6 +321,10 @@ impl ProviderTriggerService {
         }
 
         self.ensure_provider_schedule_row(provider_id)?;
+        let Some(_run_guard) = self.try_begin_window_alignment(provider_id)? else {
+            let conn = self.db.connection()?;
+            return read_provider_schedule_settings(&conn, provider_id);
+        };
         let now = current_epoch_seconds();
         let result = self.runner.trigger(provider_id, model_id).await;
         match result {
@@ -324,6 +343,23 @@ impl ProviderTriggerService {
 
         let conn = self.db.connection()?;
         read_provider_schedule_settings(&conn, provider_id)
+    }
+
+    fn try_begin_window_alignment(
+        &self,
+        provider_id: &str,
+    ) -> AppResult<Option<WindowAlignmentRunGuard>> {
+        let mut in_flight = self
+            .in_flight
+            .lock()
+            .map_err(|_| AppError::Internal("window alignment state lock poisoned".to_string()))?;
+        if !in_flight.insert(provider_id.to_string()) {
+            return Ok(None);
+        }
+        Ok(Some(WindowAlignmentRunGuard {
+            provider_id: provider_id.to_string(),
+            in_flight: Arc::clone(&self.in_flight),
+        }))
     }
 
     fn ensure_provider_schedule_row(&self, provider_id: &str) -> AppResult<()> {
@@ -460,6 +496,19 @@ impl ProviderTriggerService {
             params![provider_id, now_epoch_seconds, status, error],
         )?;
         Ok(())
+    }
+}
+
+struct WindowAlignmentRunGuard {
+    provider_id: String,
+    in_flight: Arc<Mutex<HashSet<String>>>,
+}
+
+impl Drop for WindowAlignmentRunGuard {
+    fn drop(&mut self) {
+        if let Ok(mut in_flight) = self.in_flight.lock() {
+            in_flight.remove(&self.provider_id);
+        }
     }
 }
 
@@ -848,14 +897,16 @@ async fn fetch_claude_code_models(
     let parsed = serde_json::from_str::<ClaudeModelsResponse>(&body)
         .map_err(|error| ProviderTriggerError::Retryable(error.to_string()))?;
 
-    Ok(parsed
+    let mut models = parsed
         .data
         .into_iter()
         .map(|model| ProviderTriggerModel {
             display_name: model.display_name.unwrap_or_else(|| model.id.clone()),
             id: model.id,
         })
-        .collect())
+        .collect::<Vec<_>>();
+    models.sort_by(|a, b| claude_trigger_model_rank(&a.id).cmp(&claude_trigger_model_rank(&b.id)));
+    Ok(models)
 }
 
 async fn trigger_claude_code(
@@ -876,7 +927,6 @@ async fn trigger_claude_code(
                     serde_json::json!({
                         "model": model_id,
                         "max_tokens": 1,
-                        "stream": false,
                         "messages": [{"role": "user", "content": WINDOW_ALIGN_PROMPT}]
                     })
                     .to_string(),
@@ -886,10 +936,43 @@ async fn trigger_claude_code(
         .await
         .map_err(provider_trigger_request_error)?;
     let status = response.status();
+    let headers = response.headers().clone();
+    let rate_limit_rejection = claude_rate_limit_rejection_message(&headers);
     let body = response
         .text()
         .await
         .map_err(|error| ProviderTriggerError::Retryable(error.to_string()))?;
+    if !status.is_success() {
+        let _ = request_logger.write_http_response_detail(
+            provider_trigger_log_context(
+                "claude_code_messages_detail",
+                "POST",
+                CLAUDE_CODE_MESSAGES_URL,
+            ),
+            status,
+            &headers,
+            &body,
+            Some(claude_trigger_request_metadata(model_id)),
+        );
+    }
+    if let Some(message) = rate_limit_rejection {
+        return Err(ProviderTriggerError::Terminal(message));
+    }
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        let detail = response_error_detail(&body);
+        let message = if is_haiku_model(model_id) {
+            if detail.is_empty() {
+                format!("Claude Code model {model_id} returned rate limit")
+            } else {
+                format!("Claude Code model {model_id} returned rate limit: {detail}")
+            }
+        } else {
+            format!(
+                "Claude Code model {model_id} returned rate limit; use a Haiku model for window alignment"
+            )
+        };
+        return Err(ProviderTriggerError::Retryable(message));
+    }
     ensure_success_status_or_trigger_error(status, &body, "Claude Code messages")?;
     let parsed = serde_json::from_str::<ClaudeMessageResponse>(&body)
         .map_err(|error| ProviderTriggerError::Retryable(error.to_string()))?;
@@ -904,6 +987,34 @@ async fn trigger_claude_code(
             .and_then(|usage| usage.output_tokens)
             .unwrap_or(0),
     })
+}
+
+fn claude_trigger_model_rank(model_id: &str) -> (u8, &str) {
+    let tier = if is_haiku_model(model_id) {
+        0
+    } else if model_id.contains("sonnet") {
+        1
+    } else if model_id.contains("opus") {
+        2
+    } else {
+        3
+    };
+    (tier, model_id)
+}
+
+fn is_haiku_model(model_id: &str) -> bool {
+    model_id.contains("haiku")
+}
+
+fn claude_trigger_request_metadata(model_id: &str) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("modelId".to_string(), model_id.to_string()),
+        ("maxTokens".to_string(), "1".to_string()),
+        (
+            "promptChars".to_string(),
+            WINDOW_ALIGN_PROMPT.chars().count().to_string(),
+        ),
+    ])
 }
 
 fn ensure_success_status_or_trigger_error(
@@ -929,6 +1040,40 @@ fn ensure_success_status_or_trigger_error(
         return Err(ProviderTriggerError::Retryable(message));
     }
     Err(ProviderTriggerError::Terminal(message))
+}
+
+fn claude_rate_limit_rejection_message(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let status = headers
+        .get(CLAUDE_UNIFIED_STATUS_HEADER)
+        .and_then(|value| value.to_str().ok())?;
+    if status != "rejected" {
+        return None;
+    }
+
+    let claim = headers
+        .get(CLAUDE_UNIFIED_CLAIM_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("quota");
+    let window = match claim {
+        "five_hour" => "5-hour limit",
+        "seven_day" => "weekly limit",
+        _ => "quota",
+    };
+    let reset = headers
+        .get(CLAUDE_UNIFIED_RESET_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<i64>().ok())
+        .and_then(unix_seconds_to_local_label);
+
+    Some(match reset {
+        Some(reset) => format!("Claude Code {window} is exhausted; resets at {reset}"),
+        None => format!("Claude Code {window} is exhausted"),
+    })
+}
+
+fn unix_seconds_to_local_label(epoch_seconds: i64) -> Option<String> {
+    let datetime = OffsetDateTime::from_unix_timestamp(epoch_seconds).ok()?;
+    Some(datetime.format(&Rfc3339).ok()?)
 }
 
 fn provider_trigger_log_context(
@@ -973,7 +1118,10 @@ fn response_error_detail(body: &str) -> String {
 mod tests {
     use std::{
         collections::VecDeque,
-        sync::{Arc, Mutex},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
     };
 
     use super::*;
@@ -1024,6 +1172,48 @@ mod tests {
         }
     }
 
+    struct BlockingRunner {
+        trigger_count: AtomicUsize,
+        release: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+    }
+
+    impl BlockingRunner {
+        fn new(release: tokio::sync::oneshot::Receiver<()>) -> Self {
+            Self {
+                trigger_count: AtomicUsize::new(0),
+                release: Mutex::new(Some(release)),
+            }
+        }
+    }
+
+    impl ProviderTriggerRunner for BlockingRunner {
+        fn supports(&self, _provider_id: &str) -> bool {
+            true
+        }
+
+        fn list_models<'a>(&'a self, _provider_id: &'a str) -> ProviderModelsFuture<'a> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn trigger<'a>(
+            &'a self,
+            _provider_id: &'a str,
+            _model_id: &'a str,
+        ) -> ProviderTriggerFuture<'a> {
+            Box::pin(async move {
+                self.trigger_count.fetch_add(1, Ordering::SeqCst);
+                let release = self.release.lock().expect("lock release").take();
+                if let Some(release) = release {
+                    let _ = release.await;
+                }
+                Ok(ProviderTriggerOutcome {
+                    prompt_tokens: 1,
+                    completion_tokens: 1,
+                })
+            })
+        }
+    }
+
     fn test_service(runner: FakeRunner) -> ProviderTriggerService {
         let db = Arc::new(Database::open_in_memory().expect("open db"));
         ProviderTriggerService::with_runner(db, Arc::new(runner))
@@ -1048,6 +1238,41 @@ mod tests {
                 window_align_last_error: None,
             }
         );
+    }
+
+    #[test]
+    fn claude_rate_limit_rejection_maps_to_terminal_quota_message() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            CLAUDE_UNIFIED_STATUS_HEADER,
+            reqwest::header::HeaderValue::from_static("rejected"),
+        );
+        headers.insert(
+            CLAUDE_UNIFIED_CLAIM_HEADER,
+            reqwest::header::HeaderValue::from_static("five_hour"),
+        );
+        headers.insert(
+            CLAUDE_UNIFIED_RESET_HEADER,
+            reqwest::header::HeaderValue::from_static("1787936400"),
+        );
+
+        let message = claude_rate_limit_rejection_message(&headers).expect("quota rejection");
+
+        assert!(message.contains("5-hour limit is exhausted"));
+        assert!(!message.contains("1787936400"));
+    }
+
+    #[test]
+    fn claude_trigger_model_rank_prefers_haiku_for_window_alignment() {
+        let mut models = vec![
+            "claude-sonnet-4-6",
+            "claude-opus-4-8",
+            "claude-haiku-4-5-20251001",
+        ];
+
+        models.sort_by(|a, b| claude_trigger_model_rank(a).cmp(&claude_trigger_model_rank(b)));
+
+        assert_eq!(models[0], "claude-haiku-4-5-20251001");
     }
 
     #[test]
@@ -1205,5 +1430,37 @@ mod tests {
         assert_eq!(settings.window_align_last_error, None);
         assert_eq!(settings.window_align_cron, "");
         assert_eq!(settings.window_align_model_id, None);
+    }
+
+    #[tokio::test]
+    async fn concurrent_manual_triggers_for_same_provider_are_coalesced() {
+        let db = Arc::new(Database::open_in_memory().expect("open db"));
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let runner = Arc::new(BlockingRunner::new(release_rx));
+        let service = ProviderTriggerService::with_runner(db, runner.clone());
+
+        let first = {
+            let service = service.clone();
+            tokio::spawn(async move { service.run_window_alignment_now("claude", "model-1").await })
+        };
+
+        while runner.trigger_count.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+
+        let second = service
+            .run_window_alignment_now("claude", "model-1")
+            .await
+            .expect("coalesced manual trigger reads current settings");
+        assert_eq!(second.window_align_last_status, "never");
+        assert_eq!(runner.trigger_count.load(Ordering::SeqCst), 1);
+
+        release_tx.send(()).expect("release first trigger");
+        let first = first
+            .await
+            .expect("first task joins")
+            .expect("first trigger succeeds");
+        assert_eq!(first.window_align_last_status, "success");
+        assert_eq!(runner.trigger_count.load(Ordering::SeqCst), 1);
     }
 }
