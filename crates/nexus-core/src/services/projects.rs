@@ -13,8 +13,24 @@ use uuid::Uuid;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
+    services::agent_capabilities::agent_capability_surfaces,
     services::paths,
 };
+
+/// Columns shared by every Project read, in the order `project_from_row` expects.
+const PROJECT_SELECT_COLUMNS: &str = r#"
+    p.id,
+    p.name,
+    p.status,
+    p.path,
+    p.sessions_dir,
+    NULL AS sessions_note,
+    (SELECT COUNT(*) FROM skills WHERE project_id = p.id) AS skills,
+    (SELECT COUNT(*) FROM session_index WHERE project_id = p.id) AS sessions,
+    0 AS sync,
+    p.key,
+    p.custom_skills_dirs
+"#;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +46,9 @@ pub struct Project {
     pub sessions: i64,
     pub sync: i64,
     pub key: String,
+    /// Project custom skills directories (relative to Project root, or absolute).
+    /// Scanned as Project custom sources alongside the fixed Agent project skills dirs.
+    pub custom_skills_dirs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -60,23 +79,13 @@ impl ProjectService {
 
     pub fn list_projects(&self) -> AppResult<Vec<Project>> {
         let conn = self.db.connection()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(&format!(
             r#"
-            SELECT
-                p.id,
-                p.name,
-                p.status,
-                p.path,
-                p.sessions_dir,
-                NULL AS sessions_note,
-                (SELECT COUNT(*) FROM skills WHERE project_id = p.id) AS skills,
-                (SELECT COUNT(*) FROM session_index WHERE project_id = p.id) AS sessions,
-                0 AS sync,
-                p.key
+            SELECT {PROJECT_SELECT_COLUMNS}
             FROM projects p
             ORDER BY p.sort_index IS NULL, p.sort_index, p.created_at, p.name
             "#,
-        )?;
+        ))?;
 
         let rows = stmt.query_map([], project_from_row)?;
         let mut projects = rows.collect::<Result<Vec<_>, _>>()?;
@@ -192,27 +201,84 @@ impl ProjectService {
         };
 
         let project = tx.query_row(
-            r#"
-            SELECT
-                p.id,
-                p.name,
-                p.status,
-                p.path,
-                p.sessions_dir,
-                NULL AS sessions_note,
-                (SELECT COUNT(*) FROM skills WHERE project_id = p.id) AS skills,
-                (SELECT COUNT(*) FROM session_index WHERE project_id = p.id) AS sessions,
-                0 AS sync,
-                p.key
-            FROM projects p
-            WHERE p.id = ?1
-            "#,
+            &format!(
+                r#"
+                SELECT {PROJECT_SELECT_COLUMNS}
+                FROM projects p
+                WHERE p.id = ?1
+                "#,
+            ),
             params![id],
             project_from_row,
         )?;
 
         tx.commit()?;
         Ok(project)
+    }
+
+    /// Replace the full set of Project custom skills directories. Entries are trimmed
+    /// and de-duplicated by normalized identity; a dir resolving to a fixed Agent
+    /// project skills dir is rejected so the same path never yields two source kinds.
+    pub fn set_project_custom_skills_dirs(
+        &self,
+        project_id: String,
+        dirs: Vec<String>,
+    ) -> AppResult<Project> {
+        let id = project_id.trim();
+        if id.is_empty() {
+            return Err(AppError::Validation("project id is required".to_string()));
+        }
+
+        let agent_dirs: HashSet<String> = agent_capability_surfaces()
+            .iter()
+            .filter_map(|agent| agent.skill.map(|skill| normalize_custom_dir(skill.project_dir)))
+            .collect();
+
+        let mut seen = HashSet::new();
+        let mut stored = Vec::new();
+        for dir in dirs {
+            let trimmed = dir.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let normalized = normalize_custom_dir(trimmed);
+            if normalized.is_empty() {
+                continue;
+            }
+            if agent_dirs.contains(&normalized) {
+                return Err(AppError::Validation(format!(
+                    "custom skills dir conflicts with a fixed agent skills dir: {normalized}"
+                )));
+            }
+            if seen.insert(normalized) {
+                stored.push(trimmed.to_string());
+            }
+        }
+
+        let value = stored.join("\n");
+        let now = now_epoch_seconds()?;
+        let conn = self.db.connection()?;
+        let changed = conn.execute(
+            "UPDATE projects SET custom_skills_dirs = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, value, now],
+        )?;
+        if changed == 0 {
+            return Err(AppError::Validation("project was not found".to_string()));
+        }
+
+        conn.query_row(
+            &format!(
+                r#"
+                SELECT {PROJECT_SELECT_COLUMNS}
+                FROM projects p
+                WHERE p.id = ?1
+                "#,
+            ),
+            params![id],
+            project_from_row,
+        )
+        .optional()?
+        .ok_or_else(|| AppError::Validation("project was not found".to_string()))
     }
 
     pub fn record_git_base_folder(&self, path: String) -> AppResult<GitBaseFolder> {
@@ -449,7 +515,27 @@ fn project_from_row(row: &Row<'_>) -> rusqlite::Result<Project> {
         sessions: row.get(7)?,
         sync: row.get(8)?,
         key: row.get(9)?,
+        custom_skills_dirs: parse_dir_list(&row.get::<_, String>(10)?),
     })
+}
+
+/// Split a newline-joined custom skills dir list into trimmed, non-empty entries.
+pub(crate) fn parse_dir_list(value: &str) -> Vec<String> {
+    value
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+/// Normalize a custom skills dir for de-duplication and conflict checks: trim, use
+/// `/` separators, drop a leading `./` and any trailing slash. Identity only — the
+/// stored value keeps the user's original (relative or absolute) form.
+pub(crate) fn normalize_custom_dir(dir: &str) -> String {
+    let normalized = dir.trim().replace('\\', "/");
+    let normalized = normalized.strip_prefix("./").unwrap_or(&normalized);
+    normalized.trim_end_matches('/').to_string()
 }
 
 fn git_base_folder_from_row(row: &Row<'_>) -> rusqlite::Result<GitBaseFolder> {

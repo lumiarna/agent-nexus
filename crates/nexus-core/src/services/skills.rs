@@ -15,6 +15,7 @@ use crate::{
     services::agent_capabilities::{agent_capability_surfaces, AgentCapabilitySurface},
     services::distribution::{self, MatrixSource},
     services::paths::{self, path_to_string},
+    services::projects,
     services::symlink::{create_managed_directory_link, remove_managed_directory_link_if_present},
     services::system_open::{open_path, reveal_path},
     services::util::{now_epoch_seconds, require_agent, required_trimmed},
@@ -32,7 +33,17 @@ pub struct Skill {
     pub path: String,
     pub disabled: bool,
     pub cells: BTreeMap<String, String>,
+    /// Canonical source kind: `agent` (owned by a fixed Agent skills dir) or
+    /// `project_custom` (from a Project custom_skills_dir, no Agent source).
+    pub source_kind: String,
+    /// Owning Agent for `source_kind = agent`; `None` for `project_custom`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_agent: Option<String>,
 }
+
+/// Source kind discriminants stored in `skills.source_kind`.
+const SOURCE_KIND_AGENT: &str = "agent";
+const SOURCE_KIND_PROJECT_CUSTOM: &str = "project_custom";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,11 +62,14 @@ pub struct SkillService {
 struct ProjectRoot {
     id: String,
     path: PathBuf,
+    custom_dirs: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 struct SkillSource {
+    /// Owning Agent name, or `""` for a Project custom source (no Agent source cell).
     source_agent: &'static str,
+    source_kind: &'static str,
     scope: String,
     project_id: Option<String>,
     project_path: Option<PathBuf>,
@@ -76,6 +90,7 @@ impl MatrixSource for SkillSource {
 
     fn target_path_for(&self, agent: &AgentCapabilitySurface) -> AppResult<Option<PathBuf>> {
         target_path_for_parts(
+            self.source_kind,
             &self.scope,
             self.project_path.as_deref(),
             &self.canonical_path,
@@ -111,7 +126,9 @@ impl SkillService {
                 s.project_id,
                 COALESCE(s.description, ''),
                 s.canonical_path,
-                s.disabled
+                s.disabled,
+                s.source_kind,
+                s.source_agent
             FROM skills s
             LEFT JOIN projects p ON p.id = s.project_id
             ORDER BY
@@ -137,7 +154,14 @@ impl SkillService {
                 continue;
             };
             if let Some(dir) = expand_home(skill.global_dir) {
-                sources.extend(discover_skill_sources(agent, "global", None, None, &dir)?);
+                sources.extend(discover_skill_sources(
+                    agent.name,
+                    SOURCE_KIND_AGENT,
+                    "global",
+                    None,
+                    None,
+                    &dir,
+                )?);
             }
         }
 
@@ -148,7 +172,22 @@ impl SkillService {
                 };
                 let dir = project.path.join(skill.project_dir);
                 sources.extend(discover_skill_sources(
-                    agent,
+                    agent.name,
+                    SOURCE_KIND_AGENT,
+                    "project",
+                    Some(project.id.clone()),
+                    Some(project.path.clone()),
+                    &dir,
+                )?);
+            }
+
+            // Project custom skills dirs: extra Project custom sources with no Agent
+            // owner. They are scanned in addition to the fixed Agent dirs above.
+            for custom_dir in &project.custom_dirs {
+                let dir = resolve_custom_dir(&project.path, custom_dir);
+                sources.extend(discover_skill_sources(
+                    "",
+                    SOURCE_KIND_PROJECT_CUSTOM,
                     "project",
                     Some(project.id.clone()),
                     Some(project.path.clone()),
@@ -173,14 +212,19 @@ impl SkillService {
         let skill_id = required_trimmed(&input.skill_id, "skill id")?;
         let target_agent = require_agent(required_trimmed(&input.agent, "agent")?)?;
         let context = self.skill_target_context(skill_id)?;
-        let source_agent = require_agent(&context.source_agent)?;
-        if source_agent.name == target_agent.name {
-            return Err(AppError::Validation(
-                "source agent cannot be toggled as a target".to_string(),
-            ));
+        // An agent-sourced skill cannot toggle its own source cell. A Project custom
+        // skill has no Agent source, so every Agent is a valid Global placement target.
+        if context.source_kind == SOURCE_KIND_AGENT {
+            let source_agent = require_agent(context.source_agent.as_deref().unwrap_or_default())?;
+            if source_agent.name == target_agent.name {
+                return Err(AppError::Validation(
+                    "source agent cannot be toggled as a target".to_string(),
+                ));
+            }
         }
 
         let target_path = target_path_for_parts(
+            &context.source_kind,
             &context.scope,
             context.project_path.as_deref(),
             &context.canonical_path,
@@ -255,7 +299,7 @@ impl SkillService {
         let conn = self.db.connection()?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, path
+            SELECT id, path, custom_skills_dirs
             FROM projects
             WHERE status = 'active'
             ORDER BY sort_index IS NULL, sort_index, created_at, name
@@ -263,9 +307,11 @@ impl SkillService {
         )?;
         let rows = stmt.query_map([], |row| {
             let path: String = row.get(1)?;
+            let custom_skills_dirs: String = row.get(2)?;
             Ok(ProjectRoot {
                 id: row.get(0)?,
                 path: PathBuf::from(path),
+                custom_dirs: projects::parse_dir_list(&custom_skills_dirs),
             })
         })?;
 
@@ -284,6 +330,11 @@ impl SkillService {
                 continue;
             }
 
+            let source_agent: Option<&str> = if source.source_kind == SOURCE_KIND_AGENT {
+                Some(source.source_agent)
+            } else {
+                None
+            };
             let existing_id = tx
                 .query_row(
                     "SELECT id FROM skills WHERE canonical_path = ?1",
@@ -302,7 +353,9 @@ impl SkillService {
                             description = ?5,
                             canonical_path = ?6,
                             disabled = ?7,
-                            updated_at = ?8
+                            source_kind = ?8,
+                            source_agent = ?9,
+                            updated_at = ?10
                         WHERE id = ?1
                         "#,
                         params![
@@ -313,6 +366,8 @@ impl SkillService {
                             source.desc,
                             canonical_path,
                             if source.disabled { 1 } else { 0 },
+                            source.source_kind,
+                            source_agent,
                             now,
                         ],
                     )?;
@@ -324,9 +379,9 @@ impl SkillService {
                         r#"
                         INSERT INTO skills (
                             id, name, scope, project_id, description, canonical_path, disabled,
-                            created_at, updated_at
+                            source_kind, source_agent, created_at, updated_at
                         )
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
                         "#,
                         params![
                             id,
@@ -336,6 +391,8 @@ impl SkillService {
                             source.desc,
                             canonical_path,
                             if source.disabled { 1 } else { 0 },
+                            source.source_kind,
+                            source_agent,
                             now,
                         ],
                     )?;
@@ -379,7 +436,8 @@ impl SkillService {
         let conn = self.db.connection()?;
         conn.query_row(
             r#"
-            SELECT id, name, scope, project_id, COALESCE(description, ''), canonical_path, disabled
+            SELECT id, name, scope, project_id, COALESCE(description, ''), canonical_path, disabled,
+                   source_kind, source_agent
             FROM skills
             WHERE id = ?1
             "#,
@@ -394,10 +452,9 @@ impl SkillService {
         let conn = self.db.connection()?;
         conn.query_row(
             r#"
-            SELECT s.scope, p.path, s.canonical_path, d.agent
+            SELECT s.scope, p.path, s.canonical_path, s.source_kind, s.source_agent
             FROM skills s
             LEFT JOIN projects p ON p.id = s.project_id
-            JOIN skill_distributions d ON d.skill_id = s.id AND d.role = 'source'
             WHERE s.id = ?1
             "#,
             params![id],
@@ -408,12 +465,13 @@ impl SkillService {
                     scope: row.get(0)?,
                     project_path: project_path.map(PathBuf::from),
                     canonical_path: PathBuf::from(canonical_path),
-                    source_agent: row.get(3)?,
+                    source_kind: row.get(3)?,
+                    source_agent: row.get(4)?,
                 })
             },
         )
         .optional()?
-        .ok_or_else(|| AppError::Validation("skill source was not found".to_string()))
+        .ok_or_else(|| AppError::Validation("skill was not found".to_string()))
     }
 
     fn skill_canonical_path(&self, id: &str) -> AppResult<PathBuf> {
@@ -434,11 +492,13 @@ struct SkillTargetContext {
     scope: String,
     project_path: Option<PathBuf>,
     canonical_path: PathBuf,
-    source_agent: String,
+    source_kind: String,
+    source_agent: Option<String>,
 }
 
 fn discover_skill_sources(
-    agent: &AgentCapabilitySurface,
+    source_agent: &'static str,
+    source_kind: &'static str,
     scope: &str,
     project_id: Option<String>,
     project_path: Option<PathBuf>,
@@ -465,7 +525,8 @@ fn discover_skill_sources(
         let canonical_path = path.canonicalize()?;
         let metadata = read_skill_metadata(&canonical_path)?;
         sources.push(SkillSource {
-            source_agent: agent.name,
+            source_agent,
+            source_kind,
             scope: scope.to_string(),
             project_id: project_id.clone(),
             project_path: project_path.clone(),
@@ -477,6 +538,18 @@ fn discover_skill_sources(
     }
 
     Ok(sources)
+}
+
+/// Resolve a Project custom skills dir against the Project root. Absolute paths and
+/// `~`-prefixed paths are used as-is; relative paths join the Project root.
+fn resolve_custom_dir(project_root: &Path, dir: &str) -> PathBuf {
+    let trimmed = dir.trim();
+    if let Some(expanded) = expand_home(trimmed) {
+        if expanded.is_absolute() {
+            return expanded;
+        }
+    }
+    project_root.join(trimmed)
 }
 
 fn read_skill_metadata(skill_dir: &Path) -> AppResult<SkillMetadata> {
@@ -564,6 +637,7 @@ fn set_disable_model_invocation(contents: &str, disabled: bool) -> String {
 }
 
 fn target_path_for_parts(
+    source_kind: &str,
     scope: &str,
     project_path: Option<&Path>,
     canonical_path: &Path,
@@ -573,7 +647,9 @@ fn target_path_for_parts(
         return Ok(None);
     };
     let dir_name = skill_dir_name(canonical_path)?;
-    if scope == "global" {
+    // A Project custom skill propagates to each Agent's *global* skills dir as a
+    // managed Global placement, even though its scope stays `project`.
+    if scope == "global" || source_kind == SOURCE_KIND_PROJECT_CUSTOM {
         return Ok(expand_home(skill.global_dir).map(|dir| dir.join(dir_name)));
     }
 
@@ -594,6 +670,8 @@ fn skill_from_row(row: &Row<'_>, conn: &rusqlite::Connection) -> rusqlite::Resul
         desc: row.get(4)?,
         path: row.get(5)?,
         disabled: row.get::<_, i64>(6)? != 0,
+        source_kind: row.get(7)?,
+        source_agent: row.get(8)?,
     })
 }
 

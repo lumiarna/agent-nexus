@@ -48,6 +48,7 @@ pub fn run() {
             commands::projects::remove_git_base_folder,
             commands::projects::scan_git_base_folder,
             commands::projects::scan_git_base_folders,
+            commands::projects::set_project_custom_skills_dirs,
             commands::sessions::get_cloud_session,
             commands::sessions::get_local_session,
             commands::sessions::list_cloud_sessions,

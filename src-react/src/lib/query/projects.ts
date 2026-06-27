@@ -67,6 +67,22 @@ export function useReorderProjectsMutation() {
   });
 }
 
+export function useSetProjectCustomSkillsDirsMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ projectId, dirs }: { projectId: string; dirs: string[] }) =>
+      projectsApi.setCustomSkillsDirs(projectId, dirs),
+    onSuccess: async (project: Project) => {
+      queryClient.setQueryData<Project[]>(projectKeys.all, (current) =>
+        current ? current.map((p) => (p.id === project.id ? project : p)) : current,
+      );
+      // Custom dirs change the Project custom Skill set — rescan on next read.
+      await queryClient.invalidateQueries({ queryKey: skillKeys.all });
+    },
+  });
+}
+
 export function useGitBaseFoldersQuery() {
   return useQuery({
     queryKey: projectKeys.gitBaseFolders,

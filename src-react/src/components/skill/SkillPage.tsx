@@ -15,6 +15,7 @@ import {
   useSkillsQuery,
 } from "@/lib/query/skills";
 import { isTauriRuntime } from "@/lib/runtime";
+import { hasGlobalPlacement, isProjectCustomSkill, targetAgentsOf } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type { AgentName, Skill } from "@/types";
 
@@ -87,6 +88,36 @@ export function SkillPage() {
     }
   }
 
+  async function propagateGlobal(skill: Skill, entryAgent: AgentName) {
+    if (!desktop) {
+      toast("Desktop runtime required for propagating skills");
+      return;
+    }
+
+    try {
+      await setSkillTarget.mutateAsync({ skillId: skill.id, agent: entryAgent, enabled: true });
+      toast(`Propagated to Global · ${entryAgent}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function unpropagateGlobal(skill: Skill) {
+    if (!desktop) {
+      toast("Desktop runtime required for changing skill placements");
+      return;
+    }
+
+    try {
+      for (const agent of targetAgentsOf(skill.cells)) {
+        await setSkillTarget.mutateAsync({ skillId: skill.id, agent, enabled: false });
+      }
+      toast("Removed from Global");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
   async function toggleDmi(skill: Skill) {
     if (!desktop) {
       toast("Desktop runtime required for changing skill settings");
@@ -137,7 +168,7 @@ export function SkillPage() {
   let set = skills.filter((k) =>
     isProj
       ? k.scope === "project" && (projectId === null || k.projectId === projectId)
-      : k.scope === "global",
+      : k.scope === "global" || (isProjectCustomSkill(k) && hasGlobalPlacement(k.cells)),
   );
   if (q) set = set.filter((k) => k.name.toLowerCase().includes(q) || k.desc.toLowerCase().includes(q));
 
@@ -245,8 +276,12 @@ export function SkillPage() {
             <SkillRow
               key={k.id}
               skill={k}
+              mode={isProj ? "project" : "global"}
+              projectName={k.projectId ? projects.find((p) => p.id === k.projectId)?.name : undefined}
               onToggleCell={(a) => void toggleCell(k, a)}
               onToggleDmi={() => void toggleDmi(k)}
+              onPropagateGlobal={(entry) => void propagateGlobal(k, entry)}
+              onUnpropagateGlobal={() => void unpropagateGlobal(k)}
               onOpen={() => void openSource(k)}
               onReveal={() => void revealPath(k)}
             />
@@ -262,7 +297,9 @@ export function SkillPage() {
       <p className="mt-3.5 text-[11.5px] text-[#b3a999]">
         Distribution targets show as Agent icons — <b className="text-[#9a8f80]">Agents</b> (the
         shared <span className="font-mono">~/.agents</span> dir) sits leftmost, then Claude Code /
-        CodeX / Copilot / OpenCode. Each row has exactly one source.
+        CodeX / Copilot / OpenCode. Agent-sourced rows have exactly one source;{" "}
+        <b className="text-[#9a8f80]">Project source</b> rows have no Agent source — their cells are
+        Global placements linked from a Project custom skills dir.
       </p>
     </ScreenScroll>
   );

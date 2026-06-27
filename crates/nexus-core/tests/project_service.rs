@@ -19,6 +19,49 @@ fn canonical_display_path(path: impl AsRef<Path>) -> String {
 }
 
 #[test]
+fn defaults_custom_skills_dirs_to_skills_and_replaces_with_dedup() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "agent-nexus");
+    let recorded = service.record_project(repo).expect("record project");
+
+    // A freshly recorded project scans `skills` by default.
+    assert_eq!(recorded.custom_skills_dirs, vec!["skills".to_string()]);
+
+    let updated = service
+        .set_project_custom_skills_dirs(
+            recorded.id.clone(),
+            vec![
+                "skills".to_string(),
+                "  .nexus/skills  ".to_string(),
+                "./.nexus/skills/".to_string(),
+            ],
+        )
+        .expect("set custom skills dirs");
+
+    // Trimmed, and the two `.nexus/skills` spellings collapse to one entry.
+    assert_eq!(
+        updated.custom_skills_dirs,
+        vec!["skills".to_string(), ".nexus/skills".to_string()]
+    );
+}
+
+#[test]
+fn rejects_custom_skills_dir_that_is_a_fixed_agent_dir() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "agent-nexus");
+    let recorded = service.record_project(repo).expect("record project");
+
+    let error = service
+        .set_project_custom_skills_dirs(recorded.id, vec![".claude/skills".to_string()])
+        .expect_err("agent dir must be rejected");
+    assert!(error.to_string().contains("fixed agent skills dir"));
+}
+
+#[test]
 fn records_git_project_and_lists_it_by_folder_key() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());

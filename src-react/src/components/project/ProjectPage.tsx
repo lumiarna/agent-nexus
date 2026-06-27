@@ -35,6 +35,7 @@ import {
   useReorderProjectsMutation,
   useRemoveGitBaseFolderMutation,
   useScanGitBaseFoldersMutation,
+  useSetProjectCustomSkillsDirsMutation,
 } from "@/lib/query/projects";
 import {
   useCloudSessionsQuery,
@@ -46,7 +47,7 @@ import {
   useSkillsQuery,
 } from "@/lib/query/skills";
 import { useSessionBackupsQuery } from "@/lib/query/sync";
-import { palette } from "@/lib/tokens";
+import { palette, targetAgentsOf } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import type { AgentName, Project, Skill, TaskStatus } from "@/types";
 
@@ -163,6 +164,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const reorderProjects = useReorderProjectsMutation();
   const setSkillTarget = useSetSkillTargetMutation();
   const setSkillDisabled = useSetSkillDisabledMutation();
+  const setCustomSkillsDirs = useSetProjectCustomSkillsDirsMutation();
   const recordBaseFolder = useRecordGitBaseFolderMutation();
   const removeBaseFolder = useRemoveGitBaseFolderMutation();
   const scanBaseFolders = useScanGitBaseFoldersMutation();
@@ -189,6 +191,8 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteAck, setDeleteAck] = useState(false);
   const [addPath, setAddPath] = useState("");
+  const [customDirsOpen, setCustomDirsOpen] = useState(false);
+  const [customDirInput, setCustomDirInput] = useState("");
   const addKey = deriveProjectKey(addPath);
 
   useEffect(() => {
@@ -306,6 +310,36 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
     }
   }
 
+  async function propagateGlobal(skill: Skill, entryAgent: AgentName) {
+    if (!desktop) {
+      toast("Desktop runtime required for propagating skills");
+      return;
+    }
+
+    try {
+      await setSkillTarget.mutateAsync({ skillId: skill.id, agent: entryAgent, enabled: true });
+      toast(`Propagated to Global · ${entryAgent}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function unpropagateGlobal(skill: Skill) {
+    if (!desktop) {
+      toast("Desktop runtime required for changing skill placements");
+      return;
+    }
+
+    try {
+      for (const agent of targetAgentsOf(skill.cells)) {
+        await setSkillTarget.mutateAsync({ skillId: skill.id, agent, enabled: false });
+      }
+      toast("Removed from Global");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
   async function toggleDmi(skill: Skill) {
     if (!desktop) {
       toast("Desktop runtime required for changing skill settings");
@@ -315,6 +349,39 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
     try {
       await setSkillDisabled.mutateAsync({ id: skill.id, disabled: !skill.disabled });
       toast(!skill.disabled ? "Model invocation disabled" : "Model invocation enabled");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function addCustomSkillsDir() {
+    const dir = customDirInput.trim();
+    if (!dir || !dp) return;
+    const existing = dp.customSkillsDirs ?? [];
+    if (existing.includes(dir)) {
+      toast("Directory already added");
+      return;
+    }
+
+    try {
+      await setCustomSkillsDirs.mutateAsync({ projectId: dp.id, dirs: [...existing, dir] });
+      setCustomDirInput("");
+      toast(`Added custom skills dir · ${dir}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function removeCustomSkillsDir(dir: string) {
+    if (!dp) return;
+    const existing = dp.customSkillsDirs ?? [];
+
+    try {
+      await setCustomSkillsDirs.mutateAsync({
+        projectId: dp.id,
+        dirs: existing.filter((d) => d !== dir),
+      });
+      toast(`Removed custom skills dir · ${dir}`);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -658,9 +725,23 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               <span className="text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
                 Skill
               </span>
-              <span className="text-[11px] text-[#b3a999]">
-                project scope · {dpSkills.length} {dpSkills.length === 1 ? "skill" : "skills"}
-              </span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setCustomDirInput("skills");
+                    setCustomDirsOpen(true);
+                  }}
+                  className="text-[11px] font-semibold text-nexus-accent hover:underline"
+                >
+                  Custom skills dirs
+                  {dp.customSkillsDirs && dp.customSkillsDirs.length > 0
+                    ? ` · ${dp.customSkillsDirs.length}`
+                    : ""}
+                </button>
+                <span className="text-[11px] text-[#b3a999]">
+                  project scope · {dpSkills.length} {dpSkills.length === 1 ? "skill" : "skills"}
+                </span>
+              </div>
             </div>
             <div
               className="grid items-center gap-4 px-5 py-2.5 text-[10.5px] font-bold uppercase tracking-[.05em] text-[#b3a999]"
@@ -684,8 +765,12 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                 <SkillRow
                   key={k.id}
                   skill={k}
+                  mode="project"
+                  projectName={dp.name}
                   onToggleCell={(a) => void toggleCell(k, a)}
                   onToggleDmi={() => void toggleDmi(k)}
+                  onPropagateGlobal={(entry) => void propagateGlobal(k, entry)}
+                  onUnpropagateGlobal={() => void unpropagateGlobal(k)}
                   onOpen={() => void openSkillSource(k)}
                   onReveal={() => void revealSkillPath(k)}
                 />
@@ -863,6 +948,99 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
           </Button>
         </ModalFooter>
       </Modal>
+
+      {/* Custom skills dirs modal */}
+      {dp ? (
+      <Modal
+        open={customDirsOpen}
+        onClose={() => setCustomDirsOpen(false)}
+        className="max-h-[88vh] w-[560px]"
+      >
+        <ModalHeader
+          title="Project custom skills dirs"
+          subtitle="Extra scan sources alongside the fixed Agent project skills dirs"
+        />
+        <div className="flex flex-col gap-4 px-[22px] py-5">
+          <div className="flex gap-2">
+            <input
+              value={customDirInput}
+              onChange={(event) => setCustomDirInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !setCustomSkillsDirs.isPending) {
+                  void addCustomSkillsDir();
+                }
+              }}
+              placeholder="skills  ·  .nexus/skills  ·  /abs/path/to/skills"
+              className="min-w-0 flex-1 rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055] outline-none focus:border-nexus-accent"
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              className="rounded-[10px]"
+              onClick={() => void addCustomSkillsDir()}
+              disabled={setCustomSkillsDirs.isPending || !customDirInput.trim()}
+            >
+              {setCustomSkillsDirs.isPending ? "Saving..." : "Add dir"}
+            </Button>
+          </div>
+
+          <div className="flex flex-col gap-0.5 overflow-hidden rounded-[12px] border border-nexus-border">
+            {(dp.customSkillsDirs ?? []).length === 0 ? (
+              <div className="px-3.5 py-[11px] text-[12px] text-[#b3a999]">
+                No custom skills dirs. Relative paths resolve against the Project root.
+              </div>
+            ) : (
+              (dp.customSkillsDirs ?? []).map((dir, i) => {
+                const external = /^(~|\/|[A-Za-z]:[\\/])/.test(dir);
+                return (
+                  <div
+                    key={dir}
+                    className={cn(
+                      "flex items-center justify-between gap-3 px-3.5 py-[11px]",
+                      i > 0 && "border-t border-[#f3eee5]",
+                    )}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-nexus-body">
+                        {dir}
+                      </span>
+                      <span
+                        className="flex-none rounded-[5px] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em]"
+                        style={{
+                          color: external ? "#9a6f0a" : "#5f7a3e",
+                          background: external ? "#f7eccb" : "#e9eed8",
+                        }}
+                      >
+                        {external ? "External" : "In repo"}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => void removeCustomSkillsDir(dir)}
+                      disabled={setCustomSkillsDirs.isPending}
+                      className="flex-none text-[11px] font-semibold text-nexus-crit hover:underline disabled:cursor-wait disabled:opacity-60"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="rounded-[11px] border border-nexus-border bg-nexus-bg px-3.5 py-[11px] text-[11.5px] leading-[1.55] text-[#8a7a68]">
+            Each dir is scanned for real Skill folders (containing <span className="font-mono">SKILL.md</span>)
+            as Project custom sources — they show no Agent Matrix and can be propagated to Global.
+            A dir that resolves to a fixed Agent project skills dir is rejected. Removing a dir drops
+            its custom Skills on the next scan; managed Global placements fall back to none.
+          </div>
+        </div>
+        <ModalFooter>
+          <Button variant="subtle" onClick={() => setCustomDirsOpen(false)}>
+            Close
+          </Button>
+        </ModalFooter>
+      </Modal>
+      ) : null}
 
       {/* Git Base Folders modal */}
       <Modal open={baseFoldersOpen} onClose={() => setBaseFoldersOpen(false)} className="max-h-[88vh] w-[560px]">

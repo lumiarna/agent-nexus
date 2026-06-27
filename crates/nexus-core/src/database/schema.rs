@@ -2,7 +2,11 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 15;
+const CURRENT_SCHEMA_VERSION: i64 = 16;
+
+/// Default Project custom skills directory — every Project scans `<root>/skills`
+/// as a Project custom source unless the user edits the list.
+pub(crate) const DEFAULT_PROJECT_CUSTOM_SKILLS_DIRS: &str = "skills";
 
 const LEGACY_DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules";
 pub(crate) const DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS: &str = ".git\n.venv\nnode_modules\ntarget\ndist\nbuild\nout\n__pycache__\n.pytest_cache\n.mypy_cache\n.ruff_cache\n.next\n.nuxt\n.turbo\n.svelte-kit\n.gradle\n.idea\ncoverage\n.tox\n.cache";
@@ -72,6 +76,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 15 {
             migrate_to_v15(conn)?;
         }
+        if current < 16 {
+            migrate_to_v16(conn)?;
+        }
     }
 
     Ok(())
@@ -103,7 +110,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (15);
+        INSERT INTO schema_version (version) VALUES (16);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -113,6 +120,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             status TEXT NOT NULL DEFAULT 'active'
                 CHECK (status IN ('active', 'stale', 'hidden')),
             sessions_dir TEXT NOT NULL DEFAULT '__sessions',
+            custom_skills_dirs TEXT NOT NULL DEFAULT 'skills',
             sort_index INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
@@ -132,6 +140,9 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             description TEXT,
             canonical_path TEXT NOT NULL,
             disabled INTEGER NOT NULL DEFAULT 0,
+            source_kind TEXT NOT NULL DEFAULT 'agent'
+                CHECK (source_kind IN ('agent', 'project_custom')),
+            source_agent TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -811,6 +822,34 @@ fn migrate_to_v15(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
+fn migrate_to_v16(conn: &Connection) -> AppResult<()> {
+    // Project custom skills sources: skills gain a source kind / owning agent, and
+    // projects gain a newline-joined list of custom skills dirs (default `skills`).
+    conn.execute_batch(&format!(
+        r#"
+        BEGIN;
+        ALTER TABLE skills ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'agent';
+        ALTER TABLE skills ADD COLUMN source_agent TEXT;
+        UPDATE skills
+            SET source_agent = (
+                SELECT agent FROM skill_distributions
+                WHERE skill_id = skills.id AND role = 'source'
+            )
+            WHERE source_kind = 'agent';
+        ALTER TABLE projects
+            ADD COLUMN custom_skills_dirs TEXT NOT NULL DEFAULT '{default_custom_skills_dirs}';
+        UPDATE schema_version SET version = 16;
+        COMMIT;
+        "#,
+        default_custom_skills_dirs = DEFAULT_PROJECT_CUSTOM_SKILLS_DIRS,
+    ))
+    .inspect_err(|_| {
+        let _ = conn.execute("ROLLBACK", params![]);
+    })?;
+
+    Ok(())
+}
+
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
     if task_column_exists(conn, column)? {
         return Ok(());
@@ -875,6 +914,13 @@ mod tests {
             .expect("create projects table");
         conn.execute_batch(
             r#"
+            CREATE TABLE skills (id TEXT PRIMARY KEY);
+            CREATE TABLE skill_distributions (
+                skill_id TEXT NOT NULL,
+                agent TEXT NOT NULL,
+                role TEXT NOT NULL,
+                target_path TEXT
+            );
             CREATE TABLE prompts (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,

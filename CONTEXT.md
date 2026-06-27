@@ -57,8 +57,12 @@ _Avoid_: Local path, mutable folder name as identity, remote guess
 ## Assets
 
 **Skill**:
-一种可被 agent 消费的共享能力资产。`Skill` 同时支持 `global` 与 `project` 两种 `Scope`，并以 `canonical source` 作为资产身份。
+一种可被 agent 消费的共享能力资产。`Skill` 同时支持 `global` 与 `project` 两种 `Scope`，并以 `canonical source` 作为资产身份。其 canonical source 有两种来源：`agent`（落在某个 Agent 的固定 skills 目录，由 `Source Agent` 拥有）与 `project_custom`（落在 `Project Custom Source`，不归属任一 Agent）。
 _Avoid_: Skill copy, skill target, generated placement
+
+**Project Custom Source**:
+一个由 `Project` 维护、不归属任一 `Agent` 的 `Skill` canonical source。它来自 Project 配置的 `custom_skills_dirs`，与固定 Agent project skills 目录并列扫描；它是合法 canonical source，但不是 `Agent source`。其 Global / 其他 Agent 落点都只是 managed `Placement`，不构成新的 canonical Skill。
+_Avoid_: Agent source, new global skill copy, placement-as-source
 
 **Prompt**:
 一种面向 agent 的共享提示资产，同时支持 `global` 与 `project` 两种 `Scope`。Global Prompt 使用各 Agent 的全局提示文件；Project Prompt 只覆盖仓库根的 `AGENTS.md`（Generic Agent）与 `CLAUDE.md`（Claude Code）。
@@ -113,12 +117,12 @@ _Avoid_: Type, category
 _Avoid_: Two-way sync, replication mesh
 
 **Agent Matrix**:
-`Skill` 和 `Prompt` 页面中的传播关系模型。它表达某个资产在不同 agent 上的 `source / target / none` 关系；每一行必须且只能有一个 `source`。MVP 中该模型可以用紧凑行与 Agent 图标组呈现，而不要求固定采用每个 agent 单独占一列的显式宽矩阵。
-_Avoid_: Agent tree, config table, task grid
+`Skill` 和 `Prompt` 页面中的传播关系模型。它表达某个资产在不同 agent 上的 `source / target / none` 关系。对 `agent` source kind 的行，每一行必须且只能有一个 `source`；对 `Project Custom Source` 的 `Skill` 行没有 `source` cell，cell 只表达 `target / none` 的 Global placement，行内改以 `Project source` 标识来源。MVP 中该模型可以用紧凑行与 Agent 图标组呈现，而不要求固定采用每个 agent 单独占一列的显式宽矩阵。
+_Avoid_: Agent tree, config table, task grid, every row has an agent source
 
 **Source Agent**:
-在 `Agent Matrix` 中拥有该资产 `canonical source` 的 agent。它表示关系起点，而不是运行时执行者。
-_Avoid_: Owner, primary target
+在 `Agent Matrix` 中拥有该资产 `canonical source` 的 agent，仅当 source kind 为 `agent` 时存在。它表示关系起点，而不是运行时执行者；`Project Custom Source` 的 `Skill` 没有 `Source Agent`。
+_Avoid_: Owner, primary target, source of project custom skill
 
 **Target Agent**:
 在 `Agent Matrix` 中接收资产传播关系的 agent。对 `Skill` 和 `Prompt`，其目标路径由系统按 agent 与上下文自动计算。

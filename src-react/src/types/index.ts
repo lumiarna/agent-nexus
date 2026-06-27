@@ -59,6 +59,10 @@ export interface Project {
   sync: number;
   /** Stable cross-device identity key — always the folder name in the MVP. */
   key: string;
+  /** Extra Project custom skills directories scanned alongside the fixed Agent
+   *  project skills dirs. Relative paths resolve against the Project root; absolute
+   *  paths may live outside the repo. Absent on backends that predate the feature. */
+  customSkillsDirs?: string[];
 }
 
 export interface GitBaseFolder {
@@ -75,6 +79,14 @@ export interface ScanResult {
 
 // ─── Skill / Prompt ─────────────────────────────────────────────────────────
 
+/** Canonical source kind for a Skill.
+ *  `agent` — owned by a fixed Agent project/global skills dir; the Agent Matrix
+ *  has exactly one `source` cell.
+ *  `project_custom` — discovered from a Project `custom_skills_dir`; the canonical
+ *  source belongs to no Agent, so the row has no `source` cell. Global placements
+ *  are managed symlinks/junctions and show only as `target` / `none`. */
+export type SkillSourceKind = "agent" | "project_custom";
+
 export interface Skill {
   id: string;
   name: string;
@@ -84,6 +96,11 @@ export interface Skill {
   path: string;
   disabled: boolean;
   cells: Cells;
+  /** Canonical source kind. Absent payloads are treated as `agent` for
+   *  backward compatibility with backends that predate project custom sources. */
+  sourceKind?: SkillSourceKind;
+  /** Owning Agent when `sourceKind === "agent"`; `undefined` for `project_custom`. */
+  sourceAgent?: AgentName;
 }
 
 export interface Prompt {

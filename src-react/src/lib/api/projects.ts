@@ -37,4 +37,11 @@ export const projectsApi = {
   scanGitBaseFolders(): Promise<ScanResult[]> {
     return invokeCommand<ScanResult[]>("scan_git_base_folders");
   },
+
+  /** Replace the full set of Project custom skills directories. The backend
+   *  normalizes and de-duplicates the list and rejects dirs that resolve to a
+   *  fixed Agent project skills dir. Returns the updated Project. */
+  setCustomSkillsDirs(projectId: string, dirs: string[]): Promise<Project> {
+    return invokeCommand<Project>("set_project_custom_skills_dirs", { projectId, dirs });
+  },
 };

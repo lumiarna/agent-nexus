@@ -9,6 +9,7 @@ use nexus_core::{
         symlink::create_managed_directory_link,
     },
 };
+use serial_test::serial;
 use tempfile::TempDir;
 
 fn git_repo(parent: &TempDir, name: &str) -> String {
@@ -49,6 +50,7 @@ fn assert_link_points_to(source: &Path, target: &Path) {
 }
 
 #[test]
+#[serial]
 fn scans_project_skills_and_derives_distribution_from_links() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -98,6 +100,7 @@ disable-model-invocation: true
 }
 
 #[test]
+#[serial]
 fn lists_project_skills_by_project_display_order() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -154,6 +157,7 @@ description: Beta project skill
 }
 
 #[test]
+#[serial]
 fn toggles_project_distribution_target_link() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -207,6 +211,120 @@ description: Project-scoped TAP scaffolder
 }
 
 #[test]
+#[serial]
+fn scans_project_custom_skills_dir_as_sourceless_skill() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let skills = SkillService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create isolated home");
+    env::set_var("HOME", &home);
+    env::set_var("USERPROFILE", &home);
+    let repo = git_repo(&root, "agent-nexus");
+    let project = projects
+        .record_project(repo.clone())
+        .expect("record project");
+    // `skills` is the default custom dir — no extra configuration needed.
+    let custom_dir = Path::new(&repo).join("skills/release-notes");
+
+    write_skill(
+        &custom_dir,
+        r#"---
+name: release-notes
+description: Draft project release notes
+---
+
+# Release Notes
+"#,
+    );
+
+    let rows = skills.scan_skills().expect("scan skills");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, "release-notes");
+    assert_eq!(rows[0].scope, "project");
+    assert_eq!(rows[0].project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(rows[0].source_kind, "project_custom");
+    assert_eq!(rows[0].source_agent, None);
+    // No Agent source cell — every Agent is `none` until propagated.
+    assert!(rows[0].cells.values().all(|role| role == "none"));
+}
+
+#[test]
+#[serial]
+fn propagates_project_custom_skill_to_global_and_keeps_single_source() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let skills = SkillService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create isolated home");
+    env::set_var("HOME", &home);
+    env::set_var("USERPROFILE", &home);
+    let repo = git_repo(&root, "agent-nexus");
+    projects
+        .record_project(repo.clone())
+        .expect("record project");
+    let custom_dir = Path::new(&repo).join("skills/release-notes");
+
+    write_skill(
+        &custom_dir,
+        r#"---
+name: release-notes
+description: Draft project release notes
+---
+
+# Release Notes
+"#,
+    );
+    let scanned = skills.scan_skills().expect("scan skills");
+    let skill_id = scanned[0].id.clone();
+
+    // Propagate to Global through the default entry Agent.
+    let propagated = skills
+        .set_skill_target(SetSkillTargetInput {
+            skill_id: skill_id.clone(),
+            agent: "Generic Agent".to_string(),
+            enabled: true,
+        })
+        .expect("propagate to Global");
+    assert_eq!(propagated.cells["Generic Agent"], "target");
+    let generic_link = home.join(".agents/skills/release-notes");
+    assert_link_points_to(&custom_dir, &generic_link);
+
+    // Fan out to another Global Agent.
+    let fanned = skills
+        .set_skill_target(SetSkillTargetInput {
+            skill_id: skill_id.clone(),
+            agent: "Claude Code".to_string(),
+            enabled: true,
+        })
+        .expect("fan out to Claude Code");
+    assert_eq!(fanned.cells["Claude Code"], "target");
+    assert_link_points_to(&custom_dir, &home.join(".claude/skills/release-notes"));
+
+    // A rescan must not turn the Global placement symlinks into new canonical skills.
+    let rescanned = skills.scan_skills().expect("rescan skills");
+    assert_eq!(rescanned.len(), 1);
+    assert_eq!(rescanned[0].source_kind, "project_custom");
+    assert_eq!(rescanned[0].cells["Generic Agent"], "target");
+    assert_eq!(rescanned[0].cells["Claude Code"], "target");
+
+    // Out-of-band removal of a Global placement falls back to `none` on rescan.
+    #[cfg(unix)]
+    std::fs::remove_file(&generic_link).expect("remove placement symlink");
+    #[cfg(windows)]
+    std::fs::remove_dir(&generic_link).expect("remove placement junction");
+
+    let after_removal = skills.scan_skills().expect("rescan after removal");
+    assert_eq!(after_removal.len(), 1);
+    assert_eq!(after_removal[0].cells["Generic Agent"], "none");
+    assert_eq!(after_removal[0].cells["Claude Code"], "target");
+}
+
+#[test]
+#[serial]
 fn toggles_disable_model_invocation_in_skill_file() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());

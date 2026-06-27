@@ -176,6 +176,7 @@ pub fn project_managed_target_identities(conn: &Connection) -> AppResult<HashSet
         FROM skills skill
         JOIN skill_distributions distribution ON distribution.skill_id = skill.id
         WHERE skill.scope = 'project'
+          AND skill.source_kind = 'agent'
           AND distribution.role = 'target'
           AND distribution.target_path IS NOT NULL
 

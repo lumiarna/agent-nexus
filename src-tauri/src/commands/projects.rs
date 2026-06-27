@@ -60,3 +60,14 @@ pub fn scan_git_base_folder(
 pub fn scan_git_base_folders(state: State<'_, AppState>) -> AppResult<Vec<DiscoveredRepo>> {
     state.projects.scan_git_base_folders()
 }
+
+#[tauri::command]
+pub fn set_project_custom_skills_dirs(
+    state: State<'_, AppState>,
+    project_id: String,
+    dirs: Vec<String>,
+) -> AppResult<Project> {
+    state
+        .projects
+        .set_project_custom_skills_dirs(project_id, dirs)
+}

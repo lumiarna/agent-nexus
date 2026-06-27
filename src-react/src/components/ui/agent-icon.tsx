@@ -43,12 +43,35 @@ export function AgentIcon({ role, agent, onClick, title }: AgentIconProps) {
   );
 }
 
-/** Small chip marking a row's source agent. */
-export function SourceBadge({ agent }: { agent: AgentName }) {
+/** Small chip marking a row's source.
+ *  With `agent`, renders the Agent logo (Agent canonical source).
+ *  With `label` (no `agent`), renders a text badge for a non-Agent source such
+ *  as a Project custom source — these rows have no Agent `source` cell. */
+export function SourceBadge({
+  agent,
+  label,
+  title,
+}: {
+  agent?: AgentName;
+  label?: string;
+  title?: string;
+}) {
+  if (!agent) {
+    const col = "#9a7b53";
+    return (
+      <span
+        title={title ?? "Project custom source"}
+        className="inline-flex h-[18px] items-center rounded-[5px] px-[6px] text-[9.5px] font-bold uppercase tracking-[.03em]"
+        style={{ background: col + "1c", boxShadow: `inset 0 0 0 1px ${col}40`, color: col }}
+      >
+        {label ?? "Project"}
+      </span>
+    );
+  }
   const col = agentColor(agent);
   return (
     <span
-      title="Source agent"
+      title={title ?? "Source agent"}
       className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px]"
       style={{ background: col + "1c", boxShadow: `inset 0 0 0 1px ${col}40` }}
     >
@@ -57,7 +80,15 @@ export function SourceBadge({ agent }: { agent: AgentName }) {
   );
 }
 
-function cellTitle(agent: AgentName, role: CellRole): string {
+function cellTitle(agent: AgentName, role: CellRole, sourceless: boolean): string {
+  if (sourceless) {
+    // Project custom Skill: no Agent source — cells only express Global placements.
+    const suffix =
+      role === "target"
+        ? " · Global placement — linked from Project custom source, click to remove"
+        : " · no placement — click to propagate to Global";
+    return agent + suffix;
+  }
   const suffix =
     role === "source"
       ? " · source (fixed)"
@@ -69,15 +100,19 @@ function cellTitle(agent: AgentName, role: CellRole): string {
 
 /** The row of clickable Agent Matrix cells (canonical agent order).
  *  `agents` narrows the rendered set — e.g. project prompts only span
- *  Generic Agent / Claude Code. Defaults to the full canonical order. */
+ *  Generic Agent / Claude Code. Defaults to the full canonical order.
+ *  `sourceless` switches the tooltips to the "no Agent source" wording used by
+ *  Project custom Skills, whose cells only express Global placements. */
 export function AgentMatrixCells({
   cells,
   onToggle,
   agents = AGENT_ORDER,
+  sourceless = false,
 }: {
   cells: Cells;
   onToggle: (agent: AgentName) => void;
   agents?: AgentName[];
+  sourceless?: boolean;
 }) {
   return (
     <div className="flex justify-center gap-[5px]">
@@ -86,7 +121,7 @@ export function AgentMatrixCells({
           key={a}
           agent={a}
           role={cells[a]}
-          title={cellTitle(a, cells[a])}
+          title={cellTitle(a, cells[a], sourceless)}
           onClick={() => onToggle(a)}
         />
       ))}
