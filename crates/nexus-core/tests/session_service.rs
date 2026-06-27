@@ -10,12 +10,17 @@ use std::{
 use nexus_core::{
     database::Database,
     services::{
+        outbound_request_log::OutboundRequestLogger,
         projects::ProjectService,
         sessions::SessionService,
         sync::{SyncService, WebdavSettingsInput},
     },
 };
 use tempfile::TempDir;
+
+fn request_logger() -> OutboundRequestLogger {
+    OutboundRequestLogger::for_test().expect("create request logger")
+}
 
 fn git_repo(parent: &TempDir, name: &str) -> String {
     let path = parent.path().join(name);
@@ -141,7 +146,7 @@ fn cloud_listing(body: &str) -> String {
 fn scans_local_project_session_markdown_files() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sessions = SessionService::new(db);
+    let sessions = SessionService::new(db, request_logger());
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "agent-nexus");
     let project = projects
@@ -204,8 +209,8 @@ async fn scans_cloud_project_session_markdown_files_from_webdav() {
     ]);
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db.clone());
-    let sessions = SessionService::new(db);
+    let sync = SyncService::new(db.clone(), request_logger());
+    let sessions = SessionService::new(db, request_logger());
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "agent-nexus");
     let project = projects.record_project(repo).expect("record project");
@@ -262,8 +267,8 @@ async fn scan_cloud_sessions_reuses_cached_metadata_for_unchanged_files() {
     ]);
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db.clone());
-    let sessions = SessionService::new(db);
+    let sync = SyncService::new(db.clone(), request_logger());
+    let sessions = SessionService::new(db, request_logger());
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "agent-nexus");
     projects.record_project(repo).expect("record project");
@@ -297,13 +302,11 @@ async fn scan_cloud_sessions_reuses_cached_metadata_for_unchanged_files() {
 
 #[tokio::test]
 async fn scan_cloud_sessions_returns_empty_when_remote_directory_is_missing() {
-    let (url, requests, server) = spawn_webdav_server(vec![
-        http_response("404 Not Found", ""),
-    ]);
+    let (url, requests, server) = spawn_webdav_server(vec![http_response("404 Not Found", "")]);
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sync = SyncService::new(db.clone());
-    let sessions = SessionService::new(db);
+    let sync = SyncService::new(db.clone(), request_logger());
+    let sessions = SessionService::new(db, request_logger());
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "agent-nexus");
     projects.record_project(repo).expect("record project");
@@ -332,7 +335,7 @@ async fn scan_cloud_sessions_returns_empty_when_remote_directory_is_missing() {
 fn scan_local_sessions_does_not_follow_directory_symlinks() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let sessions = SessionService::new(db);
+    let sessions = SessionService::new(db, request_logger());
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "agent-nexus");
     projects

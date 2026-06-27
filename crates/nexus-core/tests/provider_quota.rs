@@ -4,6 +4,7 @@ use nexus_core::{
     database::Database,
     services::{
         app_config::{AppConfigService, CODEX_CONFIG_DIR_KEY},
+        outbound_request_log::OutboundRequestLogger,
         provider_quota::{
             claude_code_quota_from_usage_response, codex_quota_from_usage_response,
             copilot_quota_from_usage_response, deepseek_balance_quota_from_usage_response,
@@ -20,6 +21,10 @@ use nexus_core::{
     },
 };
 use serial_test::serial;
+
+fn request_logger() -> OutboundRequestLogger {
+    OutboundRequestLogger::for_test().expect("create request logger")
+}
 
 #[test]
 fn opencode_config_exposes_custom_provider_metadata_without_credentials() {
@@ -121,7 +126,7 @@ async fn provider_quota_service_lists_and_dispatches_custom_provider_without_api
     std::env::set_var("OPENCODE_CONFIG_FILE", &config_file);
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
-    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let providers = service
         .list_opencode_custom_providers()
         .expect("list custom providers");
@@ -169,7 +174,7 @@ async fn provider_quota_service_dispatches_codex_adapter_without_credentials() {
         .expect("write Codex config dir setting");
     }
 
-    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
         .get_provider_quota("codex")
         .await
@@ -185,7 +190,7 @@ async fn provider_quota_service_dispatches_codex_adapter_without_credentials() {
 #[tokio::test]
 async fn provider_quota_service_dispatches_opencode_go_adapter_without_connection_params() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
-    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
         .get_provider_quota("opencode-go")
         .await
@@ -210,7 +215,7 @@ async fn provider_quota_service_dispatches_minimax_token_plan_cn_adapter_without
     let previous_auth_file = std::env::var_os("OPENCODE_AUTH_FILE");
     std::env::set_var("OPENCODE_AUTH_FILE", &missing_auth_file);
 
-    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
         .get_provider_quota("minimax-token")
         .await
@@ -237,7 +242,7 @@ async fn provider_quota_service_dispatches_deepseek_adapter_without_credentials(
     let previous_auth_file = std::env::var_os("OPENCODE_AUTH_FILE");
     std::env::set_var("OPENCODE_AUTH_FILE", &missing_auth_file);
 
-    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
         .get_provider_quota("deepseek")
         .await
@@ -264,7 +269,7 @@ async fn provider_quota_service_dispatches_openrouter_adapter_without_credential
     let previous_auth_file = std::env::var_os("OPENCODE_AUTH_FILE");
     std::env::set_var("OPENCODE_AUTH_FILE", &missing_auth_file);
 
-    let service = ProviderQuotaService::new(AppConfigService::new(db));
+    let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
         .get_provider_quota("openrouter")
         .await

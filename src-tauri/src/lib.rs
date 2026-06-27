@@ -8,7 +8,10 @@ use std::{
 
 use nexus_core::{
     database::Database,
-    services::{provider_trigger::ProviderTriggerService, sync::SyncService},
+    services::{
+        outbound_request_log::OutboundRequestLogger, provider_trigger::ProviderTriggerService,
+        sync::SyncService,
+    },
 };
 use store::AppState;
 use tauri::Manager;
@@ -19,7 +22,8 @@ pub fn run() {
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()?;
             let db = Database::open(app_data_dir.join("agent-nexus.sqlite3"))?;
-            let state = AppState::new(db);
+            let request_logger = OutboundRequestLogger::from_app_data_dir(&app_data_dir)?;
+            let state = AppState::new(db, request_logger);
             let scheduler_sync = state.sync.clone();
             let scheduler_provider_trigger = state.provider_trigger.clone();
             app.manage(state);

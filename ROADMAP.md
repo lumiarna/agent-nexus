@@ -10,3 +10,4 @@
 - 验证 Claude Code 窗口对齐
 - 验证 CodeX 窗口对齐
 - .claudeignore 也加入检测
+- 确定日志保留策略，例如保留 30 天或限制总大小；否则长期轮询 Provider quota 会让 app data 里的日志持续增长

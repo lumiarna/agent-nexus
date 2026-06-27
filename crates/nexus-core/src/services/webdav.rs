@@ -6,6 +6,9 @@ use roxmltree::{Document, Node};
 use time::{format_description::well_known::Rfc2822, OffsetDateTime};
 
 use crate::error::{AppError, AppResult};
+use crate::services::outbound_request_log::{
+    OutboundRequestContext, OutboundRequestError, OutboundRequestLogger,
+};
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
@@ -34,19 +37,26 @@ pub fn path_segments(raw: &str) -> impl Iterator<Item = &str> {
         .filter(|part| !part.is_empty())
 }
 
-pub async fn test_connection(base_url: &str, auth: &WebdavAuth) -> AppResult<()> {
+pub async fn test_connection(
+    base_url: &str,
+    auth: &WebdavAuth,
+    request_logger: &OutboundRequestLogger,
+) -> AppResult<()> {
     let url = parse_base_url(base_url)?;
     let client = reqwest::Client::new();
-    let response = apply_auth(
-        client
-            .request(method_propfind(), url)
-            .header("Depth", "0")
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
-        auth,
-    )
-    .send()
-    .await
-    .map_err(|error| transport_error("connect", base_url, error))?;
+    let response = request_logger
+        .send(
+            apply_auth(
+                client
+                    .request(method_propfind(), url)
+                    .header("Depth", "0")
+                    .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
+                auth,
+            ),
+            webdav_log_context("test_connection", "PROPFIND", base_url),
+        )
+        .await
+        .map_err(|error| logged_transport_error("connect", base_url, error))?;
 
     if response.status().is_success() || response.status() == StatusCode::MULTI_STATUS {
         Ok(())
@@ -59,6 +69,7 @@ pub async fn ensure_remote_directories(
     base_url: &str,
     segments: &[String],
     auth: &WebdavAuth,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<()> {
     if segments.is_empty() {
         return Ok(());
@@ -67,15 +78,18 @@ pub async fn ensure_remote_directories(
     let client = reqwest::Client::new();
     for depth in 1..=segments.len() {
         let dir_url = directory_url(base_url, &segments[..depth])?;
-        let response = apply_auth(
-            client
-                .request(method_mkcol(), &dir_url)
-                .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
-            auth,
-        )
-        .send()
-        .await
-        .map_err(|error| transport_error("create remote directory", &dir_url, error))?;
+        let response = request_logger
+            .send(
+                apply_auth(
+                    client
+                        .request(method_mkcol(), &dir_url)
+                        .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
+                    auth,
+                ),
+                webdav_log_context("ensure_remote_directory", "MKCOL", &dir_url),
+            )
+            .await
+            .map_err(|error| logged_transport_error("create remote directory", &dir_url, error))?;
 
         let status = response.status();
         if status == StatusCode::CREATED || status.is_success() {
@@ -85,7 +99,7 @@ pub async fn ensure_remote_directories(
         if matches!(
             status,
             StatusCode::METHOD_NOT_ALLOWED | StatusCode::CONFLICT
-        ) && propfind_exists(&client, &dir_url, auth).await?
+        ) && propfind_exists(&client, &dir_url, auth, request_logger).await?
         {
             continue;
         }
@@ -116,19 +130,23 @@ pub async fn put_bytes(
     auth: &WebdavAuth,
     bytes: Vec<u8>,
     content_type: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<()> {
     let client = reqwest::Client::new();
-    let response = apply_auth(
-        client
-            .put(url)
-            .header("Content-Type", content_type)
-            .body(bytes)
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
-        auth,
-    )
-    .send()
-    .await
-    .map_err(|error| transport_error("upload", url, error))?;
+    let response = request_logger
+        .send(
+            apply_auth(
+                client
+                    .put(url)
+                    .header("Content-Type", content_type)
+                    .body(bytes)
+                    .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
+                auth,
+            ),
+            webdav_log_context("put_bytes", "PUT", url),
+        )
+        .await
+        .map_err(|error| logged_transport_error("upload", url, error))?;
 
     if response.status().is_success() {
         Ok(())
@@ -141,19 +159,23 @@ pub async fn list_directory(
     base_url: &str,
     segments: &[String],
     auth: &WebdavAuth,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<Vec<WebdavEntry>> {
     let url = directory_url(base_url, segments)?;
     let client = reqwest::Client::new();
-    let response = apply_auth(
-        client
-            .request(method_propfind(), &url)
-            .header("Depth", "1")
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
-        auth,
-    )
-    .send()
-    .await
-    .map_err(|error| transport_error("list remote directory", &url, error))?;
+    let response = request_logger
+        .send(
+            apply_auth(
+                client
+                    .request(method_propfind(), &url)
+                    .header("Depth", "1")
+                    .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
+                auth,
+            ),
+            webdav_log_context("list_directory", "PROPFIND", &url),
+        )
+        .await
+        .map_err(|error| logged_transport_error("list remote directory", &url, error))?;
 
     if !(response.status().is_success() || response.status() == StatusCode::MULTI_STATUS) {
         return Err(status_error("PROPFIND", response.status(), &url));
@@ -170,8 +192,9 @@ pub async fn list_directory_if_exists(
     base_url: &str,
     segments: &[String],
     auth: &WebdavAuth,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<Option<Vec<WebdavEntry>>> {
-    match list_directory(base_url, segments, auth).await {
+    match list_directory(base_url, segments, auth, request_logger).await {
         Ok(entries) => Ok(Some(entries)),
         Err(AppError::Internal(message)) if message.contains("404 Not Found") => Ok(None),
         Err(error) => Err(error),
@@ -182,18 +205,22 @@ pub async fn get_bytes(
     base_url: &str,
     segments: &[String],
     auth: &WebdavAuth,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<Vec<u8>> {
     let url = build_remote_url(base_url, segments)?;
     let client = reqwest::Client::new();
-    let response = apply_auth(
-        client
-            .get(&url)
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
-        auth,
-    )
-    .send()
-    .await
-    .map_err(|error| transport_error("download", &url, error))?;
+    let response = request_logger
+        .send(
+            apply_auth(
+                client
+                    .get(&url)
+                    .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
+                auth,
+            ),
+            webdav_log_context("get_bytes", "GET", &url),
+        )
+        .await
+        .map_err(|error| logged_transport_error("download", &url, error))?;
 
     if !response.status().is_success() {
         return Err(status_error("GET", response.status(), &url));
@@ -334,17 +361,21 @@ async fn propfind_exists(
     client: &reqwest::Client,
     url: &str,
     auth: &WebdavAuth,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<bool> {
-    let response = apply_auth(
-        client
-            .request(method_propfind(), url)
-            .header("Depth", "0")
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
-        auth,
-    )
-    .send()
-    .await
-    .map_err(|error| transport_error("verify remote directory", url, error))?;
+    let response = request_logger
+        .send(
+            apply_auth(
+                client
+                    .request(method_propfind(), url)
+                    .header("Depth", "0")
+                    .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
+                auth,
+            ),
+            webdav_log_context("propfind_exists", "PROPFIND", url),
+        )
+        .await
+        .map_err(|error| logged_transport_error("verify remote directory", url, error))?;
 
     Ok(response.status().is_success() || response.status() == StatusCode::MULTI_STATUS)
 }
@@ -356,6 +387,13 @@ fn status_error(operation: &str, status: StatusCode, url: &str) -> AppError {
     ))
 }
 
+fn logged_transport_error(operation: &str, url: &str, error: OutboundRequestError) -> AppError {
+    match error {
+        OutboundRequestError::Http(error) => transport_error(operation, url, error),
+        OutboundRequestError::Log(error) => error,
+    }
+}
+
 fn transport_error(operation: &str, url: &str, error: reqwest::Error) -> AppError {
     AppError::Internal(format!(
         "WebDAV {operation} failed: {} ({})",
@@ -364,11 +402,27 @@ fn transport_error(operation: &str, url: &str, error: reqwest::Error) -> AppErro
     ))
 }
 
+fn webdav_log_context(
+    operation: &'static str,
+    method: &'static str,
+    url: &str,
+) -> OutboundRequestContext {
+    OutboundRequestContext {
+        category: "webdav",
+        operation,
+        provider_id: None,
+        method,
+        url: url.to_string(),
+    }
+}
+
 fn redact_url(raw: &str) -> String {
     match Url::parse(raw) {
         Ok(mut url) => {
             let _ = url.set_username("");
             let _ = url.set_password(None);
+            url.set_query(None);
+            url.set_fragment(None);
             url.to_string()
         }
         Err(_) => raw.split('?').next().unwrap_or(raw).to_string(),

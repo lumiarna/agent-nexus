@@ -3,8 +3,9 @@ use std::sync::Arc;
 use nexus_core::{
     database::Database,
     services::{
-        app_config::AppConfigService, project_symlinks::ProjectSymlinkInventory,
-        projects::ProjectService, prompts::PromptService, provider_quota::ProviderQuotaService,
+        app_config::AppConfigService, outbound_request_log::OutboundRequestLogger,
+        project_symlinks::ProjectSymlinkInventory, projects::ProjectService,
+        prompts::PromptService, provider_quota::ProviderQuotaService,
         provider_trigger::ProviderTriggerService, sessions::SessionService, skills::SkillService,
         sync::SyncService,
     },
@@ -23,7 +24,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(db: Database) -> Self {
+    pub fn new(db: Database, request_logger: OutboundRequestLogger) -> Self {
         let db = Arc::new(db);
         let app_config = AppConfigService::new(db.clone());
         Self {
@@ -31,14 +32,15 @@ impl AppState {
             prompts: PromptService::new(db.clone()),
             projects: ProjectService::new(db.clone()),
             project_symlinks: ProjectSymlinkInventory::new(db.clone()),
-            provider_quota: ProviderQuotaService::new(app_config),
+            provider_quota: ProviderQuotaService::new(app_config, request_logger.clone()),
             provider_trigger: ProviderTriggerService::new(
                 db.clone(),
                 AppConfigService::new(db.clone()),
+                request_logger.clone(),
             ),
-            sessions: SessionService::new(db.clone()),
+            sessions: SessionService::new(db.clone(), request_logger.clone()),
             skills: SkillService::new(db.clone()),
-            sync: SyncService::new(db),
+            sync: SyncService::new(db, request_logger),
         }
     }
 }

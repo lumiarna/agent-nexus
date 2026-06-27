@@ -16,7 +16,12 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime, Time};
 
 use crate::{
     error::{AppError, AppResult},
-    services::app_config::{AppConfigService, OpenCodeGoConnectionParams},
+    services::{
+        app_config::{AppConfigService, OpenCodeGoConnectionParams},
+        outbound_request_log::{
+            OutboundRequestContext, OutboundRequestError, OutboundRequestLogger,
+        },
+    },
 };
 
 pub(crate) const CLAUDE_CODE_PROVIDER_ID: &str = "claude";
@@ -412,7 +417,9 @@ trait ProviderUsageTransport: Send + Sync {
 pub(crate) struct LocalCredentialSource;
 
 #[derive(Clone)]
-pub(crate) struct HttpUsageTransport;
+pub(crate) struct HttpUsageTransport {
+    request_logger: OutboundRequestLogger,
+}
 
 impl LocalCredentialSource {
     pub(crate) fn claude_code_credentials(
@@ -424,6 +431,10 @@ impl LocalCredentialSource {
 }
 
 impl HttpUsageTransport {
+    pub(crate) fn new(request_logger: OutboundRequestLogger) -> Self {
+        Self { request_logger }
+    }
+
     pub(crate) async fn refresh_claude_code_credentials(
         &self,
         credentials: &ClaudeCodeCredentials,
@@ -471,11 +482,11 @@ pub struct ProviderQuotaService {
 }
 
 impl ProviderQuotaService {
-    pub fn new(app_config: AppConfigService) -> Self {
+    pub fn new(app_config: AppConfigService, request_logger: OutboundRequestLogger) -> Self {
         Self {
             app_config,
             credential_source: Arc::new(LocalCredentialSource),
-            usage_transport: Arc::new(HttpUsageTransport),
+            usage_transport: Arc::new(HttpUsageTransport::new(request_logger)),
         }
     }
 
@@ -616,7 +627,7 @@ impl ProviderCredentialSource for LocalCredentialSource {
 
 impl ProviderUsageTransport for HttpUsageTransport {
     fn claude_code_usage<'a>(&'a self, access_token: &'a str) -> ClaudeCodeUsageFuture<'a> {
-        Box::pin(fetch_claude_code_usage(access_token))
+        Box::pin(fetch_claude_code_usage(access_token, &self.request_logger))
     }
 
     fn claude_code_refresh<'a>(
@@ -629,7 +640,10 @@ impl ProviderUsageTransport for HttpUsageTransport {
                 + 'a,
         >,
     > {
-        Box::pin(fetch_claude_oauth_refresh(refresh_token))
+        Box::pin(fetch_claude_oauth_refresh(
+            refresh_token,
+            &self.request_logger,
+        ))
     }
 
     fn codex_usage<'a>(
@@ -637,11 +651,15 @@ impl ProviderUsageTransport for HttpUsageTransport {
         access_token: &'a str,
         account_id: Option<&'a str>,
     ) -> CodexUsageFuture<'a> {
-        Box::pin(fetch_codex_usage(access_token, account_id))
+        Box::pin(fetch_codex_usage(
+            access_token,
+            account_id,
+            &self.request_logger,
+        ))
     }
 
     fn copilot_usage<'a>(&'a self, token: &'a str) -> CopilotUsageFuture<'a> {
-        Box::pin(fetch_copilot_usage(token))
+        Box::pin(fetch_copilot_usage(token, &self.request_logger))
     }
 
     fn opencode_go_page<'a>(
@@ -649,7 +667,11 @@ impl ProviderUsageTransport for HttpUsageTransport {
         workspace_id: &'a str,
         auth_cookie: &'a str,
     ) -> OpenCodeGoPageFuture<'a> {
-        Box::pin(fetch_opencode_go_page(workspace_id, auth_cookie))
+        Box::pin(fetch_opencode_go_page(
+            workspace_id,
+            auth_cookie,
+            &self.request_logger,
+        ))
     }
 
     fn configured_provider_usage<'a>(
@@ -657,14 +679,21 @@ impl ProviderUsageTransport for HttpUsageTransport {
         config: &'static ConfiguredProviderQuotaConfig,
         api_key: &'a str,
     ) -> ConfiguredProviderUsageFuture<'a> {
-        Box::pin(fetch_configured_provider_usage(config, api_key))
+        Box::pin(fetch_configured_provider_usage(
+            config,
+            api_key,
+            &self.request_logger,
+        ))
     }
 
     fn opencode_custom_provider_usage<'a>(
         &'a self,
         credentials: &'a OpenCodeCustomProviderCredentials,
     ) -> OpenCodeCustomProviderUsageFuture<'a> {
-        Box::pin(fetch_opencode_custom_provider_usage(credentials))
+        Box::pin(fetch_opencode_custom_provider_usage(
+            credentials,
+            &self.request_logger,
+        ))
     }
 }
 
@@ -2064,20 +2093,48 @@ pub(crate) fn http_client() -> reqwest::Client {
         .expect("Failed to build HTTP client")
 }
 
+pub(crate) fn provider_quota_log_context(
+    operation: &'static str,
+    provider_id: &str,
+    method: &'static str,
+    url: &str,
+) -> OutboundRequestContext {
+    OutboundRequestContext {
+        category: "provider_quota",
+        operation,
+        provider_id: Some(provider_id.to_string()),
+        method,
+        url: url.to_string(),
+    }
+}
+
+fn provider_quota_request_error(error: OutboundRequestError) -> ProviderQuotaPollError {
+    ProviderQuotaPollError::Request(error.to_string())
+}
+
 fn format_credit_value(value: f64) -> String {
     format!("{value:.2}")
 }
 
 async fn fetch_claude_code_usage(
     access_token: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<ClaudeCodeUsageResponse, ProviderQuotaPollError> {
-    let response = http_client()
-        .get(CLAUDE_CODE_USAGE_URL)
-        .bearer_auth(access_token)
-        .header("anthropic-beta", "oauth-2025-04-20")
-        .send()
+    let response = request_logger
+        .send(
+            http_client()
+                .get(CLAUDE_CODE_USAGE_URL)
+                .bearer_auth(access_token)
+                .header("anthropic-beta", "oauth-2025-04-20"),
+            provider_quota_log_context(
+                "claude_code_usage",
+                CLAUDE_CODE_PROVIDER_ID,
+                "GET",
+                CLAUDE_CODE_USAGE_URL,
+            ),
+        )
         .await
-        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+        .map_err(provider_quota_request_error)?;
 
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -2099,20 +2156,29 @@ async fn fetch_claude_code_usage(
 
 async fn fetch_claude_oauth_refresh(
     refresh_token: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<ClaudeOAuthRefreshResponse, ProviderQuotaPollError> {
     let params = [
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh_token),
         ("client_id", CLAUDE_OAUTH_CLIENT_ID),
     ];
-    let response = http_client()
-        .post(CLAUDE_OAUTH_REFRESH_URL)
-        .header("Accept", "application/json")
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .form(&params)
-        .send()
+    let response = request_logger
+        .send(
+            http_client()
+                .post(CLAUDE_OAUTH_REFRESH_URL)
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .form(&params),
+            provider_quota_log_context(
+                "claude_oauth_refresh",
+                CLAUDE_CODE_PROVIDER_ID,
+                "POST",
+                CLAUDE_OAUTH_REFRESH_URL,
+            ),
+        )
         .await
-        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+        .map_err(provider_quota_request_error)?;
 
     if !response.status().is_success() {
         return Err(ProviderQuotaPollError::AuthRequired);
@@ -2483,6 +2549,7 @@ fn codex_plan_label(plan_type: &str) -> String {
 async fn fetch_codex_usage(
     access_token: &str,
     account_id: Option<&str>,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<CodexUsageResponse, ProviderQuotaPollError> {
     let mut request = http_client()
         .get(CODEX_USAGE_URL)
@@ -2493,10 +2560,13 @@ async fn fetch_codex_usage(
         request = request.header("ChatGPT-Account-Id", account_id);
     }
 
-    let response = request
-        .send()
+    let response = request_logger
+        .send(
+            request,
+            provider_quota_log_context("codex_usage", CODEX_PROVIDER_ID, "GET", CODEX_USAGE_URL),
+        )
         .await
-        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+        .map_err(provider_quota_request_error)?;
 
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -2530,15 +2600,24 @@ fn codex_status(status: ProviderQuotaStatus, message: &str) -> ProviderQuotaSnap
 
 async fn fetch_minimax_token_plan_cn_usage(
     api_key: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<MiniMaxTokenPlanCnUsageResponse, ProviderQuotaPollError> {
-    let response = http_client()
-        .get(MINIMAX_TOKEN_PLAN_CN_USAGE_URL)
-        .bearer_auth(api_key)
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json")
-        .send()
+    let response = request_logger
+        .send(
+            http_client()
+                .get(MINIMAX_TOKEN_PLAN_CN_USAGE_URL)
+                .bearer_auth(api_key)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json"),
+            provider_quota_log_context(
+                "minimax_token_plan_cn_usage",
+                MINIMAX_TOKEN_PLAN_CN_PROVIDER_ID,
+                "GET",
+                MINIMAX_TOKEN_PLAN_CN_USAGE_URL,
+            ),
+        )
         .await
-        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+        .map_err(provider_quota_request_error)?;
 
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -2566,6 +2645,7 @@ async fn fetch_minimax_token_plan_cn_usage(
 
 async fn fetch_opencode_custom_provider_usage(
     credentials: &OpenCodeCustomProviderCredentials,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<Vec<(String, String)>, ProviderQuotaPollError> {
     let (endpoint, body) = match credentials.provider.npm.as_str() {
         OPENAI_COMPATIBLE_NPM => (
@@ -2599,14 +2679,22 @@ async fn fetch_opencode_custom_provider_usage(
         }
     };
 
-    let response = http_client()
-        .post(&endpoint)
-        .bearer_auth(&credentials.api_key)
-        .header("Content-Type", "application/json")
-        .body(body)
-        .send()
+    let response = request_logger
+        .send(
+            http_client()
+                .post(&endpoint)
+                .bearer_auth(&credentials.api_key)
+                .header("Content-Type", "application/json")
+                .body(body),
+            provider_quota_log_context(
+                "opencode_custom_provider_usage",
+                &credentials.provider.id,
+                "POST",
+                &endpoint,
+            ),
+        )
         .await
-        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+        .map_err(provider_quota_request_error)?;
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return Err(ProviderQuotaPollError::AuthRequired);
@@ -2633,33 +2721,47 @@ async fn fetch_opencode_custom_provider_usage(
 async fn fetch_configured_provider_usage(
     config: &'static ConfiguredProviderQuotaConfig,
     api_key: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<ConfiguredProviderUsageResponse, ProviderQuotaPollError> {
     match config.kind {
         ConfiguredProviderQuotaKind::MiniMaxTokenPlanCn => {
-            fetch_minimax_token_plan_cn_usage(api_key)
+            fetch_minimax_token_plan_cn_usage(api_key, request_logger)
                 .await
                 .map(ConfiguredProviderUsageResponse::MiniMaxTokenPlanCn)
         }
-        ConfiguredProviderQuotaKind::DeepSeekBalance => fetch_deepseek_balance(api_key)
-            .await
-            .map(ConfiguredProviderUsageResponse::DeepSeekBalance),
-        ConfiguredProviderQuotaKind::OpenRouterCredits => fetch_openrouter_credits(api_key)
-            .await
-            .map(ConfiguredProviderUsageResponse::OpenRouterCredits),
+        ConfiguredProviderQuotaKind::DeepSeekBalance => {
+            fetch_deepseek_balance(api_key, request_logger)
+                .await
+                .map(ConfiguredProviderUsageResponse::DeepSeekBalance)
+        }
+        ConfiguredProviderQuotaKind::OpenRouterCredits => {
+            fetch_openrouter_credits(api_key, request_logger)
+                .await
+                .map(ConfiguredProviderUsageResponse::OpenRouterCredits)
+        }
     }
 }
 
 async fn fetch_deepseek_balance(
     api_key: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<DeepSeekBalanceResponse, ProviderQuotaPollError> {
-    let response = http_client()
-        .get(DEEPSEEK_BALANCE_URL)
-        .bearer_auth(api_key)
-        .header("Host", "api.deepseek.com")
-        .header("Accept", "application/json")
-        .send()
+    let response = request_logger
+        .send(
+            http_client()
+                .get(DEEPSEEK_BALANCE_URL)
+                .bearer_auth(api_key)
+                .header("Host", "api.deepseek.com")
+                .header("Accept", "application/json"),
+            provider_quota_log_context(
+                "deepseek_balance",
+                DEEPSEEK_PROVIDER_ID,
+                "GET",
+                DEEPSEEK_BALANCE_URL,
+            ),
+        )
         .await
-        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+        .map_err(provider_quota_request_error)?;
 
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -2681,14 +2783,23 @@ async fn fetch_deepseek_balance(
 
 async fn fetch_openrouter_credits(
     api_key: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<OpenRouterCreditsResponse, ProviderQuotaPollError> {
-    let response = http_client()
-        .get(OPENROUTER_CREDITS_URL)
-        .bearer_auth(api_key)
-        .header("Accept", "application/json")
-        .send()
+    let response = request_logger
+        .send(
+            http_client()
+                .get(OPENROUTER_CREDITS_URL)
+                .bearer_auth(api_key)
+                .header("Accept", "application/json"),
+            provider_quota_log_context(
+                "openrouter_credits",
+                OPENROUTER_PROVIDER_ID,
+                "GET",
+                OPENROUTER_CREDITS_URL,
+            ),
+        )
         .await
-        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+        .map_err(provider_quota_request_error)?;
 
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -2708,18 +2819,29 @@ async fn fetch_openrouter_credits(
         .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
 }
 
-async fn fetch_copilot_usage(token: &str) -> Result<CopilotUsageResponse, ProviderQuotaPollError> {
-    let response = http_client()
-        .get(COPILOT_USAGE_URL)
-        .header("Authorization", format!("token {token}"))
-        .header("Accept", "application/json")
-        .header("Editor-Version", "vscode/1.96.2")
-        .header("Editor-Plugin-Version", "copilot-chat/0.26.7")
-        .header("User-Agent", "GitHubCopilotChat/0.26.7")
-        .header("X-Github-Api-Version", "2025-04-01")
-        .send()
+async fn fetch_copilot_usage(
+    token: &str,
+    request_logger: &OutboundRequestLogger,
+) -> Result<CopilotUsageResponse, ProviderQuotaPollError> {
+    let response = request_logger
+        .send(
+            http_client()
+                .get(COPILOT_USAGE_URL)
+                .header("Authorization", format!("token {token}"))
+                .header("Accept", "application/json")
+                .header("Editor-Version", "vscode/1.96.2")
+                .header("Editor-Plugin-Version", "copilot-chat/0.26.7")
+                .header("User-Agent", "GitHubCopilotChat/0.26.7")
+                .header("X-Github-Api-Version", "2025-04-01"),
+            provider_quota_log_context(
+                "copilot_usage",
+                COPILOT_PROVIDER_ID,
+                "GET",
+                COPILOT_USAGE_URL,
+            ),
+        )
         .await
-        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+        .map_err(provider_quota_request_error)?;
 
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
@@ -2754,20 +2876,24 @@ fn copilot_status(status: ProviderQuotaStatus, message: &str) -> ProviderQuotaSn
 async fn fetch_opencode_go_page(
     workspace_id: &str,
     auth_cookie: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<String, ProviderQuotaPollError> {
     let id = normalize_opencode_go_workspace_id(workspace_id);
     let url = format!("https://opencode.ai/workspace/{id}/go");
-    let response = http_client()
-        .get(url)
-        .header("Cookie", format!("auth={}", auth_cookie.trim()))
-        .header("User-Agent", OPENCODE_GO_BROWSER_UA)
-        .header(
-            "Accept",
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    let response = request_logger
+        .send(
+            http_client()
+                .get(&url)
+                .header("Cookie", format!("auth={}", auth_cookie.trim()))
+                .header("User-Agent", OPENCODE_GO_BROWSER_UA)
+                .header(
+                    "Accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                ),
+            provider_quota_log_context("opencode_go_page", OPENCODE_GO_PROVIDER_ID, "GET", &url),
         )
-        .send()
         .await
-        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
+        .map_err(provider_quota_request_error)?;
 
     let final_url = response.url().as_str().to_string();
     let status = response.status();

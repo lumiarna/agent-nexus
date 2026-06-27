@@ -14,6 +14,9 @@ use crate::{
     services::{
         app_config::AppConfigService,
         cron::{next_cron_occurrence_after_local, validate_cron_schedule},
+        outbound_request_log::{
+            OutboundRequestContext, OutboundRequestError, OutboundRequestLogger,
+        },
         provider_quota::{
             http_client, is_token_expiring_soon, ClaudeCodeCredentials, HttpUsageTransport,
             LocalCredentialSource, CLAUDE_CODE_PROVIDER_ID,
@@ -95,10 +98,14 @@ pub struct ProviderTriggerService {
 }
 
 impl ProviderTriggerService {
-    pub fn new(db: Arc<Database>, app_config: AppConfigService) -> Self {
+    pub fn new(
+        db: Arc<Database>,
+        app_config: AppConfigService,
+        request_logger: OutboundRequestLogger,
+    ) -> Self {
         Self {
             db,
-            runner: Arc::new(ClaudeCodeTriggerRunner::new(app_config)),
+            runner: Arc::new(ClaudeCodeTriggerRunner::new(app_config, request_logger)),
         }
     }
 
@@ -348,14 +355,16 @@ struct ClaudeCodeTriggerRunner {
     app_config: AppConfigService,
     credential_source: Arc<LocalCredentialSource>,
     usage_transport: Arc<HttpUsageTransport>,
+    request_logger: OutboundRequestLogger,
 }
 
 impl ClaudeCodeTriggerRunner {
-    fn new(app_config: AppConfigService) -> Self {
+    fn new(app_config: AppConfigService, request_logger: OutboundRequestLogger) -> Self {
         Self {
             app_config,
             credential_source: Arc::new(LocalCredentialSource),
-            usage_transport: Arc::new(HttpUsageTransport),
+            usage_transport: Arc::new(HttpUsageTransport::new(request_logger.clone())),
+            request_logger,
         }
     }
 
@@ -424,12 +433,12 @@ impl ProviderTriggerRunner for ClaudeCodeTriggerRunner {
                 )));
             }
             let (credentials, access_token) = self.claude_access_token().await?;
-            match fetch_claude_code_models(&access_token).await {
+            match fetch_claude_code_models(&access_token, &self.request_logger).await {
                 Err(ProviderTriggerError::Terminal(message))
                     if message.contains("authorization") =>
                 {
                     let refreshed = self.refresh_or_auth_error(&credentials).await?;
-                    fetch_claude_code_models(&refreshed).await
+                    fetch_claude_code_models(&refreshed, &self.request_logger).await
                 }
                 result => result,
             }
@@ -444,12 +453,12 @@ impl ProviderTriggerRunner for ClaudeCodeTriggerRunner {
                 )));
             }
             let (credentials, access_token) = self.claude_access_token().await?;
-            match trigger_claude_code(&access_token, model_id).await {
+            match trigger_claude_code(&access_token, model_id, &self.request_logger).await {
                 Err(ProviderTriggerError::Terminal(message))
                     if message.contains("authorization") =>
                 {
                     let refreshed = self.refresh_or_auth_error(&credentials).await?;
-                    trigger_claude_code(&refreshed, model_id).await
+                    trigger_claude_code(&refreshed, model_id, &self.request_logger).await
                 }
                 result => result,
             }
@@ -687,16 +696,20 @@ struct ClaudeMessageUsage {
 
 async fn fetch_claude_code_models(
     access_token: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<Vec<ProviderTriggerModel>, ProviderTriggerError> {
-    let response = http_client()
-        .get(CLAUDE_CODE_MODELS_URL)
-        .bearer_auth(access_token)
-        .header("anthropic-version", "2023-06-01")
-        .header("anthropic-beta", "oauth-2025-04-20")
-        .header("Accept", "application/json")
-        .send()
+    let response = request_logger
+        .send(
+            http_client()
+                .get(CLAUDE_CODE_MODELS_URL)
+                .bearer_auth(access_token)
+                .header("anthropic-version", "2023-06-01")
+                .header("anthropic-beta", "oauth-2025-04-20")
+                .header("Accept", "application/json"),
+            provider_trigger_log_context("claude_code_models", "GET", CLAUDE_CODE_MODELS_URL),
+        )
         .await
-        .map_err(|error| ProviderTriggerError::Retryable(error.to_string()))?;
+        .map_err(provider_trigger_request_error)?;
     let status = response.status();
     let body = response
         .text()
@@ -719,26 +732,30 @@ async fn fetch_claude_code_models(
 async fn trigger_claude_code(
     access_token: &str,
     model_id: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> Result<ProviderTriggerOutcome, ProviderTriggerError> {
-    let response = http_client()
-        .post(CLAUDE_CODE_MESSAGES_URL)
-        .bearer_auth(access_token)
-        .header("anthropic-version", "2023-06-01")
-        .header("anthropic-beta", "oauth-2025-04-20")
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json")
-        .body(
-            serde_json::json!({
-                "model": model_id,
-                "max_tokens": 1,
-                "stream": false,
-                "messages": [{"role": "user", "content": WINDOW_ALIGN_PROMPT}]
-            })
-            .to_string(),
+    let response = request_logger
+        .send(
+            http_client()
+                .post(CLAUDE_CODE_MESSAGES_URL)
+                .bearer_auth(access_token)
+                .header("anthropic-version", "2023-06-01")
+                .header("anthropic-beta", "oauth-2025-04-20")
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .body(
+                    serde_json::json!({
+                        "model": model_id,
+                        "max_tokens": 1,
+                        "stream": false,
+                        "messages": [{"role": "user", "content": WINDOW_ALIGN_PROMPT}]
+                    })
+                    .to_string(),
+                ),
+            provider_trigger_log_context("claude_code_messages", "POST", CLAUDE_CODE_MESSAGES_URL),
         )
-        .send()
         .await
-        .map_err(|error| ProviderTriggerError::Retryable(error.to_string()))?;
+        .map_err(provider_trigger_request_error)?;
     let status = response.status();
     let body = response
         .text()
@@ -783,6 +800,27 @@ fn ensure_success_status_or_trigger_error(
         return Err(ProviderTriggerError::Retryable(message));
     }
     Err(ProviderTriggerError::Terminal(message))
+}
+
+fn provider_trigger_log_context(
+    operation: &'static str,
+    method: &'static str,
+    url: &str,
+) -> OutboundRequestContext {
+    OutboundRequestContext {
+        category: "provider_trigger",
+        operation,
+        provider_id: Some(CLAUDE_CODE_PROVIDER_ID.to_string()),
+        method,
+        url: url.to_string(),
+    }
+}
+
+fn provider_trigger_request_error(error: OutboundRequestError) -> ProviderTriggerError {
+    match error {
+        OutboundRequestError::Http(error) => ProviderTriggerError::Retryable(error.to_string()),
+        OutboundRequestError::Log(error) => ProviderTriggerError::Terminal(error.to_string()),
+    }
 }
 
 fn response_error_detail(body: &str) -> String {

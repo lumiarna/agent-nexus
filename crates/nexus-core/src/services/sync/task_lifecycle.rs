@@ -16,6 +16,7 @@ use crate::{
     error::{AppError, AppResult},
     services::{
         cron::{cron_schedule_matches, normalize_task_schedule},
+        outbound_request_log::OutboundRequestLogger,
         paths::resolve_local_path,
         placement::{
             create_task_link_placement, remove_created_task_link_placements,
@@ -36,6 +37,7 @@ use super::{
 #[derive(Clone)]
 pub(super) struct TaskLifecycle {
     db: Arc<Database>,
+    request_logger: OutboundRequestLogger,
     transfer: Arc<dyn Transfer>,
 }
 
@@ -79,7 +81,9 @@ trait Transfer: Send + Sync {
     ) -> TransferFuture<'a>;
 }
 
-struct WebdavTransfer;
+struct WebdavTransfer {
+    request_logger: OutboundRequestLogger,
+}
 
 impl Transfer for WebdavTransfer {
     fn push_local_to_cloud<'a>(
@@ -88,7 +92,12 @@ impl Transfer for WebdavTransfer {
         settings: &'a WebdavSettings,
         file_states: &'a FileStateMap,
     ) -> TransferFuture<'a> {
-        Box::pin(push_local_to_cloud(task, settings, file_states))
+        Box::pin(push_local_to_cloud(
+            task,
+            settings,
+            file_states,
+            &self.request_logger,
+        ))
     }
 
     fn pull_cloud_to_local<'a>(
@@ -97,16 +106,26 @@ impl Transfer for WebdavTransfer {
         settings: &'a WebdavSettings,
         file_states: &'a FileStateMap,
     ) -> TransferFuture<'a> {
-        Box::pin(pull_cloud_to_local(task, settings, file_states))
+        Box::pin(pull_cloud_to_local(
+            task,
+            settings,
+            file_states,
+            &self.request_logger,
+        ))
     }
 }
 
 impl TaskLifecycle {
-    pub(super) fn new(db: Arc<Database>) -> Self {
+    pub(super) fn new(db: Arc<Database>, request_logger: OutboundRequestLogger) -> Self {
         Self {
             db,
-            transfer: Arc::new(WebdavTransfer),
+            request_logger: request_logger.clone(),
+            transfer: Arc::new(WebdavTransfer { request_logger }),
         }
+    }
+
+    pub(super) fn request_logger(&self) -> &OutboundRequestLogger {
+        &self.request_logger
     }
 
     pub(super) fn list_task_groups(&self) -> AppResult<Vec<TaskGroup>> {
@@ -693,14 +712,31 @@ async fn push_local_to_cloud(
     task: &Task,
     settings: &WebdavSettings,
     file_states: &FileStateMap,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<()> {
     let source = resolve_local_path(&task.source)?;
     let auth = webdav::auth_from_credentials(&settings.user, &settings.pass);
 
     if source.is_file() {
-        push_local_file_to_cloud(&source, &task.target, settings, &auth, file_states).await
+        push_local_file_to_cloud(
+            &source,
+            &task.target,
+            settings,
+            &auth,
+            file_states,
+            request_logger,
+        )
+        .await
     } else if source.is_dir() {
-        push_local_directory_to_cloud(&source, &task.target, settings, &auth, file_states).await
+        push_local_directory_to_cloud(
+            &source,
+            &task.target,
+            settings,
+            &auth,
+            file_states,
+            request_logger,
+        )
+        .await
     } else {
         Err(AppError::Validation(format!(
             "local source does not exist: {}",
@@ -713,12 +749,14 @@ async fn pull_cloud_to_local(
     task: &Task,
     settings: &WebdavSettings,
     _file_states: &FileStateMap,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<()> {
     let auth = webdav::auth_from_credentials(&settings.user, &settings.pass);
 
     if task.source.ends_with('/') {
         let source_segments = remote_segments(settings, &task.source)?;
-        let entries = webdav::list_directory(&settings.url, &source_segments, &auth).await?;
+        let entries =
+            webdav::list_directory(&settings.url, &source_segments, &auth, request_logger).await?;
         let target_root = resolve_local_path(&task.target)?;
         fs::create_dir_all(&target_root)?;
         for entry in entries {
@@ -732,16 +770,25 @@ async fn pull_cloud_to_local(
                     target: child_target.to_string_lossy().into_owned(),
                     ..task.clone()
                 };
-                Box::pin(pull_cloud_to_local(&child_task, settings, _file_states)).await?;
+                Box::pin(pull_cloud_to_local(
+                    &child_task,
+                    settings,
+                    _file_states,
+                    request_logger,
+                ))
+                .await?;
             } else {
-                let bytes = webdav::get_bytes(&settings.url, &child_segments, &auth).await?;
+                let bytes =
+                    webdav::get_bytes(&settings.url, &child_segments, &auth, request_logger)
+                        .await?;
                 fs::write(&child_target, bytes)?;
             }
         }
         Ok(())
     } else {
         let source_segments = remote_segments(settings, &task.source)?;
-        let bytes = webdav::get_bytes(&settings.url, &source_segments, &auth).await?;
+        let bytes =
+            webdav::get_bytes(&settings.url, &source_segments, &auth, request_logger).await?;
         let target = resolve_local_path(&task.target)?;
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
@@ -757,6 +804,7 @@ async fn push_local_file_to_cloud(
     settings: &WebdavSettings,
     auth: &webdav::WebdavAuth,
     file_states: &FileStateMap,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<()> {
     let mut file_segments = remote_segments(settings, target)?;
     if target.trim().ends_with('/') {
@@ -779,9 +827,17 @@ async fn push_local_file_to_cloud(
     }
 
     let parent_segments = file_segments[..file_segments.len() - 1].to_vec();
-    webdav::ensure_remote_directories(&settings.url, &parent_segments, auth).await?;
+    webdav::ensure_remote_directories(&settings.url, &parent_segments, auth, request_logger)
+        .await?;
     let url = webdav::build_remote_url(&settings.url, &file_segments)?;
-    webdav::put_bytes(&url, auth, fs::read(source)?, "application/octet-stream").await
+    webdav::put_bytes(
+        &url,
+        auth,
+        fs::read(source)?,
+        "application/octet-stream",
+        request_logger,
+    )
+    .await
 }
 
 async fn push_local_directory_to_cloud(
@@ -790,19 +846,34 @@ async fn push_local_directory_to_cloud(
     settings: &WebdavSettings,
     auth: &webdav::WebdavAuth,
     file_states: &FileStateMap,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<()> {
     let target_segments = remote_segments(settings, target)?;
     let mut directories = Vec::new();
     let mut files = Vec::new();
-    collect_local_directory_push(source, target_segments, &mut directories, &mut files, file_states, source)?;
+    collect_local_directory_push(
+        source,
+        target_segments,
+        &mut directories,
+        &mut files,
+        file_states,
+        source,
+    )?;
 
     for directory in directories {
-        webdav::ensure_remote_directories(&settings.url, &directory, auth).await?;
+        webdav::ensure_remote_directories(&settings.url, &directory, auth, request_logger).await?;
     }
 
     for (path, file_segments) in files {
         let url = webdav::build_remote_url(&settings.url, &file_segments)?;
-        webdav::put_bytes(&url, auth, fs::read(path)?, "application/octet-stream").await?;
+        webdav::put_bytes(
+            &url,
+            auth,
+            fs::read(path)?,
+            "application/octet-stream",
+            request_logger,
+        )
+        .await?;
     }
 
     Ok(())
@@ -827,7 +898,14 @@ fn collect_local_directory_push(
         child_segments.push(required_file_name(&path)?);
         let metadata = fs::metadata(&path)?;
         if metadata.is_dir() {
-            collect_local_directory_push(&path, child_segments, directories, files, file_states, source_root)?;
+            collect_local_directory_push(
+                &path,
+                child_segments,
+                directories,
+                files,
+                file_states,
+                source_root,
+            )?;
         } else if metadata.is_file() {
             let rel_path = path
                 .strip_prefix(source_root)
@@ -866,9 +944,9 @@ fn remote_segments(settings: &WebdavSettings, cloud_path: &str) -> AppResult<Vec
 }
 
 fn file_mtime_epoch(path: &Path) -> AppResult<i64> {
-    let mtime = fs::metadata(path)?
-        .modified()
-        .map_err(|e| AppError::Internal(format!("failed to get mtime for {}: {e}", path.display())))?;
+    let mtime = fs::metadata(path)?.modified().map_err(|e| {
+        AppError::Internal(format!("failed to get mtime for {}: {e}", path.display()))
+    })?;
     let secs = mtime
         .duration_since(UNIX_EPOCH)
         .map_err(|e| AppError::Internal(format!("invalid mtime for {}: {e}", path.display())))?;
@@ -893,7 +971,11 @@ fn load_file_state(conn: &rusqlite::Connection, task_id: &str) -> AppResult<File
     Ok(map)
 }
 
-fn refresh_file_state(conn: &rusqlite::Connection, task_id: &str, source_root: &Path) -> AppResult<()> {
+fn refresh_file_state(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+    source_root: &Path,
+) -> AppResult<()> {
     conn.execute("DELETE FROM task_file_state WHERE task_id = ?1", [task_id])?;
     if source_root.is_dir() {
         let now = now_epoch_seconds()?;
@@ -935,7 +1017,11 @@ fn insert_file_state_recursive(
     Ok(())
 }
 
-fn save_single_file_state(conn: &rusqlite::Connection, task_id: &str, source: &Path) -> AppResult<()> {
+fn save_single_file_state(
+    conn: &rusqlite::Connection,
+    task_id: &str,
+    source: &Path,
+) -> AppResult<()> {
     let rel_path = required_file_name(source)?;
     let metadata = fs::metadata(source)?;
     let size = metadata.len() as i64;
@@ -1244,8 +1330,10 @@ mod tests {
             .expect("set webdav remote root");
         }
         let transfer = Arc::new(RecordingTransfer::default());
+        let request_logger = OutboundRequestLogger::for_test().expect("create request logger");
         let lifecycle = TaskLifecycle {
             db,
+            request_logger,
             transfer: transfer.clone(),
         };
         let task = Task {
@@ -1290,8 +1378,10 @@ mod tests {
             .expect("set webdav remote root");
         }
         let transfer = Arc::new(RecordingTransfer::default());
+        let request_logger = OutboundRequestLogger::for_test().expect("create request logger");
         let lifecycle = TaskLifecycle {
             db,
+            request_logger,
             transfer: transfer.clone(),
         };
         let task = Task {

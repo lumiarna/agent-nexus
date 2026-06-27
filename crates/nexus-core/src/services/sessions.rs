@@ -13,7 +13,7 @@ use serde::Serialize;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
-    services::{paths, sync, webdav},
+    services::{outbound_request_log::OutboundRequestLogger, paths, sync, webdav},
 };
 
 const MAX_SESSION_INDEX_BYTES: u64 = 64 * 1024;
@@ -36,6 +36,7 @@ pub struct Session {
 #[derive(Clone)]
 pub struct SessionService {
     db: Arc<Database>,
+    request_logger: OutboundRequestLogger,
 }
 
 #[derive(Debug, Clone)]
@@ -100,8 +101,8 @@ struct RemoteMarkdownFile {
 }
 
 impl SessionService {
-    pub fn new(db: Arc<Database>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<Database>, request_logger: OutboundRequestLogger) -> Self {
+        Self { db, request_logger }
     }
 
     pub fn list_local_sessions(&self) -> AppResult<Vec<Session>> {
@@ -158,7 +159,7 @@ impl SessionService {
     pub async fn get_cloud_session(&self, id: String) -> AppResult<Session> {
         let indexed = self.get_indexed_session(id, "cloud")?;
         let settings = self.webdav_settings()?;
-        session_with_cloud_body_from_indexed(indexed, &settings).await
+        session_with_cloud_body_from_indexed(indexed, &settings, &self.request_logger).await
     }
 
     fn get_indexed_session(&self, id: String, source: &str) -> AppResult<IndexedSession> {
@@ -269,7 +270,9 @@ impl SessionService {
         let mut discovered = Vec::new();
 
         for root in roots {
-            let files = collect_remote_markdown_files(&settings, &auth, &root.key).await?;
+            let files =
+                collect_remote_markdown_files(&settings, &auth, &root.key, &self.request_logger)
+                    .await?;
             for file in files {
                 let cache_key = (root.id.clone(), file.file_path.clone());
                 if let Some(session) = cached.get(&cache_key) {
@@ -281,7 +284,10 @@ impl SessionService {
                     }
                 }
 
-                discovered.push(read_cloud_session_file(&root, &settings, &auth, file).await?);
+                discovered.push(
+                    read_cloud_session_file(&root, &settings, &auth, file, &self.request_logger)
+                        .await?,
+                );
             }
         }
 
@@ -435,10 +441,11 @@ fn session_with_local_body_from_indexed(value: IndexedSession) -> AppResult<Sess
 async fn session_with_cloud_body_from_indexed(
     value: IndexedSession,
     settings: &sync::WebdavSettings,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<Session> {
     let auth = webdav::auth_from_credentials(&settings.user, &settings.pass);
     let segments = cloud_file_segments(&settings.remote_root, &value.project_key, &value.file_path);
-    let bytes = webdav::get_bytes(&settings.url, &segments, &auth).await?;
+    let bytes = webdav::get_bytes(&settings.url, &segments, &auth, request_logger).await?;
     let text = valid_utf8_prefix(bytes, false, Path::new(&value.file_path))?;
     let body = parse_session_markdown(
         &text,
@@ -512,6 +519,7 @@ async fn collect_remote_markdown_files(
     settings: &sync::WebdavSettings,
     auth: &webdav::WebdavAuth,
     project_key: &str,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<Vec<RemoteMarkdownFile>> {
     let mut files = Vec::new();
     let mut directories = vec![(
@@ -520,7 +528,10 @@ async fn collect_remote_markdown_files(
     )];
 
     while let Some((relative_dir, segments)) = directories.pop() {
-        let Some(entries) = webdav::list_directory_if_exists(&settings.url, &segments, auth).await? else {
+        let Some(entries) =
+            webdav::list_directory_if_exists(&settings.url, &segments, auth, request_logger)
+                .await?
+        else {
             continue;
         };
         for entry in entries {
@@ -566,9 +577,10 @@ async fn read_cloud_session_file(
     settings: &sync::WebdavSettings,
     auth: &webdav::WebdavAuth,
     file: RemoteMarkdownFile,
+    request_logger: &OutboundRequestLogger,
 ) -> AppResult<DiscoveredCloudSession> {
     let segments = cloud_file_segments(&settings.remote_root, &project.key, &file.file_path);
-    let bytes = webdav::get_bytes(&settings.url, &segments, auth).await?;
+    let bytes = webdav::get_bytes(&settings.url, &segments, auth, request_logger).await?;
     let text = valid_utf8_prefix(bytes, false, Path::new(&file.file_path))?;
     let parsed =
         parse_session_markdown(&text, fallback_title_from_path(Path::new(&file.file_path))?);

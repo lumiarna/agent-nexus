@@ -2,6 +2,7 @@ pub mod agent_capabilities;
 pub mod app_config;
 pub mod cron;
 pub mod distribution;
+pub mod outbound_request_log;
 pub mod paths;
 pub mod placement;
 pub mod project_symlinks;

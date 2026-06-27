@@ -9,8 +9,7 @@ use url::Url;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
-    services::util::required_trimmed,
-    services::webdav,
+    services::{outbound_request_log::OutboundRequestLogger, util::required_trimmed, webdav},
 };
 
 use task_lifecycle::TaskLifecycle;
@@ -100,9 +99,9 @@ pub struct SyncService {
 }
 
 impl SyncService {
-    pub fn new(db: Arc<Database>) -> Self {
+    pub fn new(db: Arc<Database>, request_logger: OutboundRequestLogger) -> Self {
         Self {
-            task_lifecycle: TaskLifecycle::new(db.clone()),
+            task_lifecycle: TaskLifecycle::new(db.clone(), request_logger.clone()),
             db,
         }
     }
@@ -129,11 +128,17 @@ impl SyncService {
     pub async fn test_webdav_connection(&self, input: WebdavSettingsInput) -> AppResult<()> {
         let settings = normalize_webdav_settings(input)?;
         let auth = webdav::auth_from_credentials(&settings.user, &settings.pass);
-        webdav::test_connection(&settings.url, &auth).await?;
+        webdav::test_connection(&settings.url, &auth, self.task_lifecycle.request_logger()).await?;
         let segments = webdav::path_segments(&settings.remote_root)
             .map(ToOwned::to_owned)
             .collect::<Vec<_>>();
-        webdav::ensure_remote_directories(&settings.url, &segments, &auth).await
+        webdav::ensure_remote_directories(
+            &settings.url,
+            &segments,
+            &auth,
+            self.task_lifecycle.request_logger(),
+        )
+        .await
     }
 
     pub async fn run_task(&self, id: String) -> AppResult<Task> {
