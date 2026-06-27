@@ -21,7 +21,7 @@ use crate::{
             OutboundRequestContext, OutboundRequestError, OutboundRequestLogger,
         },
         provider_quota::{
-            http_client, is_token_expiring_soon, ClaudeCodeCredentials, HttpUsageTransport,
+            http_client, ClaudeAccessToken, ClaudeAuthError, HttpUsageTransport,
             LocalCredentialSource, CLAUDE_CODE_PROVIDER_ID,
         },
         util::required_trimmed,
@@ -77,17 +77,31 @@ struct ProviderTriggerOutcome {
 enum ProviderTriggerError {
     Retryable(String),
     Terminal(String),
+    AuthRequired,
 }
 
 impl ProviderTriggerError {
     fn message(&self) -> &str {
         match self {
             Self::Retryable(message) | Self::Terminal(message) => message,
+            Self::AuthRequired => "Claude Code authorization was rejected; run claude /login",
         }
     }
 
     fn is_retryable(&self) -> bool {
         matches!(self, Self::Retryable(_))
+    }
+}
+
+impl From<ClaudeAuthError> for ProviderTriggerError {
+    fn from(error: ClaudeAuthError) -> Self {
+        match error {
+            ClaudeAuthError::NoCreds
+            | ClaudeAuthError::MissingScope { .. }
+            | ClaudeAuthError::RefreshFailed { .. }
+            | ClaudeAuthError::RefreshRejected { .. }
+            | ClaudeAuthError::Terminal(_) => ProviderTriggerError::Terminal(error.message()),
+        }
     }
 }
 
@@ -530,55 +544,12 @@ impl ClaudeCodeTriggerRunner {
         }
     }
 
-    async fn claude_access_token(
-        &self,
-    ) -> Result<(ClaudeCodeCredentials, String), ProviderTriggerError> {
-        let credentials = self
-            .credential_source
-            .claude_code_credentials(&self.app_config)
-            .map_err(|error| ProviderTriggerError::Terminal(error.to_string()))?
-            .ok_or_else(|| {
-                ProviderTriggerError::Terminal("Claude Code credentials were not found".to_string())
-            })?;
-
-        if !credentials.scopes.is_empty()
-            && !credentials
-                .scopes
-                .iter()
-                .any(|scope| scope == "user:profile")
-        {
-            return Err(ProviderTriggerError::Terminal(
-                "Claude OAuth token missing 'user:profile' scope. Run 'claude setup-token'."
-                    .to_string(),
-            ));
-        }
-
-        let mut access_token = credentials.access_token.clone();
-        if is_token_expiring_soon(credentials.expires_at) {
-            if let Some(refreshed) = self
-                .usage_transport
-                .refresh_claude_code_credentials(&credentials)
-                .await
-            {
-                access_token = refreshed;
-            }
-        }
-
-        Ok((credentials, access_token))
-    }
-
-    async fn refresh_or_auth_error(
-        &self,
-        credentials: &ClaudeCodeCredentials,
-    ) -> Result<String, ProviderTriggerError> {
-        self.usage_transport
-            .refresh_claude_code_credentials(credentials)
-            .await
-            .ok_or_else(|| {
-                ProviderTriggerError::Terminal(
-                    "Claude Code authorization was rejected; run claude /login".to_string(),
-                )
-            })
+    fn auth(&self) -> ClaudeAccessToken<'_> {
+        ClaudeAccessToken::new(
+            &self.app_config,
+            self.credential_source.as_ref(),
+            self.usage_transport.as_ref(),
+        )
     }
 }
 
@@ -594,16 +565,17 @@ impl ProviderTriggerRunner for ClaudeCodeTriggerRunner {
                     "window alignment is not supported for provider: {provider_id}"
                 )));
             }
-            let (credentials, access_token) = self.claude_access_token().await?;
-            match fetch_claude_code_models(&access_token, &self.request_logger).await {
-                Err(ProviderTriggerError::Terminal(message))
-                    if message.contains("authorization") =>
-                {
-                    let refreshed = self.refresh_or_auth_error(&credentials).await?;
-                    fetch_claude_code_models(&refreshed, &self.request_logger).await
-                }
-                result => result,
-            }
+            let auth = self.auth();
+            let (credentials, access_token) = auth.acquire().await?;
+            auth.with_auth_retry(
+                &credentials,
+                access_token,
+                |access_token| async move {
+                    fetch_claude_code_models(&access_token, &self.request_logger).await
+                },
+                |error| matches!(error, ProviderTriggerError::AuthRequired),
+            )
+            .await
         })
     }
 
@@ -614,16 +586,17 @@ impl ProviderTriggerRunner for ClaudeCodeTriggerRunner {
                     "window alignment is not supported for provider: {provider_id}"
                 )));
             }
-            let (credentials, access_token) = self.claude_access_token().await?;
-            match trigger_claude_code(&access_token, model_id, &self.request_logger).await {
-                Err(ProviderTriggerError::Terminal(message))
-                    if message.contains("authorization") =>
-                {
-                    let refreshed = self.refresh_or_auth_error(&credentials).await?;
-                    trigger_claude_code(&refreshed, model_id, &self.request_logger).await
-                }
-                result => result,
-            }
+            let auth = self.auth();
+            let (credentials, access_token) = auth.acquire().await?;
+            auth.with_auth_retry(
+                &credentials,
+                access_token,
+                |access_token| async move {
+                    trigger_claude_code(&access_token, model_id, &self.request_logger).await
+                },
+                |error| matches!(error, ProviderTriggerError::AuthRequired),
+            )
+            .await
         })
     }
 }
@@ -1032,9 +1005,7 @@ fn ensure_success_status_or_trigger_error(
         format!("{label} endpoint returned {status}: {detail}")
     };
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err(ProviderTriggerError::Terminal(
-            "Claude Code authorization was rejected; run claude /login".to_string(),
-        ));
+        return Err(ProviderTriggerError::AuthRequired);
     }
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
         return Err(ProviderTriggerError::Retryable(message));

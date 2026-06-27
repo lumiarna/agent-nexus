@@ -19,9 +19,9 @@ use super::super::{
         http_client, percent_to_u8, provider_quota_log_context, provider_quota_request_error,
         shortest_percent_window_used,
     },
-    ProviderCredentialSource, ProviderQuotaAdapter, ProviderQuotaFuture, ProviderQuotaPollError,
-    ProviderQuotaSnapshot, ProviderQuotaStatus, ProviderQuotaWindow, ProviderQuotaWindowKind,
-    ProviderUsageTransport,
+    ClaudeAccessToken, ClaudeAuthError, ProviderCredentialSource, ProviderQuotaAdapter,
+    ProviderQuotaFuture, ProviderQuotaPollError, ProviderQuotaSnapshot, ProviderQuotaStatus,
+    ProviderQuotaWindow, ProviderQuotaWindowKind, ProviderUsageTransport,
 };
 
 pub(crate) const PROVIDER_ID: &str = "claude";
@@ -59,8 +59,8 @@ pub(crate) struct ClaudeCodeCredentials {
 pub(crate) struct ClaudeOAuthRefreshResponse {
     pub(crate) access_token: String,
     #[serde(default)]
-    refresh_token: Option<String>,
-    expires_in: i64,
+    pub(crate) refresh_token: Option<String>,
+    pub(crate) expires_in: i64,
 }
 
 pub(crate) struct ClaudeCodeQuotaAdapter;
@@ -95,52 +95,50 @@ impl ClaudeCodeQuotaAdapter {
         credential_source: &dyn ProviderCredentialSource,
         usage_transport: &dyn ProviderUsageTransport,
     ) -> ProviderQuotaSnapshot {
-        let credentials = match credential_source.claude_code_credentials(app_config) {
-            Ok(Some(credentials)) => credentials,
-            Ok(None) => return status(ProviderQuotaStatus::NoCreds, "not found"),
-            Err(error) => return status(ProviderQuotaStatus::Failed, error.to_string().as_str()),
+        let auth = ClaudeAccessToken::new(app_config, credential_source, usage_transport);
+        let (credentials, access_token) = match auth.acquire().await {
+            Ok(result) => result,
+            Err(error) => return snapshot_from_auth_error(error),
         };
 
-        if !credentials.scopes.is_empty()
-            && !credentials
-                .scopes
-                .iter()
-                .any(|scope| scope == "user:profile")
-        {
-            return ProviderQuotaSnapshot {
-                provider_id: PROVIDER_ID.to_string(),
-                status: ProviderQuotaStatus::Failed,
-                plan: credentials.plan,
-                primary: None,
-                windows: Vec::new(),
-                credential: Some(credentials.source.clone()),
-                error: Some(
-                    "Claude OAuth token missing 'user:profile' scope. Run 'claude setup-token'."
-                        .to_string(),
-                ),
-            };
-        }
-
-        let mut access_token = credentials.access_token.clone();
-        if is_token_expiring_soon(credentials.expires_at) {
-            match refresh_and_persist_result(&credentials, usage_transport).await {
-                Ok(Some(refreshed)) => {
-                    access_token = refreshed.access_token.clone();
-                }
-                Ok(None) => {}
-                Err(error) => return derive_snapshot(credentials, Err(error)),
-            }
-        }
-
-        let mut usage = usage_transport.claude_code_usage(&access_token).await;
-        if let Err(ProviderQuotaPollError::AuthRequired) = usage {
-            if let Some(refreshed) = refresh_and_persist(&credentials, usage_transport).await {
-                access_token = refreshed.access_token.clone();
-                usage = usage_transport.claude_code_usage(&access_token).await;
-            }
-        }
+        let usage = auth
+            .with_auth_retry(
+                &credentials,
+                access_token,
+                |access_token| async move {
+                    usage_transport.claude_code_usage(&access_token).await
+                },
+                |error| matches!(error, ProviderQuotaPollError::AuthRequired),
+            )
+            .await;
 
         derive_snapshot(credentials, usage)
+    }
+}
+
+fn snapshot_from_auth_error(error: ClaudeAuthError) -> ProviderQuotaSnapshot {
+    let message = error.message();
+    match error {
+        ClaudeAuthError::NoCreds => status(ProviderQuotaStatus::NoCreds, "not found"),
+        ClaudeAuthError::Terminal(_) => status(ProviderQuotaStatus::Failed, &message),
+        ClaudeAuthError::MissingScope { credentials } => {
+            let ClaudeCodeCredentials { plan, source, .. } = credentials;
+            ProviderQuotaSnapshot {
+                provider_id: PROVIDER_ID.to_string(),
+                status: ProviderQuotaStatus::Failed,
+                plan,
+                primary: None,
+                windows: Vec::new(),
+                credential: Some(source),
+                error: Some(message),
+            }
+        }
+        ClaudeAuthError::RefreshFailed { credentials, error } => {
+            derive_snapshot(credentials, Err(error))
+        }
+        ClaudeAuthError::RefreshRejected { credentials } => {
+            derive_snapshot(credentials, Err(ProviderQuotaPollError::AuthRequired))
+        }
     }
 }
 
@@ -293,17 +291,7 @@ pub(crate) async fn fetch_oauth_refresh(
         .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
 }
 
-pub(crate) async fn refresh_and_persist(
-    credentials: &ClaudeCodeCredentials,
-    usage_transport: &dyn ProviderUsageTransport,
-) -> Option<ClaudeOAuthRefreshResponse> {
-    refresh_and_persist_result(credentials, usage_transport)
-        .await
-        .ok()
-        .flatten()
-}
-
-async fn refresh_and_persist_result(
+pub(crate) async fn refresh_and_persist_result(
     credentials: &ClaudeCodeCredentials,
     usage_transport: &dyn ProviderUsageTransport,
 ) -> Result<Option<ClaudeOAuthRefreshResponse>, ProviderQuotaPollError> {

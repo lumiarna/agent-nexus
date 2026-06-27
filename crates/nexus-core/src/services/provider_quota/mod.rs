@@ -7,6 +7,7 @@ use crate::{
     services::{app_config::AppConfigService, outbound_request_log::OutboundRequestLogger},
 };
 
+mod claude_auth;
 mod shared;
 mod providers {
     pub(crate) mod claude_code;
@@ -17,8 +18,9 @@ mod providers {
     pub(crate) mod opencode_go;
 }
 
+pub(crate) use claude_auth::{ClaudeAccessToken, ClaudeAuthError};
 pub(crate) use providers::claude_code::{
-    is_token_expiring_soon, ClaudeCodeCredentials, PROVIDER_ID as CLAUDE_CODE_PROVIDER_ID,
+    ClaudeCodeCredentials, PROVIDER_ID as CLAUDE_CODE_PROVIDER_ID,
 };
 pub use providers::{
     claude_code::{
@@ -151,7 +153,7 @@ type OpenCodeCustomProviderUsageFuture<'a> = Pin<
     Box<dyn Future<Output = Result<Vec<(String, String)>, ProviderQuotaPollError>> + Send + 'a>,
 >;
 
-trait ProviderCredentialSource: Send + Sync {
+pub(crate) trait ProviderCredentialSource: Send + Sync {
     fn claude_code_credentials(
         &self,
         app_config: &AppConfigService,
@@ -173,7 +175,7 @@ trait ProviderCredentialSource: Send + Sync {
     fn opencode_custom_providers(&self) -> AppResult<Vec<OpenCodeCustomProviderCredentials>>;
 }
 
-trait ProviderUsageTransport: Send + Sync {
+pub(crate) trait ProviderUsageTransport: Send + Sync {
     fn claude_code_usage<'a>(&'a self, access_token: &'a str) -> ClaudeCodeUsageFuture<'a>;
     fn claude_code_refresh<'a>(
         &'a self,
@@ -215,27 +217,9 @@ pub(crate) struct HttpUsageTransport {
     request_logger: OutboundRequestLogger,
 }
 
-impl LocalCredentialSource {
-    pub(crate) fn claude_code_credentials(
-        &self,
-        app_config: &AppConfigService,
-    ) -> AppResult<Option<ClaudeCodeCredentials>> {
-        <Self as ProviderCredentialSource>::claude_code_credentials(self, app_config)
-    }
-}
-
 impl HttpUsageTransport {
     pub(crate) fn new(request_logger: OutboundRequestLogger) -> Self {
         Self { request_logger }
-    }
-
-    pub(crate) async fn refresh_claude_code_credentials(
-        &self,
-        credentials: &ClaudeCodeCredentials,
-    ) -> Option<String> {
-        providers::claude_code::refresh_and_persist(credentials, self)
-            .await
-            .map(|refreshed| refreshed.access_token)
     }
 }
 
@@ -457,9 +441,12 @@ pub(crate) enum ProviderQuotaPollError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
+    use std::{
+        collections::VecDeque,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
     };
 
     use super::*;
@@ -509,6 +496,28 @@ mod tests {
 
     struct FailingClaudeRefreshTransport {
         usage_calls: Arc<AtomicUsize>,
+    }
+
+    struct RecordingClaudeTransport {
+        usage_results: Mutex<VecDeque<Result<ClaudeCodeUsageResponse, ProviderQuotaPollError>>>,
+        refresh_results:
+            Mutex<VecDeque<Result<ClaudeOAuthRefreshResponse, ProviderQuotaPollError>>>,
+        usage_tokens: Mutex<Vec<String>>,
+        refresh_calls: AtomicUsize,
+    }
+
+    impl RecordingClaudeTransport {
+        fn new(
+            usage_results: Vec<Result<ClaudeCodeUsageResponse, ProviderQuotaPollError>>,
+            refresh_results: Vec<Result<ClaudeOAuthRefreshResponse, ProviderQuotaPollError>>,
+        ) -> Self {
+            Self {
+                usage_results: Mutex::new(VecDeque::from(usage_results)),
+                refresh_results: Mutex::new(VecDeque::from(refresh_results)),
+                usage_tokens: Mutex::new(Vec::new()),
+                refresh_calls: AtomicUsize::new(0),
+            }
+        }
     }
 
     impl ProviderUsageTransport for FailingClaudeRefreshTransport {
@@ -570,15 +579,87 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn claude_quota_stops_before_usage_when_expiring_token_refresh_fails() {
+    impl ProviderUsageTransport for RecordingClaudeTransport {
+        fn claude_code_usage<'a>(&'a self, access_token: &'a str) -> ClaudeCodeUsageFuture<'a> {
+            self.usage_tokens
+                .lock()
+                .expect("lock usage tokens")
+                .push(access_token.to_string());
+            Box::pin(async move {
+                self.usage_results
+                    .lock()
+                    .expect("lock usage results")
+                    .pop_front()
+                    .expect("usage result is queued")
+            })
+        }
+
+        fn claude_code_refresh<'a>(
+            &'a self,
+            _refresh_token: &'a str,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<ClaudeOAuthRefreshResponse, ProviderQuotaPollError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            self.refresh_calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                self.refresh_results
+                    .lock()
+                    .expect("lock refresh results")
+                    .pop_front()
+                    .expect("refresh result is queued")
+            })
+        }
+
+        fn codex_usage<'a>(
+            &'a self,
+            _access_token: &'a str,
+            _account_id: Option<&'a str>,
+        ) -> CodexUsageFuture<'a> {
+            Box::pin(async { unreachable!("codex usage is not part of this test") })
+        }
+
+        fn copilot_usage<'a>(&'a self, _token: &'a str) -> CopilotUsageFuture<'a> {
+            Box::pin(async { unreachable!("copilot usage is not part of this test") })
+        }
+
+        fn opencode_go_page<'a>(
+            &'a self,
+            _workspace_id: &'a str,
+            _auth_cookie: &'a str,
+        ) -> OpenCodeGoPageFuture<'a> {
+            Box::pin(async { unreachable!("opencode go usage is not part of this test") })
+        }
+
+        fn configured_provider_usage<'a>(
+            &'a self,
+            _config: &'static ConfiguredProviderQuotaConfig,
+            _api_key: &'a str,
+        ) -> ConfiguredProviderUsageFuture<'a> {
+            Box::pin(async { unreachable!("configured provider usage is not part of this test") })
+        }
+
+        fn opencode_custom_provider_usage<'a>(
+            &'a self,
+            _credentials: &'a OpenCodeCustomProviderCredentials,
+        ) -> OpenCodeCustomProviderUsageFuture<'a> {
+            Box::pin(async { unreachable!("custom provider usage is not part of this test") })
+        }
+    }
+
+    fn test_app_config() -> AppConfigService {
         let db = Arc::new(crate::database::Database::open_in_memory().expect("open test db"));
-        let app_config = AppConfigService::new(db);
-        let usage_calls = Arc::new(AtomicUsize::new(0));
-        let credentials = ClaudeCodeCredentials {
+        AppConfigService::new(db)
+    }
+
+    fn claude_credentials(expires_at: Option<i64>) -> ClaudeCodeCredentials {
+        ClaudeCodeCredentials {
             access_token: "old-access-token".to_string(),
-            refresh_token: Some("rejected-refresh-token".to_string()),
-            expires_at: Some(0),
+            refresh_token: Some("refresh-token".to_string()),
+            expires_at,
             scopes: vec!["user:profile".to_string()],
             plan: Some("Claude".to_string()),
             source: "test credentials".to_string(),
@@ -587,13 +668,116 @@ mod tests {
             raw: serde_json::json!({
                 "claudeAiOauth": {
                     "accessToken": "old-access-token",
-                    "refreshToken": "rejected-refresh-token",
-                    "expiresAt": 0
+                    "refreshToken": "refresh-token",
+                    "expiresAt": expires_at.unwrap_or(4_102_444_800_000_i64)
                 }
             }),
-        };
+        }
+    }
+
+    fn usage_response() -> ClaudeCodeUsageResponse {
+        ClaudeCodeUsageResponse {
+            five_hour: Some(ClaudeCodeUsageBucket {
+                utilization: 1.0,
+                resets_at: None,
+            }),
+            seven_day: None,
+        }
+    }
+
+    fn refresh_response(access_token: &str) -> ClaudeOAuthRefreshResponse {
+        ClaudeOAuthRefreshResponse {
+            access_token: access_token.to_string(),
+            refresh_token: None,
+            expires_in: 3600,
+        }
+    }
+
+    #[tokio::test]
+    async fn claude_auth_acquire_refreshes_expiring_token() {
+        let app_config = test_app_config();
         let credential_source = StaticCredentialSource {
-            claude_credentials: Some(credentials),
+            claude_credentials: Some(claude_credentials(Some(0))),
+        };
+        let usage_transport =
+            RecordingClaudeTransport::new(Vec::new(), vec![Ok(refresh_response("fresh-token"))]);
+
+        let (_credentials, access_token) =
+            ClaudeAccessToken::new(&app_config, &credential_source, &usage_transport)
+                .acquire()
+                .await
+                .expect("acquire access token");
+
+        assert_eq!(access_token, "fresh-token");
+        assert_eq!(usage_transport.refresh_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn claude_auth_acquire_reports_refresh_rejection() {
+        let app_config = test_app_config();
+        let credential_source = StaticCredentialSource {
+            claude_credentials: Some(claude_credentials(Some(0))),
+        };
+        let usage_transport = RecordingClaudeTransport::new(
+            Vec::new(),
+            vec![Err(ProviderQuotaPollError::AuthRequired)],
+        );
+
+        let error = ClaudeAccessToken::new(&app_config, &credential_source, &usage_transport)
+            .acquire()
+            .await
+            .expect_err("refresh rejection is surfaced");
+
+        assert!(matches!(error, ClaudeAuthError::RefreshFailed { .. }));
+        assert_eq!(
+            error.message(),
+            "Claude Code authorization was rejected; run claude /login"
+        );
+    }
+
+    #[tokio::test]
+    async fn claude_auth_retries_once_after_auth_required() {
+        let app_config = test_app_config();
+        let credentials = claude_credentials(None);
+        let credential_source = StaticCredentialSource {
+            claude_credentials: Some(credentials.clone()),
+        };
+        let usage_transport = RecordingClaudeTransport::new(
+            vec![
+                Err(ProviderQuotaPollError::AuthRequired),
+                Ok(usage_response()),
+            ],
+            vec![Ok(refresh_response("retry-token"))],
+        );
+        let auth = ClaudeAccessToken::new(&app_config, &credential_source, &usage_transport);
+        let usage_transport_ref = &usage_transport;
+
+        let usage = auth
+            .with_auth_retry(
+                &credentials,
+                "old-access-token".to_string(),
+                |access_token| async move {
+                    usage_transport_ref.claude_code_usage(&access_token).await
+                },
+                |error| matches!(error, ProviderQuotaPollError::AuthRequired),
+            )
+            .await
+            .expect("retry succeeds");
+
+        assert!(usage.five_hour.is_some());
+        assert_eq!(usage_transport.refresh_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *usage_transport.usage_tokens.lock().expect("lock tokens"),
+            vec!["old-access-token".to_string(), "retry-token".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn claude_quota_stops_before_usage_when_expiring_token_refresh_fails() {
+        let app_config = test_app_config();
+        let usage_calls = Arc::new(AtomicUsize::new(0));
+        let credential_source = StaticCredentialSource {
+            claude_credentials: Some(claude_credentials(Some(0))),
         };
         let usage_transport = FailingClaudeRefreshTransport {
             usage_calls: usage_calls.clone(),
