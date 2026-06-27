@@ -27,6 +27,7 @@ accepted (2026-06-27)
 ## Implementation Notes
 
 - Prompt scan 顺序:`AGENTS.md` / `CLAUDE.md` primary 自动发现 → `extra_prompt_files` 列表每条文件 → 各自匹配 Agent glob → 生成 Prompt 行带 Source Agent。
+- **Extra Prompt File 的跨 Agent 分发用 "stem-swap"**:project prompt 落到 target Agent 的路径 = 把 source Agent 的 prompt-file stem(`AGENTS` / `CLAUDE`)换成 target Agent 的 stem,保留目录前缀与 stem 与 `.md` 之间的后缀。即 `AGENTS.md → CLAUDE.md`(后缀空,与既有 primary 行为字节一致,无回归)、`AGENTS.local.md → CLAUDE.local.md`、`docs/CLAUDE.md → docs/AGENTS.md`。这条规则是 ADR 决策时未定的语义,实现时收敛为此:它是唯一对 primary 与 extra 统一、且跨 Agent 无文件名碰撞的映射。Global scope 不走 stem-swap,仍用各 Agent 的 `global_file`。
 - 命名 glob 选最宽 `AGENTS*.md` / `CLAUDE*.md`,因为只有用户显式加进 `extra_prompt_files` 的文件才被当 extra,glob 严格度不影响过滤安全性。
 - Session 编辑入口放 Session card 头部(对齐 Skill "Custom skills dirs" / Prompt "Custom prompt files" 位置),不放在 Project 头部只读摘要旁。
 - Project 列表页布局改为 4 列 (`drag | key+path | skill | prompt | session | ⋯`),SYNC 移出 Assets 列(它是任务数不是 Asset)。每个 asset cell 显示"大数字 + 最多 2 行小字 + `+N`"。

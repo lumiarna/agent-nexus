@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { projectsApi } from "@/lib/api/projects";
 import { createDeleteProjectMutationOptions } from "@/lib/query/projectDeletion";
 import { projectSymlinkKeys } from "@/lib/query/projectSymlinkInventory";
+import { promptKeys } from "@/lib/query/prompts";
 import { sessionKeys } from "@/lib/query/sessions";
 import { skillKeys } from "@/lib/query/skills";
 import type { Project } from "@/types";
@@ -79,6 +80,38 @@ export function useSetProjectCustomSkillsDirsMutation() {
       );
       // Custom dirs change the Project custom Skill set — rescan on next read.
       await queryClient.invalidateQueries({ queryKey: skillKeys.all });
+    },
+  });
+}
+
+export function useSetProjectExtraPromptFilesMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ projectId, files }: { projectId: string; files: string[] }) =>
+      projectsApi.setExtraPromptFiles(projectId, files),
+    onSuccess: async (project: Project) => {
+      queryClient.setQueryData<Project[]>(projectKeys.all, (current) =>
+        current ? current.map((p) => (p.id === project.id ? project : p)) : current,
+      );
+      // Extra prompt files widen the Project prompt scan — rescan on next read.
+      await queryClient.invalidateQueries({ queryKey: promptKeys.all });
+    },
+  });
+}
+
+export function useSetProjectSessionsDirMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ projectId, dir }: { projectId: string; dir: string }) =>
+      projectsApi.setSessionsDir(projectId, dir),
+    onSuccess: async (project: Project) => {
+      queryClient.setQueryData<Project[]>(projectKeys.all, (current) =>
+        current ? current.map((p) => (p.id === project.id ? project : p)) : current,
+      );
+      // The Session Directory moved — local sessions resolve from the new path.
+      await queryClient.invalidateQueries({ queryKey: sessionKeys.local });
     },
   });
 }

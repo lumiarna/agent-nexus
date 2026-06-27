@@ -71,3 +71,23 @@ pub fn set_project_custom_skills_dirs(
         .projects
         .set_project_custom_skills_dirs(project_id, dirs)
 }
+
+#[tauri::command]
+pub fn set_project_extra_prompt_files(
+    state: State<'_, AppState>,
+    project_id: String,
+    files: Vec<String>,
+) -> AppResult<Project> {
+    state
+        .projects
+        .set_project_extra_prompt_files(project_id, files)
+}
+
+#[tauri::command]
+pub fn set_project_sessions_dir(
+    state: State<'_, AppState>,
+    project_id: String,
+    dir: String,
+) -> AppResult<Project> {
+    state.projects.set_project_sessions_dir(project_id, dir)
+}

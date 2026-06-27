@@ -55,6 +55,7 @@ export interface Project {
   sessionsDir: string;
   sessionsNote?: string;
   skills: number;
+  prompts: number;
   sessions: number;
   sync: number;
   /** Stable cross-device identity key — always the folder name in the MVP. */
@@ -63,6 +64,11 @@ export interface Project {
    *  project skills dirs. Relative paths resolve against the Project root; absolute
    *  paths may live outside the repo. Absent on backends that predate the feature. */
   customSkillsDirs?: string[];
+  /** Extra Prompt files explicitly registered for this Project, scanned alongside
+   *  the primary AGENTS.md / CLAUDE.md. Each entry is a path relative to the Project
+   *  root whose filename must match an Agent `projectPromptFile` glob (AGENTS*.md /
+   *  CLAUDE*.md). Absent on backends that predate the feature. */
+  extraPromptFiles?: string[];
 }
 
 export interface GitBaseFolder {

@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 16;
+const CURRENT_SCHEMA_VERSION: i64 = 17;
 
 /// Default Project custom skills directory — every Project scans `<root>/skills`
 /// as a Project custom source unless the user edits the list.
@@ -79,6 +79,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 16 {
             migrate_to_v16(conn)?;
         }
+        if current < 17 {
+            migrate_to_v17(conn)?;
+        }
     }
 
     Ok(())
@@ -110,7 +113,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (16);
+        INSERT INTO schema_version (version) VALUES (17);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -121,6 +124,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
                 CHECK (status IN ('active', 'stale', 'hidden')),
             sessions_dir TEXT NOT NULL DEFAULT '__sessions',
             custom_skills_dirs TEXT NOT NULL DEFAULT 'skills',
+            extra_prompt_files TEXT NOT NULL DEFAULT '',
             sort_index INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
@@ -843,6 +847,24 @@ fn migrate_to_v16(conn: &Connection) -> AppResult<()> {
         "#,
         default_custom_skills_dirs = DEFAULT_PROJECT_CUSTOM_SKILLS_DIRS,
     ))
+    .inspect_err(|_| {
+        let _ = conn.execute("ROLLBACK", params![]);
+    })?;
+
+    Ok(())
+}
+
+fn migrate_to_v17(conn: &Connection) -> AppResult<()> {
+    // Project Extra Prompt Files: projects gain a newline-joined list of extra prompt
+    // files scanned alongside the primary AGENTS.md / CLAUDE.md (default empty).
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        ALTER TABLE projects ADD COLUMN extra_prompt_files TEXT NOT NULL DEFAULT '';
+        UPDATE schema_version SET version = 17;
+        COMMIT;
+        "#,
+    )
     .inspect_err(|_| {
         let _ = conn.execute("ROLLBACK", params![]);
     })?;

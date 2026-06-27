@@ -62,6 +62,95 @@ fn rejects_custom_skills_dir_that_is_a_fixed_agent_dir() {
 }
 
 #[test]
+fn defaults_extra_prompt_files_to_empty_and_accepts_matching_globs() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let recorded = service
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+
+    // A freshly recorded project registers no extra prompt files.
+    assert!(recorded.extra_prompt_files.is_empty());
+
+    let updated = service
+        .set_project_extra_prompt_files(
+            recorded.id.clone(),
+            vec![
+                "AGENTS.local.md".to_string(),
+                "  docs/CLAUDE.md  ".to_string(),
+                "./docs/CLAUDE.md".to_string(),
+            ],
+        )
+        .expect("set extra prompt files");
+
+    // Trimmed, and the two `docs/CLAUDE.md` spellings collapse to one entry.
+    assert_eq!(
+        updated.extra_prompt_files,
+        vec!["AGENTS.local.md".to_string(), "docs/CLAUDE.md".to_string()]
+    );
+}
+
+#[test]
+fn rejects_extra_prompt_file_that_does_not_match_a_prompt_glob() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let recorded = service
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+
+    let error = service
+        .set_project_extra_prompt_files(recorded.id, vec!["README.md".to_string()])
+        .expect_err("non-matching file must be rejected");
+    assert!(
+        error.to_string().contains("does not match a prompt glob"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn rejects_extra_prompt_file_that_collides_with_a_primary_prompt() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let recorded = service
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+
+    let error = service
+        .set_project_extra_prompt_files(recorded.id, vec!["CLAUDE.md".to_string()])
+        .expect_err("primary prompt file must be rejected");
+    assert!(
+        error.to_string().contains("auto-discovered primary prompt file"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn sets_sessions_dir_and_restores_default_when_cleared() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+    let recorded = service
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+
+    // A freshly recorded project uses the default session directory.
+    assert_eq!(recorded.sessions_dir, "__sessions");
+
+    let overridden = service
+        .set_project_sessions_dir(recorded.id.clone(), "  .sessions/  ".to_string())
+        .expect("override sessions dir");
+    assert_eq!(overridden.sessions_dir, ".sessions");
+
+    let restored = service
+        .set_project_sessions_dir(recorded.id, String::new())
+        .expect("restore default sessions dir");
+    assert_eq!(restored.sessions_dir, "__sessions");
+}
+
+#[test]
 fn records_git_project_and_lists_it_by_folder_key() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());

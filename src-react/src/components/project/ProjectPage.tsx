@@ -16,12 +16,19 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AgentMatrixCells,
+  MatrixLegend,
+  SourceBadge,
+} from "@/components/ui/agent-icon";
 import { Button } from "@/components/ui/button";
 import { Card, Dot } from "@/components/ui/primitives";
 import { Modal, ModalFooter, ModalHeader } from "@/components/ui/modal";
 import { Segmented } from "@/components/ui/segmented";
 import { SkillRow } from "@/components/skill/SkillRow";
 import { ScreenScroll } from "@/components/shell/screen";
+import { AGENTS } from "@/config/agents";
+import { promptsApi } from "@/lib/api/prompts";
 import { skillsApi } from "@/lib/api/skills";
 import { useNav } from "@/lib/nav";
 import { isTauriRuntime } from "@/lib/runtime";
@@ -36,7 +43,10 @@ import {
   useRemoveGitBaseFolderMutation,
   useScanGitBaseFoldersMutation,
   useSetProjectCustomSkillsDirsMutation,
+  useSetProjectExtraPromptFilesMutation,
+  useSetProjectSessionsDirMutation,
 } from "@/lib/query/projects";
+import { usePromptsQuery, useSetPromptTargetMutation } from "@/lib/query/prompts";
 import {
   useCloudSessionsQuery,
   useLocalSessionsQuery,
@@ -47,12 +57,34 @@ import {
   useSkillsQuery,
 } from "@/lib/query/skills";
 import { useSessionBackupsQuery } from "@/lib/query/sync";
-import { palette, targetAgentsOf } from "@/lib/tokens";
+import { palette, srcAgentOf, targetAgentsOf } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
-import type { AgentName, Project, Skill, TaskStatus } from "@/types";
+import type { AgentName, Project, Prompt, Skill, TaskStatus } from "@/types";
 
-const LIST_COLS = "20px 1.5fr 1.8fr 220px 36px";
+// drag | key+path | skill | prompt | session | ⋯
+const LIST_COLS = "20px 1.6fr 1fr 1fr 1fr 36px";
 type DetailSource = "local" | "cloud";
+
+/** Project prompts collapse to the repo-root files owned by prompt-capable
+ *  agents — Generic Agent (AGENTS.md) and Claude Code (CLAUDE.md). */
+const PROJECT_PROMPT_AGENTS: AgentName[] = AGENTS.filter(
+  (agent) => agent.projectPromptFile,
+).map((agent) => agent.name);
+
+/** Per-agent glob an Extra Prompt File must match (e.g. `AGENTS.md` → `AGENTS*.md`). */
+const PROMPT_FILE_GLOBS = AGENTS.filter((agent) => agent.projectPromptFile).map(
+  (agent) => {
+    const file = agent.projectPromptFile as string;
+    const stem = file.replace(/\.md$/i, "");
+    return { agent: agent.name, glob: `${stem}*.md`, re: new RegExp(`^${stem}.*\\.md$`, "i") };
+  },
+);
+
+/** True when the basename of `file` matches an Agent prompt-file glob. */
+function matchesPromptGlob(file: string): boolean {
+  const base = file.trim().replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
+  return PROMPT_FILE_GLOBS.some((g) => g.re.test(base));
+}
 
 interface MenuState {
   id: string;
@@ -149,12 +181,43 @@ function SortableProjectRow({ id, onClick, stale, children }: SortableProjectRow
   );
 }
 
+/** Default Session Directory leaf — anything else is a project-level override. */
+const DEFAULT_SESSIONS_DIR = "__sessions";
+
+/** A list asset cell: a count chip with up to two lines of small detail beside
+ *  it, then `+N` when the detail overflows. */
+function AssetCell({ n, lines }: { n: number; lines: string[] }) {
+  const shown = lines.slice(0, 2);
+  const extra = lines.length - shown.length;
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <span className="flex-none rounded-[7px] bg-nexus-bg px-[9px] py-[5px] text-[12px] font-extrabold text-nexus-body">
+        {n}
+      </span>
+      {shown.length > 0 || extra > 0 ? (
+        <div className="flex min-w-0 flex-col">
+          {shown.map((line) => (
+            <span
+              key={line}
+              className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10.5px] text-[#b3a999]"
+            >
+              {line}
+            </span>
+          ))}
+          {extra > 0 ? <span className="text-[10px] text-[#c3b9a8]">+{extra}</span> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ProjectPage({ initialProjectId }: { initialProjectId?: string }) {
   const { go } = useNav();
   const desktop = isTauriRuntime();
   const projectsQuery = useProjectsQuery();
   const baseFoldersQuery = useGitBaseFoldersQuery();
   const skillsQuery = useSkillsQuery();
+  const promptsQuery = usePromptsQuery();
   const localSessionsQuery = useLocalSessionsQuery();
   const cloudSessionsQuery = useCloudSessionsQuery();
   const sessionBackupsQuery = useSessionBackupsQuery();
@@ -164,12 +227,16 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const reorderProjects = useReorderProjectsMutation();
   const setSkillTarget = useSetSkillTargetMutation();
   const setSkillDisabled = useSetSkillDisabledMutation();
+  const setPromptTarget = useSetPromptTargetMutation();
   const setCustomSkillsDirs = useSetProjectCustomSkillsDirsMutation();
+  const setExtraPromptFiles = useSetProjectExtraPromptFilesMutation();
+  const setSessionsDir = useSetProjectSessionsDirMutation();
   const recordBaseFolder = useRecordGitBaseFolderMutation();
   const removeBaseFolder = useRemoveGitBaseFolderMutation();
   const scanBaseFolders = useScanGitBaseFoldersMutation();
   const projects = projectsQuery.data ?? [];
   const skills = skillsQuery.data ?? [];
+  const prompts = promptsQuery.data ?? [];
   const baseFolders = baseFoldersQuery.data ?? [];
   const projectError = projectsQuery.error ? getErrorMessage(projectsQuery.error) : null;
   const baseFoldersError = baseFoldersQuery.error
@@ -193,6 +260,10 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   const [addPath, setAddPath] = useState("");
   const [customDirsOpen, setCustomDirsOpen] = useState(false);
   const [customDirInput, setCustomDirInput] = useState("");
+  const [extraFilesOpen, setExtraFilesOpen] = useState(false);
+  const [extraFileInput, setExtraFileInput] = useState("");
+  const [sessionDirOpen, setSessionDirOpen] = useState(false);
+  const [sessionDirInput, setSessionDirInput] = useState("");
   const addKey = deriveProjectKey(addPath);
 
   useEffect(() => {
@@ -267,6 +338,9 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
   // Detail derived state
   const dp = projects.find((p) => p.id === detailId) ?? projects[0];
   const dpSkills = dp ? skills.filter((k) => k.scope === "project" && k.projectId === dp.id) : [];
+  const dpPrompts = dp
+    ? prompts.filter((p) => p.scope === "project" && p.projectId === dp.id)
+    : [];
   const detailSessionsQuery = detailSource === "local" ? localSessionsQuery : cloudSessionsQuery;
   const detailSessions = detailSessionsQuery.data ?? [];
   const dpSessions = dp
@@ -280,6 +354,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
     ? (sessionBackupsQuery.data ?? []).find((backup) => backup.projectKey === dp.key)
     : undefined;
   const skillError = skillsQuery.error ? getErrorMessage(skillsQuery.error) : null;
+  const promptError = promptsQuery.error ? getErrorMessage(promptsQuery.error) : null;
   const detailSessionError = detailSessionsQuery.error
     ? getErrorMessage(detailSessionsQuery.error)
     : null;
@@ -382,6 +457,103 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
         dirs: existing.filter((d) => d !== dir),
       });
       toast(`Removed custom skills dir · ${dir}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function addExtraPromptFile() {
+    const file = extraFileInput.trim();
+    if (!file || !dp) return;
+    if (!matchesPromptGlob(file)) {
+      toast("File must match AGENTS*.md or CLAUDE*.md");
+      return;
+    }
+    const existing = dp.extraPromptFiles ?? [];
+    if (existing.includes(file)) {
+      toast("File already added");
+      return;
+    }
+
+    try {
+      await setExtraPromptFiles.mutateAsync({ projectId: dp.id, files: [...existing, file] });
+      setExtraFileInput("");
+      toast(`Added extra prompt file · ${file}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function removeExtraPromptFile(file: string) {
+    if (!dp) return;
+    const existing = dp.extraPromptFiles ?? [];
+
+    try {
+      await setExtraPromptFiles.mutateAsync({
+        projectId: dp.id,
+        files: existing.filter((f) => f !== file),
+      });
+      toast(`Removed extra prompt file · ${file}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function submitSessionsDir() {
+    if (!dp) return;
+    const dir = sessionDirInput.trim();
+
+    try {
+      const project = await setSessionsDir.mutateAsync({ projectId: dp.id, dir });
+      setSessionDirOpen(false);
+      toast(
+        dir ? `Session dir set · ${project.sessionsDir}` : "Session dir restored to default",
+      );
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function togglePromptCell(prompt: Prompt, agent: AgentName) {
+    if (prompt.cells[agent] === "source") return;
+    if (!desktop) {
+      toast("Desktop runtime required for changing prompt targets");
+      return;
+    }
+
+    try {
+      await setPromptTarget.mutateAsync({
+        promptId: prompt.id,
+        agent,
+        enabled: prompt.cells[agent] !== "target",
+      });
+      toast(prompt.cells[agent] === "target" ? "Target removed" : "Target linked");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function openPromptSource(prompt: Prompt) {
+    if (!desktop) {
+      toast("Desktop runtime required for opening source files");
+      return;
+    }
+
+    try {
+      await promptsApi.openSource(prompt.id);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function revealPromptPath(prompt: Prompt) {
+    if (!desktop) {
+      toast("Desktop runtime required for revealing files");
+      return;
+    }
+
+    try {
+      await promptsApi.revealPath(prompt.id);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -551,8 +723,9 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
             >
               <div />
               <div>Project</div>
-              <div>Repo path</div>
-              <div className="text-right">Assets</div>
+              <div>Skill</div>
+              <div>Prompt</div>
+              <div>Session</div>
               <div />
             </div>
 
@@ -605,41 +778,32 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
                             </span>
                           )}
                         </div>
-                        {isStale ? (
-                          <div className="mt-[3px] text-[11px] text-[#bca37a]">
-                            Repo path no longer resolves
-                          </div>
-                        ) : (
-                          <div className="mt-[3px] font-mono text-[11px] text-[#b3a999]">
-                            {p.sessionsDir}
-                            {p.sessionsNote ?? ""}
-                          </div>
-                        )}
-                      </div>
-                      <div className={cn(
-                        "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px]",
-                        isStale ? "text-[#bca37a] line-through" : "text-[#8a8073]",
-                      )}>
-                        {p.path}
+                        <div className={cn(
+                          "mt-[3px] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px]",
+                          isStale ? "text-[#bca37a] line-through" : "text-[#8a8073]",
+                        )}>
+                          {isStale ? "Repo path no longer resolves" : p.path}
+                        </div>
                       </div>
                       {isStale ? (
-                        <div />
+                        <>
+                          <div />
+                          <div />
+                          <div />
+                        </>
                       ) : (
-                        <div className="flex justify-end gap-[6px]">
-                          {[
-                            { label: "SKILL", n: p.skills },
-                            { label: "SESSION", n: p.sessions },
-                            { label: "SYNC", n: p.sync },
-                          ].map((c) => (
-                            <div
-                              key={c.label}
-                              className="flex items-center gap-[5px] rounded-[7px] bg-nexus-bg px-[9px] py-[5px]"
-                            >
-                              <span className="text-[12px] font-extrabold text-nexus-body">{c.n}</span>
-                              <span className="text-[9px] tracking-[.03em] text-[#b3a999]">{c.label}</span>
-                            </div>
-                          ))}
-                        </div>
+                        <>
+                          <AssetCell n={p.skills} lines={p.customSkillsDirs ?? []} />
+                          <AssetCell n={p.prompts} lines={p.extraPromptFiles ?? []} />
+                          <AssetCell
+                            n={p.sessions}
+                            lines={
+                              p.sessionsDir && p.sessionsDir !== DEFAULT_SESSIONS_DIR
+                                ? [p.sessionsDir]
+                                : []
+                            }
+                          />
+                        </>
                       )}
                       <div
                         onClick={(e) => openMenu(e, p.id)}
@@ -785,12 +949,118 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
             </button>
           </Card>
 
+          {/* Prompt table */}
+          <Card className="mt-4 overflow-hidden">
+            <div className="flex items-center justify-between gap-2.5 px-5 pb-1 pt-4">
+              <span className="text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
+                Prompt
+              </span>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setExtraFileInput("");
+                    setExtraFilesOpen(true);
+                  }}
+                  className="text-[11px] font-semibold text-nexus-accent hover:underline"
+                >
+                  Custom prompt files
+                  {dp.extraPromptFiles && dp.extraPromptFiles.length > 0
+                    ? ` · ${dp.extraPromptFiles.length}`
+                    : ""}
+                </button>
+                <span className="text-[11px] text-[#b3a999]">
+                  project scope · {dpPrompts.length} {dpPrompts.length === 1 ? "prompt" : "prompts"}
+                </span>
+              </div>
+            </div>
+            <div
+              className="grid items-center gap-4 px-5 py-2.5 text-[10.5px] font-bold uppercase tracking-[.05em] text-[#b3a999]"
+              style={{ gridTemplateColumns: "1fr 196px 132px" }}
+            >
+              <div>Prompt</div>
+              <div className="text-center">Distribution</div>
+              <div className="text-right">Source file</div>
+            </div>
+            {promptsQuery.isLoading && dpPrompts.length === 0 ? (
+              <div className="mx-5 mb-5 rounded-[12px] border border-dashed border-nexus-border2 bg-nexus-sand p-[18px] text-center text-[12px] text-[#b3a999]">
+                Loading project prompts...
+              </div>
+            ) : promptError ? (
+              <div className="mx-5 mb-5 rounded-[12px] border border-[#ecd0c6] bg-[#f8ebe6] p-[18px] text-center text-[12px] text-nexus-crit">
+                {promptError}
+              </div>
+            ) : dpPrompts.length > 0 ? (
+              dpPrompts.map((p) => (
+                <div
+                  key={p.id}
+                  className="grid items-center gap-4 border-t border-[#f3eee5] px-5 py-[14px]"
+                  style={{ gridTemplateColumns: "1fr 196px 132px" }}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[14px] font-bold text-nexus-ink">{p.name}</span>
+                      <SourceBadge agent={srcAgentOf(p.cells)} />
+                    </div>
+                    <div className="mt-[3px] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#a99a89]">
+                      {p.path}
+                    </div>
+                  </div>
+                  <AgentMatrixCells
+                    cells={p.cells}
+                    agents={PROJECT_PROMPT_AGENTS}
+                    onToggle={(a) => void togglePromptCell(p, a)}
+                  />
+                  <div className="flex flex-col items-end gap-[5px]">
+                    <span
+                      onClick={() => void openPromptSource(p)}
+                      className="cursor-pointer whitespace-nowrap text-[11.5px] font-semibold text-nexus-accent hover:underline"
+                    >
+                      Open source
+                    </span>
+                    <span
+                      onClick={() => void revealPromptPath(p)}
+                      className="cursor-pointer whitespace-nowrap text-[11.5px] font-semibold text-[#a99a89] hover:underline"
+                    >
+                      Reveal path
+                    </span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="mx-5 mb-5 rounded-[12px] border border-dashed border-nexus-border2 bg-nexus-sand p-[18px] text-center text-[12px] text-[#b3a999]">
+                No project prompts discovered. Add AGENTS.md / CLAUDE.md at the repo root, or register extra prompt files.
+              </div>
+            )}
+            <div className="mx-5 mb-[18px] flex items-center justify-between gap-3">
+              <button onClick={() => go("prompt")} className="inline-flex text-[12px] font-semibold text-nexus-accent hover:underline">
+                Open in Prompt →
+              </button>
+              <MatrixLegend />
+            </div>
+          </Card>
+
           {/* Session panel */}
           <Card className="mt-4 p-5">
-            <div className="mb-3.5 flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
-                Session
-              </span>
+            <div className="mb-3.5 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
+                  Session
+                </span>
+                <button
+                  onClick={() => {
+                    setSessionDirInput(
+                      dp.sessionsDir && dp.sessionsDir !== DEFAULT_SESSIONS_DIR ? dp.sessionsDir : "",
+                    );
+                    setSessionDirOpen(true);
+                  }}
+                  className="text-[11px] font-semibold text-nexus-accent hover:underline"
+                >
+                  Configure session dir
+                  {dp.sessionsDir && dp.sessionsDir !== DEFAULT_SESSIONS_DIR
+                    ? ` · ${dp.sessionsDir}`
+                    : ""}
+                </button>
+              </div>
               <Segmented<DetailSource>
                 options={[
                   { value: "local", label: "Local" },
@@ -1037,6 +1307,146 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
         <ModalFooter>
           <Button variant="subtle" onClick={() => setCustomDirsOpen(false)}>
             Close
+          </Button>
+        </ModalFooter>
+      </Modal>
+      ) : null}
+
+      {/* Extra prompt files modal */}
+      {dp ? (
+      <Modal
+        open={extraFilesOpen}
+        onClose={() => setExtraFilesOpen(false)}
+        className="max-h-[88vh] w-[560px]"
+      >
+        <ModalHeader
+          title="Project extra prompt files"
+          subtitle="Extra Prompt files scanned alongside the primary AGENTS.md / CLAUDE.md"
+        />
+        <div className="flex flex-col gap-4 px-[22px] py-5">
+          <div className="flex gap-2">
+            <input
+              value={extraFileInput}
+              onChange={(event) => setExtraFileInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !setExtraPromptFiles.isPending) {
+                  void addExtraPromptFile();
+                }
+              }}
+              placeholder="AGENTS.local.md  ·  docs/CLAUDE.md"
+              className="min-w-0 flex-1 rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055] outline-none focus:border-nexus-accent"
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              className="rounded-[10px]"
+              onClick={() => void addExtraPromptFile()}
+              disabled={setExtraPromptFiles.isPending || !extraFileInput.trim()}
+            >
+              {setExtraPromptFiles.isPending ? "Saving..." : "Add file"}
+            </Button>
+          </div>
+
+          <div className="flex flex-col gap-0.5 overflow-hidden rounded-[12px] border border-nexus-border">
+            {(dp.extraPromptFiles ?? []).length === 0 ? (
+              <div className="px-3.5 py-[11px] text-[12px] text-[#b3a999]">
+                No extra prompt files. Paths resolve against the Project root.
+              </div>
+            ) : (
+              (dp.extraPromptFiles ?? []).map((file, i) => {
+                const owner = PROMPT_FILE_GLOBS.find((g) => g.re.test(
+                  file.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "",
+                ))?.agent;
+                return (
+                  <div
+                    key={file}
+                    className={cn(
+                      "flex items-center justify-between gap-3 px-3.5 py-[11px]",
+                      i > 0 && "border-t border-[#f3eee5]",
+                    )}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-nexus-body">
+                        {file}
+                      </span>
+                      {owner ? (
+                        <span className="flex-none rounded-[5px] bg-[#e9eed8] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#5f7a3e]">
+                          {owner}
+                        </span>
+                      ) : null}
+                    </div>
+                    <button
+                      onClick={() => void removeExtraPromptFile(file)}
+                      disabled={setExtraPromptFiles.isPending}
+                      className="flex-none text-[11px] font-semibold text-nexus-crit hover:underline disabled:cursor-wait disabled:opacity-60"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="rounded-[11px] border border-nexus-border bg-nexus-bg px-3.5 py-[11px] text-[11.5px] leading-[1.55] text-[#8a7a68]">
+            Each file's name must match an Agent prompt-file glob —{" "}
+            <span className="font-mono">AGENTS*.md</span> (Generic Agent) or{" "}
+            <span className="font-mono">CLAUDE*.md</span> (Claude Code). The matching Agent
+            becomes the Source Agent; files that match neither are rejected. This widens the
+            Prompt scan inside an existing Agent namespace — it does not create a new source.
+          </div>
+        </div>
+        <ModalFooter>
+          <Button variant="subtle" onClick={() => setExtraFilesOpen(false)}>
+            Close
+          </Button>
+        </ModalFooter>
+      </Modal>
+      ) : null}
+
+      {/* Session dir modal */}
+      {dp ? (
+      <Modal
+        open={sessionDirOpen}
+        onClose={() => setSessionDirOpen(false)}
+        className="w-[480px]"
+      >
+        <ModalHeader
+          title="Configure session dir"
+          subtitle="Override the single Session Directory for this Project"
+        />
+        <div className="flex flex-col gap-4 px-[22px] py-5">
+          <div>
+            <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">Session directory</div>
+            <input
+              value={sessionDirInput}
+              onChange={(event) => setSessionDirInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !setSessionsDir.isPending) {
+                  void submitSessionsDir();
+                }
+              }}
+              placeholder={DEFAULT_SESSIONS_DIR}
+              className="w-full rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055] outline-none focus:border-nexus-accent"
+              autoFocus
+            />
+          </div>
+          <div className="rounded-[11px] border border-nexus-border bg-nexus-bg px-3.5 py-[11px] text-[11.5px] leading-[1.55] text-[#8a7a68]">
+            A Project always has exactly one Session Directory — this is a deliberate constraint,
+            not an MVP limit. Relative paths resolve against the Project root. Leave empty to
+            restore the default <span className="font-mono">{DEFAULT_SESSIONS_DIR}</span>.
+          </div>
+        </div>
+        <ModalFooter>
+          <Button variant="subtle" onClick={() => setSessionDirOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => void submitSessionsDir()}
+            disabled={setSessionsDir.isPending}
+          >
+            {setSessionsDir.isPending ? "Saving..." : "Save"}
           </Button>
         </ModalFooter>
       </Modal>

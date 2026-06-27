@@ -194,6 +194,63 @@ fn scans_both_real_project_prompt_files_as_independent_sources() {
 
 #[test]
 #[serial]
+#[cfg(unix)]
+fn scans_extra_prompt_file_under_its_glob_agent_and_distributes_with_stem_swap() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let prompts = PromptService::new(db);
+
+    with_isolated_home(|home| {
+        let repo = git_repo(&home.join("workspace"), "agent-nexus");
+        let project = projects
+            .record_project(repo.clone())
+            .expect("record project");
+        let repo = Path::new(&repo);
+        let extra_source = repo.join("AGENTS.local.md");
+        write_prompt(&extra_source, "# Personal instructions\n");
+        projects
+            .set_project_extra_prompt_files(project.id.clone(), vec!["AGENTS.local.md".to_string()])
+            .expect("register extra prompt file");
+
+        let rows = prompts.scan_prompts().expect("scan project prompts");
+
+        // The extra file is owned by Generic Agent (its name matches AGENTS*.md).
+        assert_eq!(rows.len(), 1);
+        let prompt = &rows[0];
+        assert_eq!(prompt.name, "agent-nexus · AGENTS.local.md");
+        assert_eq!(prompt.scope, "project");
+        assert_eq!(prompt.project_id.as_deref(), Some(project.id.as_str()));
+        assert_eq!(prompt.cells["Generic Agent"], "source");
+        assert_eq!(prompt.cells["Claude Code"], "none");
+
+        // Distributing to Claude Code swaps the stem, keeping the `.local` suffix.
+        let claude_target = repo.join("CLAUDE.local.md");
+        let enabled = prompts
+            .set_prompt_target(SetPromptTargetInput {
+                prompt_id: prompt.id.clone(),
+                agent: "Claude Code".to_string(),
+                enabled: true,
+            })
+            .expect("enable Claude Code target");
+
+        assert_eq!(enabled.cells["Claude Code"], "target");
+        assert!(claude_target.exists(), "stem-swapped target file should exist");
+        assert_file_distribution_tracks_source_writes(&extra_source, &claude_target);
+
+        // The project now reports the extra prompt in its aggregate count.
+        let reloaded = projects
+            .list_projects()
+            .expect("list projects")
+            .into_iter()
+            .find(|p| p.id == project.id)
+            .expect("project still listed");
+        assert_eq!(reloaded.prompts, 1);
+        assert_eq!(reloaded.extra_prompt_files, vec!["AGENTS.local.md".to_string()]);
+    });
+}
+
+#[test]
+#[serial]
 fn toggles_project_prompt_distribution_and_rejects_non_project_agents() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());

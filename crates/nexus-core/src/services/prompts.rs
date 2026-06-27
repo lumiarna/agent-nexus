@@ -14,10 +14,11 @@ use crate::{
     database::Database,
     error::{AppError, AppResult},
     services::agent_capabilities::{
-        agent_capability_surfaces, agent_order_index, AgentCapabilitySurface,
+        agent_by_name, agent_capability_surfaces, agent_order_index, AgentCapabilitySurface,
     },
     services::distribution::{self, MatrixSource},
     services::paths::{self, path_to_string},
+    services::projects::parse_dir_list,
     services::symlink::{create_managed_file_link, remove_managed_file_link_if_present},
     services::system_open::{open_path, reveal_path},
     services::util::{now_epoch_seconds, require_agent, required_trimmed},
@@ -54,6 +55,7 @@ struct ProjectRoot {
     id: String,
     name: String,
     path: PathBuf,
+    extra_prompt_files: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -100,9 +102,14 @@ impl MatrixSource for PromptMatrixSource<'_> {
     }
 
     fn target_path_for(&self, agent: &AgentCapabilitySurface) -> AppResult<Option<PathBuf>> {
-        target_path_for_parts(
+        let source_agent = agent_by_name(self.source.source_agent).ok_or_else(|| {
+            AppError::Validation(format!("unknown source agent: {}", self.source.source_agent))
+        })?;
+        prompt_target_path(
             &self.source.scope,
             self.source.project_path.as_deref(),
+            &self.source.canonical_path,
+            source_agent,
             agent,
         )
     }
@@ -200,6 +207,27 @@ impl PromptService {
                     sources.push(source);
                 }
             }
+
+            // Extra Prompt Files: each registered file is owned by the Agent whose
+            // prompt glob its name matches (AGENTS*.md → Generic Agent, CLAUDE*.md →
+            // Claude Code) and scanned in that Agent's namespace.
+            for extra in &project.extra_prompt_files {
+                let Some(agent) = prompt_agent_for_file(extra) else {
+                    continue;
+                };
+                let prompt_file = project.path.join(extra);
+                if let Some(source) = discover_prompt_source(
+                    agent,
+                    "project",
+                    Some(project.id.clone()),
+                    Some(project.name.as_str()),
+                    Some(project.path.clone()),
+                    &prompt_file,
+                    &known_target_paths,
+                )? {
+                    sources.push(source);
+                }
+            }
         }
 
         sources.sort_by(|left, right| {
@@ -233,9 +261,11 @@ impl PromptService {
             ));
         }
 
-        let target_path = target_path_for_parts(
+        let target_path = prompt_target_path(
             &context.scope,
             context.project_path.as_deref(),
+            &context.canonical_path,
+            source_agent,
             target_agent,
         )?
         .ok_or_else(|| {
@@ -275,7 +305,7 @@ impl PromptService {
         let conn = self.db.connection()?;
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, name, path
+            SELECT id, name, path, extra_prompt_files
             FROM projects
             WHERE status = 'active'
             ORDER BY sort_index IS NULL, sort_index, created_at, name
@@ -283,10 +313,12 @@ impl PromptService {
         )?;
         let rows = stmt.query_map([], |row| {
             let path: String = row.get(2)?;
+            let extra: String = row.get(3)?;
             Ok(ProjectRoot {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 path: PathBuf::from(path),
+                extra_prompt_files: parse_dir_list(&extra),
             })
         })?;
 
@@ -533,24 +565,77 @@ fn target_paths_for_prompt(
     rows.collect()
 }
 
-fn target_path_for_parts(
+/// The Agent that owns an extra prompt file, by matching its basename against each
+/// Agent's prompt glob (`AGENTS*.md` → Generic Agent, `CLAUDE*.md` → Claude Code).
+fn prompt_agent_for_file(file: &str) -> Option<&'static AgentCapabilitySurface> {
+    let base = file.rsplit(['/', '\\']).next().unwrap_or(file);
+    if !base.ends_with(".md") {
+        return None;
+    }
+    agent_capability_surfaces().iter().find(|agent| {
+        prompt_stem(agent)
+            .map(|stem| base.starts_with(stem))
+            .unwrap_or(false)
+    })
+}
+
+/// The prompt-file stem for an Agent (`AGENTS.md` → `AGENTS`), if it has a project file.
+fn prompt_stem(agent: &AgentCapabilitySurface) -> Option<&'static str> {
+    agent
+        .prompt
+        .and_then(|prompt| prompt.project_file)
+        .and_then(|file| file.strip_suffix(".md"))
+}
+
+/// Resolve a prompt's target path on `target_agent`. Global prompts map to the
+/// Agent's global file; project prompts swap the source Agent's prompt-file stem for
+/// the target Agent's stem, keeping any directory prefix and the suffix between the
+/// stem and `.md` (so `AGENTS.md` → `CLAUDE.md`, `AGENTS.local.md` → `CLAUDE.local.md`).
+fn prompt_target_path(
     scope: &str,
     project_path: Option<&Path>,
-    agent: &AgentCapabilitySurface,
+    source_canonical: &Path,
+    source_agent: &AgentCapabilitySurface,
+    target_agent: &AgentCapabilitySurface,
 ) -> AppResult<Option<PathBuf>> {
-    let Some(prompt) = agent.prompt else {
+    let Some(prompt) = target_agent.prompt else {
         return Ok(None);
     };
     match scope {
         "global" => Ok(Some(paths::resolve_local_path(prompt.global_file)?)),
         "project" => {
-            let Some(project_file) = prompt.project_file else {
+            let (Some(source_stem), Some(target_stem)) =
+                (prompt_stem(source_agent), prompt_stem(target_agent))
+            else {
                 return Ok(None);
             };
             let project_path = project_path.ok_or_else(|| {
                 AppError::Validation("project prompt has no project path".to_string())
             })?;
-            Ok(Some(project_path.join(project_file)))
+
+            let rel = source_canonical
+                .strip_prefix(project_path)
+                .unwrap_or(source_canonical);
+            let file_name = rel
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    AppError::Validation("prompt file has no file name".to_string())
+                })?;
+            let suffix = file_name
+                .strip_prefix(source_stem)
+                .and_then(|rest| rest.strip_suffix(".md"))
+                .ok_or_else(|| {
+                    AppError::Validation(format!(
+                        "prompt file does not match its source agent glob: {file_name}"
+                    ))
+                })?;
+            let target_name = format!("{target_stem}{suffix}.md");
+            let target_rel = match rel.parent() {
+                Some(parent) if !parent.as_os_str().is_empty() => parent.join(target_name),
+                _ => PathBuf::from(target_name),
+            };
+            Ok(Some(project_path.join(target_rel)))
         }
         _ => Err(AppError::Validation(format!(
             "unsupported prompt scope: {scope}"

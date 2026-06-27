@@ -17,6 +17,9 @@ use crate::{
     services::paths,
 };
 
+/// Default Session Directory leaf restored when the override is cleared.
+const DEFAULT_SESSIONS_DIR: &str = "__sessions";
+
 /// Columns shared by every Project read, in the order `project_from_row` expects.
 const PROJECT_SELECT_COLUMNS: &str = r#"
     p.id,
@@ -29,7 +32,9 @@ const PROJECT_SELECT_COLUMNS: &str = r#"
     (SELECT COUNT(*) FROM session_index WHERE project_id = p.id) AS sessions,
     0 AS sync,
     p.key,
-    p.custom_skills_dirs
+    p.custom_skills_dirs,
+    (SELECT COUNT(*) FROM prompts WHERE project_id = p.id) AS prompts,
+    p.extra_prompt_files
 "#;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -43,12 +48,16 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sessions_note: Option<String>,
     pub skills: i64,
+    pub prompts: i64,
     pub sessions: i64,
     pub sync: i64,
     pub key: String,
     /// Project custom skills directories (relative to Project root, or absolute).
     /// Scanned as Project custom sources alongside the fixed Agent project skills dirs.
     pub custom_skills_dirs: Vec<String>,
+    /// Project extra prompt files (relative to Project root). Scanned alongside the
+    /// primary AGENTS.md / CLAUDE.md; each filename must match an Agent prompt glob.
+    pub extra_prompt_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -260,6 +269,118 @@ impl ProjectService {
         let conn = self.db.connection()?;
         let changed = conn.execute(
             "UPDATE projects SET custom_skills_dirs = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, value, now],
+        )?;
+        if changed == 0 {
+            return Err(AppError::Validation("project was not found".to_string()));
+        }
+
+        conn.query_row(
+            &format!(
+                r#"
+                SELECT {PROJECT_SELECT_COLUMNS}
+                FROM projects p
+                WHERE p.id = ?1
+                "#,
+            ),
+            params![id],
+            project_from_row,
+        )
+        .optional()?
+        .ok_or_else(|| AppError::Validation("project was not found".to_string()))
+    }
+
+    /// Replace the full set of Project extra prompt files. Entries are trimmed and
+    /// de-duplicated by normalized identity; a file whose name does not match an Agent
+    /// prompt glob (`AGENTS*.md` / `CLAUDE*.md`) is rejected, as is one that collides
+    /// with an auto-discovered primary project prompt file (`AGENTS.md` / `CLAUDE.md`).
+    pub fn set_project_extra_prompt_files(
+        &self,
+        project_id: String,
+        files: Vec<String>,
+    ) -> AppResult<Project> {
+        let id = project_id.trim();
+        if id.is_empty() {
+            return Err(AppError::Validation("project id is required".to_string()));
+        }
+
+        let primary_files: HashSet<String> = prompt_primary_files();
+
+        let mut seen = HashSet::new();
+        let mut stored = Vec::new();
+        for file in files {
+            let trimmed = file.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let normalized = normalize_custom_dir(trimmed);
+            if normalized.is_empty() {
+                continue;
+            }
+            if primary_files.contains(&normalized) {
+                return Err(AppError::Validation(format!(
+                    "extra prompt file collides with an auto-discovered primary prompt file: {normalized}"
+                )));
+            }
+            if !matches_prompt_glob(&normalized) {
+                return Err(AppError::Validation(format!(
+                    "extra prompt file does not match a prompt glob (AGENTS*.md / CLAUDE*.md): {trimmed}"
+                )));
+            }
+            if seen.insert(normalized) {
+                stored.push(trimmed.to_string());
+            }
+        }
+
+        let value = stored.join("\n");
+        let now = now_epoch_seconds()?;
+        let conn = self.db.connection()?;
+        let changed = conn.execute(
+            "UPDATE projects SET extra_prompt_files = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, value, now],
+        )?;
+        if changed == 0 {
+            return Err(AppError::Validation("project was not found".to_string()));
+        }
+
+        conn.query_row(
+            &format!(
+                r#"
+                SELECT {PROJECT_SELECT_COLUMNS}
+                FROM projects p
+                WHERE p.id = ?1
+                "#,
+            ),
+            params![id],
+            project_from_row,
+        )
+        .optional()?
+        .ok_or_else(|| AppError::Validation("project was not found".to_string()))
+    }
+
+    /// Override the Project Session Directory. An empty input restores the default
+    /// `__sessions` template. Session Directory stays single-valued by design.
+    pub fn set_project_sessions_dir(
+        &self,
+        project_id: String,
+        dir: String,
+    ) -> AppResult<Project> {
+        let id = project_id.trim();
+        if id.is_empty() {
+            return Err(AppError::Validation("project id is required".to_string()));
+        }
+
+        let trimmed = dir.trim();
+        let value = if trimmed.is_empty() {
+            DEFAULT_SESSIONS_DIR.to_string()
+        } else {
+            normalize_custom_dir(trimmed)
+        };
+
+        let now = now_epoch_seconds()?;
+        let conn = self.db.connection()?;
+        let changed = conn.execute(
+            "UPDATE projects SET sessions_dir = ?2, updated_at = ?3 WHERE id = ?1",
             params![id, value, now],
         )?;
         if changed == 0 {
@@ -516,6 +637,8 @@ fn project_from_row(row: &Row<'_>) -> rusqlite::Result<Project> {
         sync: row.get(8)?,
         key: row.get(9)?,
         custom_skills_dirs: parse_dir_list(&row.get::<_, String>(10)?),
+        prompts: row.get(11)?,
+        extra_prompt_files: parse_dir_list(&row.get::<_, String>(12)?),
     })
 }
 
@@ -536,6 +659,36 @@ pub(crate) fn normalize_custom_dir(dir: &str) -> String {
     let normalized = dir.trim().replace('\\', "/");
     let normalized = normalized.strip_prefix("./").unwrap_or(&normalized);
     normalized.trim_end_matches('/').to_string()
+}
+
+/// The auto-discovered primary project prompt filenames (`AGENTS.md` / `CLAUDE.md`).
+/// Extra prompt files must not collide with these — they are already scanned.
+fn prompt_primary_files() -> HashSet<String> {
+    agent_capability_surfaces()
+        .iter()
+        .filter_map(|agent| agent.prompt.and_then(|prompt| prompt.project_file))
+        .map(|file| file.to_string())
+        .collect()
+}
+
+/// True when a normalized file path's basename matches an Agent prompt glob — that is,
+/// it starts with a primary stem (`AGENTS` / `CLAUDE`) and ends with `.md`.
+fn matches_prompt_glob(file: &str) -> bool {
+    let base = file.rsplit('/').next().unwrap_or(file);
+    if !base.ends_with(".md") {
+        return false;
+    }
+    prompt_file_stems().iter().any(|stem| base.starts_with(stem))
+}
+
+/// Prompt-file stems derived from each Agent's primary project prompt file
+/// (`AGENTS.md` → `AGENTS`, `CLAUDE.md` → `CLAUDE`).
+fn prompt_file_stems() -> Vec<String> {
+    agent_capability_surfaces()
+        .iter()
+        .filter_map(|agent| agent.prompt.and_then(|prompt| prompt.project_file))
+        .filter_map(|file| file.strip_suffix(".md").map(ToOwned::to_owned))
+        .collect()
 }
 
 fn git_base_folder_from_row(row: &Row<'_>) -> rusqlite::Result<GitBaseFolder> {
