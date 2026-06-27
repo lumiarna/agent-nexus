@@ -51,11 +51,6 @@ struct PreparedTask {
     direction: String,
 }
 
-struct ScheduledTask {
-    task: Task,
-    last_run_at: Option<i64>,
-}
-
 enum TaskRunStatus {
     Ok,
     Skipped,
@@ -170,7 +165,7 @@ impl TaskLifecycle {
                 t.target_type,
                 t.target,
                 t.schedule,
-                COALESCE(strftime('%m-%d %H:%M', t.last_run_at, 'unixepoch'), '—'),
+                t.last_run_at,
                 COALESCE(t.last_status, 'never')
             FROM tasks t
             JOIN projects p ON p.id = t.project_id
@@ -190,7 +185,7 @@ impl TaskLifecycle {
                     target_type: row.get(6)?,
                     target: row.get(7)?,
                     schedule: row.get(8)?,
-                    last_run: row.get(9)?,
+                    last_run_at: row.get(9)?,
                     status: row.get(10)?,
                     link_state: "present".to_string(),
                 },
@@ -474,6 +469,36 @@ impl TaskLifecycle {
             .ok_or_else(|| AppError::Internal("updated task was not found".to_string()))
     }
 
+    /// Bulk-apply one schedule to every Copy task in the group. This is the "group schedule":
+    /// re-applying it overrides any per-task schedules (last write wins). Non-Copy tasks own no
+    /// schedule and are left untouched.
+    pub(super) fn update_group_schedule(&self, group_id: String, schedule: String) -> AppResult<()> {
+        let group_id = required_trimmed(&group_id, "task group id")?.to_string();
+        let schedule = normalize_task_schedule(&schedule, "Copy")?;
+        let now = now_epoch_seconds()?;
+        let conn = self.db.connection()?;
+        let group_exists = conn
+            .query_row(
+                "SELECT 1 FROM task_groups WHERE id = ?1",
+                [&group_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !group_exists {
+            return Err(AppError::Validation("task group not found".to_string()));
+        }
+        conn.execute(
+            r#"
+            UPDATE tasks
+            SET schedule = ?2, updated_at = ?3
+            WHERE group_id = ?1 AND action = 'Copy'
+            "#,
+            params![group_id, schedule, now],
+        )?;
+        Ok(())
+    }
+
     pub(super) async fn run_task(&self, id: String) -> AppResult<Task> {
         let id = required_trimmed(&id, "task id")?.to_string();
         let task = self
@@ -506,25 +531,25 @@ impl TaskLifecycle {
         };
         let mut ran = Vec::new();
 
-        for scheduled in scheduled_tasks {
-            if scheduled
+        for task in scheduled_tasks {
+            if task
                 .last_run_at
                 .is_some_and(|last_run_at| last_run_at >= minute_start)
             {
                 continue;
             }
-            if !cron_schedule_matches(&scheduled.task.schedule, minute_start)? {
+            if !cron_schedule_matches(&task.schedule, minute_start)? {
                 continue;
             }
 
-            let status = match self.run_task_operation(&scheduled.task).await {
+            let status = match self.run_task_operation(&task).await {
                 Ok(TaskRunStatus::Ok) => "ok",
                 Ok(TaskRunStatus::Skipped) => "skipped",
                 Err(_) => "failed",
             };
-            self.record_task_run_at(&scheduled.task.id, status, now_epoch_seconds)?;
-            if let Some(task) = self.find_task(&scheduled.task.id)? {
-                ran.push(task);
+            self.record_task_run_at(&task.id, status, now_epoch_seconds)?;
+            if let Some(updated) = self.find_task(&task.id)? {
+                ran.push(updated);
             }
         }
 
@@ -627,7 +652,7 @@ impl TaskLifecycle {
                 target_type,
                 target,
                 schedule,
-                COALESCE(strftime('%m-%d %H:%M', last_run_at, 'unixepoch'), '—') AS last_run,
+                last_run_at,
                 COALESCE(last_status, 'never') AS status
             FROM tasks
             WHERE id = ?1
@@ -1174,7 +1199,7 @@ fn list_tasks_for_group(conn: &rusqlite::Connection, group_id: &str) -> AppResul
             target_type,
             target,
             schedule,
-            COALESCE(strftime('%m-%d %H:%M', last_run_at, 'unixepoch'), '—') AS last_run,
+            last_run_at,
             COALESCE(last_status, 'never') AS status
         FROM tasks
         WHERE group_id = ?1
@@ -1190,7 +1215,7 @@ fn list_tasks_for_group(conn: &rusqlite::Connection, group_id: &str) -> AppResul
     Ok(tasks)
 }
 
-fn list_scheduled_copy_tasks(conn: &rusqlite::Connection) -> AppResult<Vec<ScheduledTask>> {
+fn list_scheduled_copy_tasks(conn: &rusqlite::Connection) -> AppResult<Vec<Task>> {
     let mut stmt = conn.prepare(
         r#"
         SELECT
@@ -1202,28 +1227,18 @@ fn list_scheduled_copy_tasks(conn: &rusqlite::Connection) -> AppResult<Vec<Sched
             target_type,
             target,
             schedule,
-            COALESCE(strftime('%m-%d %H:%M', last_run_at, 'unixepoch'), '—') AS last_run,
-            COALESCE(last_status, 'never') AS status,
-            last_run_at
+            last_run_at,
+            COALESCE(last_status, 'never') AS status
         FROM tasks
         WHERE action = 'Copy' AND schedule <> 'manual'
         ORDER BY sort_index IS NULL, sort_index, created_at
         "#,
     )?;
 
-    let rows = stmt.query_map([], |row| {
-        Ok(ScheduledTask {
-            task: task_from_row(row)?,
-            last_run_at: row.get(10)?,
-        })
-    })?;
-    let mut tasks = rows.collect::<Result<Vec<_>, _>>()?;
-    for scheduled in &mut tasks {
-        scheduled.task.link_state = derive_link_state(
-            &scheduled.task.action,
-            &scheduled.task.target_type,
-            &scheduled.task.target,
-        );
+    let rows = stmt.query_map([], task_from_row)?;
+    let mut tasks: Vec<Task> = rows.collect::<Result<Vec<_>, _>>()?;
+    for task in &mut tasks {
+        task.link_state = derive_link_state(&task.action, &task.target_type, &task.target);
     }
     Ok(tasks)
 }
@@ -1238,7 +1253,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         target_type: row.get(5)?,
         target: row.get(6)?,
         schedule: row.get(7)?,
-        last_run: row.get(8)?,
+        last_run_at: row.get(8)?,
         status: row.get(9)?,
         link_state: String::new(),
     })
@@ -1345,7 +1360,7 @@ mod tests {
             target_type: "Cloud".to_string(),
             target: "backup/source.txt".to_string(),
             schedule: "manual".to_string(),
-            last_run: "—".to_string(),
+            last_run_at: None,
             status: "never".to_string(),
             link_state: "present".to_string(),
         };
@@ -1393,7 +1408,7 @@ mod tests {
             target_type: "Local".to_string(),
             target: "~/restored.txt".to_string(),
             schedule: "manual".to_string(),
-            last_run: "—".to_string(),
+            last_run_at: None,
             status: "never".to_string(),
             link_state: "present".to_string(),
         };

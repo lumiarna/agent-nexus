@@ -307,7 +307,7 @@ async fn automatically_pushes_due_session_backup_and_records_status() {
         .is_empty());
     let backups = sync.list_session_backups().expect("list session backups");
     assert_eq!(backups[0].task.status, "ok");
-    assert_ne!(backups[0].task.last_run, "—");
+    assert!(backups[0].task.last_run_at.is_some());
     assert!(sync
         .run_due_scheduled_tasks(3_620)
         .await
@@ -341,7 +341,7 @@ async fn skips_due_session_backup_when_local_sessions_directory_is_missing() {
     assert_eq!(ran[0].status, "skipped");
     let backups = sync.list_session_backups().expect("list session backups");
     assert_eq!(backups[0].task.status, "skipped");
-    assert_ne!(backups[0].task.last_run, "鈥?");
+    assert!(backups[0].task.last_run_at.is_some());
 }
 
 #[tokio::test]
@@ -364,7 +364,7 @@ async fn manually_running_session_backup_skips_missing_local_sessions_directory(
         .expect("run session backup");
 
     assert_eq!(task.status, "skipped");
-    assert_ne!(task.last_run, "鈥?");
+    assert!(task.last_run_at.is_some());
 }
 
 #[test]
@@ -473,7 +473,7 @@ async fn runs_local_file_copy_task_to_webdav() {
         .expect("run cloud copy task");
 
     assert_eq!(task.status, "ok");
-    assert_ne!(task.last_run, "—");
+    assert!(task.last_run_at.is_some());
     server.join().expect("join webdav server");
     {
         let requests = requests.lock().expect("lock request log");
@@ -532,7 +532,7 @@ async fn runs_due_local_to_cloud_copy_task_on_schedule() {
 
     assert_eq!(ran.len(), 1);
     assert_eq!(ran[0].status, "ok");
-    assert_ne!(ran[0].last_run, "—");
+    assert!(ran[0].last_run_at.is_some());
     server.join().expect("join webdav server");
     let requests = requests.lock().expect("lock request log");
     assert!(
@@ -744,7 +744,7 @@ fn creates_symlink_placement_and_lists_custom_task_group() {
         normalized_display_path(&target_link)
     );
     assert_eq!(groups[0].tasks[0].schedule, "manual");
-    assert_eq!(groups[0].tasks[0].last_run, "—");
+    assert!(groups[0].tasks[0].last_run_at.is_none());
     assert_eq!(groups[0].tasks[0].status, "never");
     assert_link_points_to(&source_dir, &target_link);
 }
@@ -968,6 +968,89 @@ fn updates_copy_task_schedule_and_lists_the_saved_value() {
         sync.list_task_groups().expect("list task groups")[0].tasks[0].schedule,
         "0 * * * *"
     );
+}
+
+#[test]
+fn group_schedule_bulk_applies_to_copy_tasks_and_re_overrides_per_task_schedule() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db, request_logger());
+    let root = TempDir::new().expect("create temp dir");
+    let source_dir = root.path().join("source");
+    let target_link = root.path().join("target-link");
+    fs::create_dir_all(&source_dir).expect("create source dir");
+
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Mixed group".to_string(),
+            tasks: vec![
+                CreateTaskInput {
+                    action: "Copy".to_string(),
+                    source_type: "Local".to_string(),
+                    source: "/workspace/a".to_string(),
+                    target_type: "Cloud".to_string(),
+                    target: "backups/a".to_string(),
+                    schedule: "manual".to_string(),
+                },
+                CreateTaskInput {
+                    action: "Copy".to_string(),
+                    source_type: "Local".to_string(),
+                    source: "/workspace/b".to_string(),
+                    target_type: "Cloud".to_string(),
+                    target: "backups/b".to_string(),
+                    schedule: "*/5 * * * *".to_string(),
+                },
+                CreateTaskInput {
+                    action: LINK_ACTION.to_string(),
+                    source_type: "Local".to_string(),
+                    source: source_dir.to_string_lossy().into_owned(),
+                    target_type: "Local".to_string(),
+                    target: target_link.to_string_lossy().into_owned(),
+                    schedule: "manual".to_string(),
+                },
+            ],
+        })
+        .expect("create mixed group");
+
+    // Group schedule bulk-applies to every Copy task, regardless of their prior values,
+    // and leaves the non-schedulable link task untouched.
+    sync.update_group_schedule(created.id.clone(), "0 * * * *".to_string())
+        .expect("apply group schedule");
+    let groups = sync.list_task_groups().expect("list task groups");
+    for task in &groups[0].tasks {
+        let expected = if task.action == "Copy" { "0 * * * *" } else { "manual" };
+        assert_eq!(task.schedule, expected);
+    }
+
+    // A per-task schedule overrides the group for that one task...
+    let copy_id = groups[0]
+        .tasks
+        .iter()
+        .find(|task| task.action == "Copy")
+        .expect("a copy task")
+        .id
+        .clone();
+    let overridden = sync
+        .update_task_schedule(copy_id.clone(), "30 * * * *".to_string())
+        .expect("override one task");
+    assert_eq!(overridden.schedule, "30 * * * *");
+
+    // ...and re-applying the group schedule overrides that per-task value again (last write wins).
+    sync.update_group_schedule(created.id.clone(), "0 5 * * *".to_string())
+        .expect("re-apply group schedule");
+    let groups = sync.list_task_groups().expect("list task groups");
+    for task in &groups[0].tasks {
+        let expected = if task.action == "Copy" { "0 5 * * *" } else { "manual" };
+        assert_eq!(task.schedule, expected);
+    }
+}
+
+#[test]
+fn group_schedule_rejects_unknown_group() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db, request_logger());
+    assert!(sync
+        .update_group_schedule("missing-group".to_string(), "0 * * * *".to_string())
+        .is_err());
 }
 
 #[test]

@@ -88,6 +88,7 @@ pub fn run() {
             commands::sync::save_webdav_settings,
             commands::sync::test_webdav_connection,
             commands::sync::update_task_schedule,
+            commands::sync::update_group_schedule,
         ])
         .on_window_event(|window, event| {
             if window.label() == "main"

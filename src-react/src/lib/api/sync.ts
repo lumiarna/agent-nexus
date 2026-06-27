@@ -62,6 +62,9 @@ export const syncApi = {
   updateTaskSchedule(id: string, schedule: string): Promise<TaskGroup["tasks"][number]> {
     return invokeCommand<TaskGroup["tasks"][number]>("update_task_schedule", { id, schedule });
   },
+  updateGroupSchedule(groupId: string, schedule: string): Promise<void> {
+    return invokeCommand<void>("update_group_schedule", { groupId, schedule });
+  },
   runTask(id: string): Promise<TaskGroup["tasks"][number]> {
     return invokeCommand<TaskGroup["tasks"][number]>("run_task", { id });
   },

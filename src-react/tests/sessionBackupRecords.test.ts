@@ -13,7 +13,7 @@ test("maps backend Session Backup tasks into a system-managed Task Group", () =>
     targetType: "Cloud" as const,
     target: "Session/agent-nexus/",
     schedule: "0 * * * *",
-    lastRun: "06-23 22:00",
+    lastRunAt: 1750000000,
     status: "ok" as const,
     linkState: "present" as const,
   };

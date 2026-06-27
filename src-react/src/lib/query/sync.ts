@@ -97,6 +97,18 @@ export function useUpdateTaskScheduleMutation() {
   });
 }
 
+export function useUpdateGroupScheduleMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, schedule }: { groupId: string; schedule: string }) =>
+      syncApi.updateGroupSchedule(groupId, schedule),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: syncKeys.taskGroups });
+      void queryClient.invalidateQueries({ queryKey: syncKeys.sessionBackups });
+    },
+  });
+}
+
 export function useRunTaskMutation() {
   const queryClient = useQueryClient();
   return useMutation({

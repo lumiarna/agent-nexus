@@ -132,7 +132,8 @@ export interface Task {
   target: string;
   /** "manual" or a schedule expression. */
   schedule: string;
-  lastRun: string;
+  /** Epoch seconds of the last run, or `null` when never run. Formatted in local time by the UI. */
+  lastRunAt: number | null;
   status: TaskStatus;
   /** Placement health for link actions (Symlink/Junction + Local target).
    *  `missing` means the symlink/junction was removed out-of-band; the task row

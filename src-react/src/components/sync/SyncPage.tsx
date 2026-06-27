@@ -42,6 +42,7 @@ import {
   useRunTaskMutation,
   useSessionBackupsQuery,
   useTaskGroupsQuery,
+  useUpdateGroupScheduleMutation,
   useUpdateTaskScheduleMutation,
   syncKeys,
 } from "@/lib/query/sync";
@@ -96,6 +97,12 @@ function statusOf(st: TaskStatus): { label: string; fg: string; dot: string } {
   if (st === "skipped") return { label: "Skipped", fg: "#8a7a68", dot: "#c6b6a1" };
   if (st === "failed") return { label: "Failed", fg: palette.crit, dot: palette.crit };
   return { label: "Never", fg: "#a99a89", dot: "#d9c9b3" };
+}
+
+/** Tooltip text for a Copy task's status badge — surfaces the last sync time in local time. */
+function lastSyncTitle(lastRunAt: number | null): string {
+  if (lastRunAt == null) return "Never synced";
+  return `Last sync · ${new Date(lastRunAt * 1000).toLocaleString()}`;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -199,10 +206,13 @@ interface FormState {
   name: string;
   tasks: FormTask[];
 }
+/** A schedule edit targets either one task or the whole group. Group edits bulk-apply to every
+ *  Copy task in the group (last write wins — re-applying overrides any per-task schedules). */
 interface SchedState {
+  scope: "task" | "group";
   groupId: string;
-  taskId: string;
-  taskName: string;
+  taskId?: string;
+  title: string;
   mode: "manual" | "cron";
   cronExpr: string;
 }
@@ -254,8 +264,11 @@ function RunGroupButton({ running, onRun }: { running: boolean; onRun: () => voi
 interface TaskGroupCardProps {
   group: TaskGroup;
   sortable?: SortableRender;
+  open: boolean;
+  onToggle: () => void;
   running: boolean;
   onRunGroup: (group: TaskGroup) => void;
+  onGroupSchedule: (group: TaskGroup) => void;
   onEditSchedule: (group: TaskGroup, task: Task) => void;
   onRunTask: (group: TaskGroup, task: Task) => void;
   onAddTask?: (group: TaskGroup) => void;
@@ -266,14 +279,18 @@ interface TaskGroupCardProps {
 function TaskGroupCard({
   group,
   sortable,
+  open,
+  onToggle,
   running,
   onRunGroup,
+  onGroupSchedule,
   onEditSchedule,
   onRunTask,
   onAddTask,
   onDeleteGroup,
   onDeleteTask,
 }: TaskGroupCardProps) {
+  const hasCopyTask = group.tasks.some((task) => task.action === "Copy");
   return (
     <div
       ref={sortable?.setNodeRef}
@@ -289,28 +306,52 @@ function TaskGroupCard({
       }}
       {...(sortable?.attributes ?? {})}
     >
-      <div className="flex flex-wrap items-center gap-[11px] border-b border-[#f3eee5] px-5 py-[15px]">
+      <div
+        onClick={onToggle}
+        className="flex cursor-pointer flex-wrap items-center gap-[11px] border-b border-[#f3eee5] px-5 py-[15px] hover:bg-[#faf6ef]"
+      >
         {sortable ? (
           <span
             ref={sortable.setActivatorNodeRef}
             {...sortable.listeners}
+            onClick={(e) => e.stopPropagation()}
             title="Drag to reorder group"
             className="cursor-grab text-[13px] leading-none tracking-[-1px] text-[#cabfae]"
           >
             ⠿
           </span>
         ) : null}
+        <span
+          className="inline-block text-[10px] text-[#a99a89] transition-transform"
+          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+        >
+          ▸
+        </span>
         <div className="text-[14.5px] font-extrabold text-nexus-ink">{group.name}</div>
         <span className="text-[11px] text-[#b3a999]">
           {group.tasks.length} {group.tasks.length === 1 ? "task" : "tasks"}
         </span>
         <div className="ml-auto flex gap-[7px]">
-          {group.tasks.some((task) => task.action === "Copy") ? (
+          {hasCopyTask ? (
             <RunGroupButton running={running} onRun={() => onRunGroup(group)} />
+          ) : null}
+          {hasCopyTask ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onGroupSchedule(group);
+              }}
+              className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-[#7a6f60] hover:bg-[#ece2d5]"
+            >
+              Schedule
+            </button>
           ) : null}
           {onAddTask ? (
             <button
-              onClick={() => onAddTask(group)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddTask(group);
+              }}
               className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-[#7a6f60] hover:bg-[#ece2d5]"
             >
               Add task
@@ -318,7 +359,10 @@ function TaskGroupCard({
           ) : null}
           {onDeleteGroup ? (
             <button
-              onClick={() => onDeleteGroup(group)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteGroup(group);
+              }}
               className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-nexus-crit hover:bg-[#f6e3e0]"
             >
               Delete group
@@ -327,13 +371,15 @@ function TaskGroupCard({
         </div>
       </div>
 
-      <TaskTable
-        group={group}
-        sortable={!!sortable}
-        onEditSchedule={onEditSchedule}
-        onRunTask={onRunTask}
-        onDeleteTask={onDeleteTask}
-      />
+      {open ? (
+        <TaskTable
+          group={group}
+          sortable={!!sortable}
+          onEditSchedule={onEditSchedule}
+          onRunTask={onRunTask}
+          onDeleteTask={onDeleteTask}
+        />
+      ) : null}
     </div>
   );
 }
@@ -474,7 +520,11 @@ function TaskGroupRow({
       </div>
       <div className="col-span-2 flex items-center justify-end gap-[9px]">
         {status ? (
-          <span className="inline-flex items-center gap-[5px] text-[11px] font-bold" style={{ color: status.fg }}>
+          <span
+            className="inline-flex cursor-default items-center gap-[5px] text-[11px] font-bold"
+            style={{ color: status.fg }}
+            title={lastSyncTitle(task.lastRunAt)}
+          >
             <Dot color={status.dot} /> {status.label}
           </span>
         ) : null}
@@ -521,11 +571,15 @@ export function SyncPage() {
   const addTaskMutation = useAddTaskMutation();
   const runTaskMutation = useRunTaskMutation();
   const updateTaskScheduleMutation = useUpdateTaskScheduleMutation();
+  const updateGroupScheduleMutation = useUpdateGroupScheduleMutation();
   const projectSymlinksQuery = useProjectSymlinksQuery();
   const sessionBackupsQuery = useSessionBackupsQuery();
   const deleteProjectSymlinkMutation = useDeleteProjectSymlinkMutation();
   const templates = TASK_TEMPLATES;
   const [openSec, setOpenSec] = useState({ skill: false, prompt: false, backup: false });
+  // Task Groups are expanded by default (primary work area); a group is collapsed only when its
+  // id is explicitly set to false here.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [tpl, setTpl] = useState("blank");
   const [form, setForm] = useState<FormState>({ name: "", tasks: [newTask()] });
@@ -697,13 +751,36 @@ export function SyncPage() {
     }
   }
 
+  function toggleGroup(groupId: string) {
+    setOpenGroups((state) => ({ ...state, [groupId]: state[groupId] === false }));
+  }
+
   function openSchedule(group: TaskGroup, task: Task) {
     setSched({
+      scope: "task",
       groupId: group.id,
       taskId: task.id,
-      taskName: `${task.direction} · ${task.source || "task"}`,
+      title: `${task.direction} · ${task.source || "task"}`,
       mode: task.schedule !== "manual" ? "cron" : "manual",
       cronExpr: task.schedule !== "manual" ? task.schedule : DEFAULT_CRON_SCHEDULE,
+    });
+  }
+
+  function openGroupSchedule(group: TaskGroup) {
+    // Prefill from the group's Copy tasks: their shared value when they agree, else a default
+    // (the tasks currently have mixed schedules).
+    const copySchedules = group.tasks
+      .filter((task) => task.action === "Copy")
+      .map((task) => task.schedule);
+    const unique = Array.from(new Set(copySchedules));
+    const common = unique.length === 1 ? unique[0] : null;
+    const isCron = common != null && common !== "manual";
+    setSched({
+      scope: "group",
+      groupId: group.id,
+      title: group.name,
+      mode: common === "manual" ? "manual" : "cron",
+      cronExpr: isCron ? common : DEFAULT_CRON_SCHEDULE,
     });
   }
 
@@ -712,6 +789,13 @@ export function SyncPage() {
     const isCron = sched.mode === "cron";
     const schedule = isCron ? sched.cronExpr.trim() || "manual" : "manual";
     try {
+      if (sched.scope === "group") {
+        await updateGroupScheduleMutation.mutateAsync({ groupId: sched.groupId, schedule });
+        setSched(null);
+        toast(isCron ? `Group schedule set · ${schedule}` : "Group schedule set to Manual");
+        return;
+      }
+      if (!sched.taskId) return;
       const updated = await updateTaskScheduleMutation.mutateAsync({
         id: sched.taskId,
         schedule,
@@ -850,8 +934,11 @@ export function SyncPage() {
                       <TaskGroupCard
                         group={g}
                         sortable={sortable}
+                        open={openGroups[g.id] !== false}
+                        onToggle={() => toggleGroup(g.id)}
                         running={runningGroupId === g.id}
                         onRunGroup={(group) => void runGroup(group)}
+                        onGroupSchedule={openGroupSchedule}
                         onEditSchedule={openSchedule}
                         onRunTask={(group, task) => void runTask(group.id, task)}
                         onAddTask={openAddTask}
@@ -1024,10 +1111,21 @@ export function SyncPage() {
                 {sessionBackupGroup.tasks.length} projects
               </span>
               {sessionBackupGroup.tasks.some((task) => task.action === "Copy") ? (
-                <RunGroupButton
-                  running={runningGroupId === sessionBackupGroup.id}
-                  onRun={() => void runGroup(sessionBackupGroup)}
-                />
+                <>
+                  <RunGroupButton
+                    running={runningGroupId === sessionBackupGroup.id}
+                    onRun={() => void runGroup(sessionBackupGroup)}
+                  />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openGroupSchedule(sessionBackupGroup);
+                    }}
+                    className="cursor-pointer whitespace-nowrap rounded-full border border-nexus-border2 bg-nexus-bg px-3 py-[5px] text-[11.5px] font-semibold text-[#7a6f60] hover:bg-[#ece2d5]"
+                  >
+                    Schedule
+                  </button>
+                </>
               ) : null}
             </div>
             {openSec.backup ? (
@@ -1258,9 +1356,13 @@ export function SyncPage() {
         {sched ? (
           <>
             <ModalHeader
-              title={`Schedule · ${sched.taskName}`}
+              title={`${sched.scope === "group" ? "Group schedule" : "Schedule"} · ${sched.title}`}
               titleClassName="text-[16px]"
-              subtitle="Per-task trigger using a five-field CRON schedule."
+              subtitle={
+                sched.scope === "group"
+                  ? "Applies to every Copy task in this group · re-applying overrides any per-task schedules."
+                  : "Per-task trigger using a five-field CRON schedule."
+              }
             />
             <div className="flex flex-col gap-3.5 px-[22px] py-5">
               <Segmented<"manual" | "cron">
@@ -1292,7 +1394,9 @@ export function SyncPage() {
                 </div>
               ) : (
                 <div className="rounded-[11px] border border-nexus-border bg-nexus-bg px-3.5 py-3 text-[12px] leading-[1.5] text-[#8a7a68]">
-                  Manual — this task only runs when you trigger it from the group or the task row.
+                  {sched.scope === "group"
+                    ? "Manual — every Copy task in this group runs only when you trigger it."
+                    : "Manual — this task only runs when you trigger it from the group or the task row."}
                 </div>
               )}
             </div>

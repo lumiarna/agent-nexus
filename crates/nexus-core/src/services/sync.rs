@@ -36,7 +36,9 @@ pub struct Task {
     pub target_type: String,
     pub target: String,
     pub schedule: String,
-    pub last_run: String,
+    /// Epoch seconds of the last run, or `None` when the task has never run.
+    /// The frontend formats it in local time; the backend stays presentation-free.
+    pub last_run_at: Option<i64>,
     pub status: String,
     pub link_state: String,
 }
@@ -177,6 +179,10 @@ impl SyncService {
 
     pub fn update_task_schedule(&self, id: String, schedule: String) -> AppResult<Task> {
         self.task_lifecycle.update_task_schedule(id, schedule)
+    }
+
+    pub fn update_group_schedule(&self, group_id: String, schedule: String) -> AppResult<()> {
+        self.task_lifecycle.update_group_schedule(group_id, schedule)
     }
 }
 
