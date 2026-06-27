@@ -65,8 +65,12 @@ _Avoid_: Skill copy, skill target, generated placement
 _Avoid_: Agent source, new global skill copy, placement-as-source
 
 **Prompt**:
-一种面向 agent 的共享提示资产，同时支持 `global` 与 `project` 两种 `Scope`。Global Prompt 使用各 Agent 的全局提示文件；Project Prompt 只覆盖仓库根的 `AGENTS.md`（Generic Agent）与 `CLAUDE.md`（Claude Code）。
+一种面向 agent 的共享提示资产,同时支持 `global` 与 `project` 两种 `Scope`。Global Prompt 使用各 Agent 的全局提示文件;Project Prompt 默认覆盖仓库根的 `AGENTS.md`(Generic Agent)与 `CLAUDE.md`(Claude Code),并可由 Project 的 `extra_prompt_files` 列表扩展同名命名空间下的额外文件(`AGENTS*.md` / `CLAUDE*.md`)。
 _Avoid_: Arbitrary project prompt path, prompt copy
+
+**Extra Prompt File**:
+Project 通过 `extra_prompt_files: Vec<String>` 显式登记的额外 Prompt 文件,每条是相对项目根的路径。它必须匹配某个 Agent 的 `projectPromptFile` glob(例如 `AGENTS*.md` 对应 Generic Agent、`CLAUDE*.md` 对应 Claude Code),由该 Agent 担任 Source Agent;不匹配则拒绝入列。它与 Skill 的 `Project Custom Source` 故意区分——不创建新 canonical source,只是在 Agent 既有命名空间内扩大扫描范围。
+_Avoid_: Custom prompt, additional prompt, project prompt override, project prompt custom source
 
 **Session**:
 一种可搜索、可归档的会话内容资产。它既有 `Local` 视图，也有 `Cloud` 视图，但归档与恢复的任务粒度保持在 `Project` 级。
@@ -201,8 +205,8 @@ _Avoid_: Cloud cache, merged archive
 _Avoid_: Local session, mixed source view
 
 **Session Directory**:
-一个 `Project` 的本地会话目录。默认模板是 `{{project_dir}}/__sessions/`，但可被 project-level override 覆写；MVP 中每个 `Project` 只允许一个 `Session Directory`。
-_Avoid_: Multi-root session source, fixed hardcoded path
+一个 `Project` 的本地会话目录。默认模板是 `{{project_dir}}/__sessions/`，可被 project-level override 覆写为单值字符串。每个 `Project` 始终只有一个 `Session Directory`——这是有意识的约束,不是 MVP 临时限制:Session 是 `Archivable Content`,没有 Distributable Asset 那样的"独立 source"概念可对应,多 dir 不会带来新的可观测维度,只会增加合并扫描的歧义;UI 编辑入口仅在 Project 详情 Session card 暴露。
+_Avoid_: Multi-root session source, fixed hardcoded path, session source vector
 
 ## Boundaries
 
