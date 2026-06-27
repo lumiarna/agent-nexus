@@ -34,6 +34,8 @@ import {
   isWindowAlignActive,
   quotaRefreshIntervalMs,
   windowAlignCronHuman,
+  windowAlignLastAttemptLabel,
+  windowAlignStatusLabel,
 } from "@/components/provider/providerSchedule";
 import { providersApi } from "@/lib/api/providers";
 import {
@@ -51,6 +53,7 @@ import {
   useProviderScheduleSettingsQueries,
   useProviderTriggerModelsQuery,
   useReorderProvidersMutation,
+  useRunProviderWindowAlignmentMutation,
   useSetProviderDisplayPreferencesMutation,
   useSetProviderScheduleSettingsMutation,
 } from "@/lib/query/providers";
@@ -248,6 +251,7 @@ export function ProviderPage() {
   const [windowAlignCron, setWindowAlignCron] = useState("");
   const [windowAlignModelId, setWindowAlignModelId] = useState<string | null>(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [windowAlignTriggering, setWindowAlignTriggering] = useState(false);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
   const [trayMetric, setTrayMetric] = useState<TrayMetric>("Remaining");
   const [colCount, setColCount] = useState(1);
@@ -272,7 +276,9 @@ export function ProviderPage() {
     providerIds.map((providerId, index) => [providerId, quotaResults[index]]),
   );
   const setProviderScheduleSettings = useSetProviderScheduleSettingsMutation();
-  const triggerModelsQuery = useProviderTriggerModelsQuery(configId, !!configId);
+  const runProviderWindowAlignment = useRunProviderWindowAlignmentMutation();
+  const canUseWindowAlignment = configId === "claude";
+  const triggerModelsQuery = useProviderTriggerModelsQuery(configId, canUseWindowAlignment);
   const openSchedule = configId ? scheduleByProvider[configId] : undefined;
   const displayProviders = providerCatalog.map((provider) => {
     const quota = quotaQueries[provider.id]?.data;
@@ -434,6 +440,31 @@ export function ProviderPage() {
     );
   }
 
+  async function triggerWindowAlignmentNow(providerId: string, modelId: string | null) {
+    if (!isTauriRuntime()) {
+      toast("Desktop runtime required for window alignment");
+      return;
+    }
+    if (!modelId?.trim()) {
+      toast.error("Select a trigger model first");
+      return;
+    }
+
+    setWindowAlignTriggering(true);
+    try {
+      await runProviderWindowAlignment.mutateAsync({
+        providerId,
+        modelId: modelId.trim(),
+      });
+      toast("Window alignment triggered");
+      refreshProvider(providerId);
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setWindowAlignTriggering(false);
+    }
+  }
+
   function reorder(fromId: string, toId: string, currentOrder: string[]) {
     if (!fromId || fromId === toId) return null;
     const fromIndex = currentOrder.indexOf(fromId);
@@ -477,7 +508,7 @@ export function ProviderPage() {
   const visible = ordered.filter((p) => cardVisible[p.id] !== false);
   const hidden = ordered.filter((p) => cardVisible[p.id] === false);
   const cfg = configId ? displayProviders.find((p) => p.id === configId) ?? null : null;
-  const triggerSupported = triggerModelsQuery.data?.supported !== false;
+  const triggerSupported = cfg?.id === "claude" && triggerModelsQuery.data?.supported !== false;
   const triggerModels = triggerModelsQuery.data?.models ?? [];
   const modelOptions =
     windowAlignModelId && !triggerModels.some((model) => model.id === windowAlignModelId)
@@ -978,6 +1009,45 @@ export function ProviderPage() {
                           : "Inactive — set both a time and a model to enable."}
                       </div>
                     </div>
+                    <div className="rounded-[12px] border border-nexus-border bg-nexus-bg px-[14px] py-[13px]">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-semibold text-[#6a6055]">
+                            Manual trigger
+                          </div>
+                          <div className="mt-[5px] text-[11px] text-[#b3a999]">
+                            Last:{" "}
+                            <span className="font-medium text-[#7a6f60]">
+                              {windowAlignLastAttemptLabel(
+                                openSchedule?.windowAlignLastAttemptAt,
+                              )}
+                            </span>{" "}
+                            ·{" "}
+                            <span className="font-medium text-[#7a6f60]">
+                              {windowAlignStatusLabel(openSchedule?.windowAlignLastStatus)}
+                            </span>
+                          </div>
+                          {openSchedule?.windowAlignLastError ? (
+                            <div className="mt-[5px] overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-[#b75548]">
+                              {openSchedule.windowAlignLastError}
+                            </div>
+                          ) : null}
+                        </div>
+                        <Button
+                          variant="subtle"
+                          size="sm"
+                          className="flex-none px-3"
+                          disabled={
+                            windowAlignTriggering ||
+                            triggerModelsQuery.isFetching ||
+                            !windowAlignModelId?.trim()
+                          }
+                          onClick={() => void triggerWindowAlignmentNow(cfg.id, windowAlignModelId)}
+                        >
+                          {windowAlignTriggering ? "Triggering..." : "Trigger now"}
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1000,8 +1070,8 @@ export function ProviderPage() {
                         providerId: cfg.id,
                         settings: {
                           quotaRefreshMinutes,
-                          windowAlignCron: windowAlignCron.trim(),
-                          windowAlignModelId,
+                          windowAlignCron: cfg.id === "claude" ? windowAlignCron.trim() : "",
+                          windowAlignModelId: cfg.id === "claude" ? windowAlignModelId : null,
                         },
                       });
                     } catch {

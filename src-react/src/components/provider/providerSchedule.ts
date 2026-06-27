@@ -49,3 +49,28 @@ export function windowAlignCronHuman(expr: string): string {
 export function isWindowAlignActive(cron: string, modelId: string | null | undefined): boolean {
   return cron.trim().length > 0 && typeof modelId === "string" && modelId.trim().length > 0;
 }
+
+export function windowAlignLastAttemptLabel(epochSeconds: number | null | undefined): string {
+  if (typeof epochSeconds !== "number" || !Number.isFinite(epochSeconds) || epochSeconds <= 0) {
+    return "Never triggered";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(epochSeconds * 1000));
+}
+
+export function windowAlignStatusLabel(status: string | null | undefined): string {
+  switch (status) {
+    case "success":
+      return "Success";
+    case "retryable_failed":
+      return "Temporary failure";
+    case "terminal_failed":
+      return "Failed";
+    default:
+      return "No result yet";
+  }
+}

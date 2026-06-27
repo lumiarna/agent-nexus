@@ -39,6 +39,12 @@ pub struct ProviderScheduleSettings {
     pub quota_refresh_minutes: i64,
     pub window_align_cron: String,
     pub window_align_model_id: Option<String>,
+    #[serde(default)]
+    pub window_align_last_attempt_at: Option<i64>,
+    #[serde(default = "default_window_align_last_status")]
+    pub window_align_last_status: String,
+    #[serde(default)]
+    pub window_align_last_error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -138,59 +144,62 @@ impl ProviderTriggerService {
         }
 
         let now = current_epoch_seconds();
-        let mut conn = self.db.connection()?;
-        let tx = conn.transaction()?;
-        let existing = read_provider_schedule_row(&tx, provider_id)?;
-        let runtime = next_runtime_for_save(&settings, existing.as_ref(), now)?;
+        {
+            let mut conn = self.db.connection()?;
+            let tx = conn.transaction()?;
+            let existing = read_provider_schedule_row(&tx, provider_id)?;
+            let runtime = next_runtime_for_save(&settings, existing.as_ref(), now)?;
 
-        tx.execute(
-            "INSERT INTO provider_schedule_settings (
-                provider_id,
-                quota_refresh_minutes,
-                window_align_cron,
-                window_align_model_id,
-                window_align_anchor_at,
-                window_align_next_attempt_at,
-                window_align_last_attempt_at,
-                window_align_last_success_at,
-                window_align_last_status,
-                window_align_last_error,
-                window_align_failure_count,
-                created_at,
-                updated_at
-            ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12
-            )
-            ON CONFLICT(provider_id) DO UPDATE SET
-                quota_refresh_minutes = excluded.quota_refresh_minutes,
-                window_align_cron = excluded.window_align_cron,
-                window_align_model_id = excluded.window_align_model_id,
-                window_align_anchor_at = excluded.window_align_anchor_at,
-                window_align_next_attempt_at = excluded.window_align_next_attempt_at,
-                window_align_last_attempt_at = excluded.window_align_last_attempt_at,
-                window_align_last_success_at = excluded.window_align_last_success_at,
-                window_align_last_status = excluded.window_align_last_status,
-                window_align_last_error = excluded.window_align_last_error,
-                window_align_failure_count = excluded.window_align_failure_count,
-                updated_at = excluded.updated_at",
-            params![
-                provider_id,
-                settings.quota_refresh_minutes,
-                settings.window_align_cron,
-                settings.window_align_model_id,
-                runtime.anchor_at,
-                runtime.next_attempt_at,
-                runtime.last_attempt_at,
-                runtime.last_success_at,
-                runtime.last_status,
-                runtime.last_error,
-                runtime.failure_count,
-                now,
-            ],
-        )?;
-        tx.commit()?;
+            tx.execute(
+                "INSERT INTO provider_schedule_settings (
+                    provider_id,
+                    quota_refresh_minutes,
+                    window_align_cron,
+                    window_align_model_id,
+                    window_align_anchor_at,
+                    window_align_next_attempt_at,
+                    window_align_last_attempt_at,
+                    window_align_last_success_at,
+                    window_align_last_status,
+                    window_align_last_error,
+                    window_align_failure_count,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12
+                )
+                ON CONFLICT(provider_id) DO UPDATE SET
+                    quota_refresh_minutes = excluded.quota_refresh_minutes,
+                    window_align_cron = excluded.window_align_cron,
+                    window_align_model_id = excluded.window_align_model_id,
+                    window_align_anchor_at = excluded.window_align_anchor_at,
+                    window_align_next_attempt_at = excluded.window_align_next_attempt_at,
+                    window_align_last_attempt_at = excluded.window_align_last_attempt_at,
+                    window_align_last_success_at = excluded.window_align_last_success_at,
+                    window_align_last_status = excluded.window_align_last_status,
+                    window_align_last_error = excluded.window_align_last_error,
+                    window_align_failure_count = excluded.window_align_failure_count,
+                    updated_at = excluded.updated_at",
+                params![
+                    provider_id,
+                    settings.quota_refresh_minutes,
+                    settings.window_align_cron,
+                    settings.window_align_model_id,
+                    runtime.anchor_at,
+                    runtime.next_attempt_at,
+                    runtime.last_attempt_at,
+                    runtime.last_success_at,
+                    runtime.last_status,
+                    runtime.last_error,
+                    runtime.failure_count,
+                    now,
+                ],
+            )?;
+            tx.commit()?;
+        }
 
-        Ok(settings)
+        let conn = self.db.connection()?;
+        read_provider_schedule_settings(&conn, provider_id)
     }
 
     pub async fn list_provider_trigger_models(
@@ -283,6 +292,67 @@ impl ProviderTriggerService {
         Ok(triggered)
     }
 
+    pub async fn run_window_alignment_now(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> AppResult<ProviderScheduleSettings> {
+        let provider_id = normalize_provider_id(provider_id)?;
+        let model_id = required_trimmed(model_id, "window alignment model")?;
+        if !self.runner.supports(provider_id) {
+            return Err(AppError::Validation(format!(
+                "window alignment is not supported for provider: {provider_id}"
+            )));
+        }
+
+        self.ensure_provider_schedule_row(provider_id)?;
+        let now = current_epoch_seconds();
+        let result = self.runner.trigger(provider_id, model_id).await;
+        match result {
+            Ok(outcome) => self.record_manual_success(provider_id, now, outcome)?,
+            Err(error) => self.record_manual_failure(
+                provider_id,
+                now,
+                if error.is_retryable() {
+                    "retryable_failed"
+                } else {
+                    "terminal_failed"
+                },
+                error.message(),
+            )?,
+        }
+
+        let conn = self.db.connection()?;
+        read_provider_schedule_settings(&conn, provider_id)
+    }
+
+    fn ensure_provider_schedule_row(&self, provider_id: &str) -> AppResult<()> {
+        let now = current_epoch_seconds();
+        let settings = default_schedule_settings();
+        let conn = self.db.connection()?;
+        conn.execute(
+            "INSERT INTO provider_schedule_settings (
+                provider_id,
+                quota_refresh_minutes,
+                window_align_cron,
+                window_align_model_id,
+                window_align_last_status,
+                window_align_failure_count,
+                created_at,
+                updated_at
+            ) VALUES (?1, ?2, ?3, ?4, 'never', 0, ?5, ?5)
+            ON CONFLICT(provider_id) DO NOTHING",
+            params![
+                provider_id,
+                settings.quota_refresh_minutes,
+                settings.window_align_cron,
+                settings.window_align_model_id,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
     fn update_next_attempt_at(&self, provider_id: &str, next_attempt_at: i64) -> AppResult<()> {
         let conn = self.db.connection()?;
         conn.execute(
@@ -345,6 +415,49 @@ impl ProviderTriggerService {
                 status,
                 error
             ],
+        )?;
+        Ok(())
+    }
+
+    fn record_manual_success(
+        &self,
+        provider_id: &str,
+        now_epoch_seconds: i64,
+        outcome: ProviderTriggerOutcome,
+    ) -> AppResult<()> {
+        let conn = self.db.connection()?;
+        conn.execute(
+            "UPDATE provider_schedule_settings
+             SET window_align_last_attempt_at = ?2,
+                 window_align_last_success_at = ?2,
+                 window_align_last_status = 'success',
+                 window_align_last_error = NULL,
+                 window_align_failure_count = 0,
+                 updated_at = ?2
+             WHERE provider_id = ?1",
+            params![provider_id, now_epoch_seconds],
+        )?;
+        let _tokens = outcome.prompt_tokens + outcome.completion_tokens;
+        Ok(())
+    }
+
+    fn record_manual_failure(
+        &self,
+        provider_id: &str,
+        now_epoch_seconds: i64,
+        status: &str,
+        error: &str,
+    ) -> AppResult<()> {
+        let conn = self.db.connection()?;
+        conn.execute(
+            "UPDATE provider_schedule_settings
+             SET window_align_last_attempt_at = ?2,
+                 window_align_last_status = ?3,
+                 window_align_last_error = ?4,
+                 window_align_failure_count = window_align_failure_count + 1,
+                 updated_at = ?2
+             WHERE provider_id = ?1",
+            params![provider_id, now_epoch_seconds, status, error],
         )?;
         Ok(())
     }
@@ -550,20 +663,26 @@ fn list_due_window_alignment_rows(
 fn provider_schedule_row_from_sql(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<ProviderScheduleRow> {
+    let last_attempt_at: Option<i64> = row.get(6)?;
+    let last_status: String = row.get(8)?;
+    let last_error: Option<String> = row.get(9)?;
     Ok(ProviderScheduleRow {
         provider_id: row.get(0)?,
         settings: ProviderScheduleSettings {
             quota_refresh_minutes: row.get(1)?,
             window_align_cron: row.get(2)?,
             window_align_model_id: row.get(3)?,
+            window_align_last_attempt_at: last_attempt_at,
+            window_align_last_status: last_status.clone(),
+            window_align_last_error: last_error.clone(),
         },
         runtime: WindowAlignmentRuntime {
             anchor_at: row.get(4)?,
             next_attempt_at: row.get(5)?,
-            last_attempt_at: row.get(6)?,
+            last_attempt_at,
             last_success_at: row.get(7)?,
-            last_status: row.get(8)?,
-            last_error: row.get(9)?,
+            last_status,
+            last_error,
             failure_count: row.get(10)?,
         },
     })
@@ -620,7 +739,14 @@ fn default_schedule_settings() -> ProviderScheduleSettings {
         quota_refresh_minutes: DEFAULT_QUOTA_REFRESH_MINUTES,
         window_align_cron: String::new(),
         window_align_model_id: None,
+        window_align_last_attempt_at: None,
+        window_align_last_status: default_window_align_last_status(),
+        window_align_last_error: None,
     }
+}
+
+fn default_window_align_last_status() -> String {
+    "never".to_string()
 }
 
 fn normalize_schedule_settings(
@@ -644,6 +770,9 @@ fn normalize_schedule_settings(
             let model_id = model_id.trim().to_string();
             (!model_id.is_empty()).then_some(model_id)
         }),
+        window_align_last_attempt_at: settings.window_align_last_attempt_at,
+        window_align_last_status: settings.window_align_last_status,
+        window_align_last_error: settings.window_align_last_error,
     })
 }
 
@@ -914,6 +1043,9 @@ mod tests {
                 quota_refresh_minutes: DEFAULT_QUOTA_REFRESH_MINUTES,
                 window_align_cron: String::new(),
                 window_align_model_id: None,
+                window_align_last_attempt_at: None,
+                window_align_last_status: "never".to_string(),
+                window_align_last_error: None,
             }
         );
     }
@@ -931,6 +1063,9 @@ mod tests {
                 quota_refresh_minutes: 5,
                 window_align_cron: "0 5,,10 * * *".to_string(),
                 window_align_model_id: Some("model-1".to_string()),
+                window_align_last_attempt_at: None,
+                window_align_last_status: "never".to_string(),
+                window_align_last_error: None,
             },
         );
 
@@ -949,6 +1084,9 @@ mod tests {
                     quota_refresh_minutes: 5,
                     window_align_cron: "* * * * *".to_string(),
                     window_align_model_id: Some("model-1".to_string()),
+                    window_align_last_attempt_at: None,
+                    window_align_last_status: "never".to_string(),
+                    window_align_last_error: None,
                 },
             )
             .expect("save schedule");
@@ -984,6 +1122,9 @@ mod tests {
                     quota_refresh_minutes: 5,
                     window_align_cron: "* * * * *".to_string(),
                     window_align_model_id: Some("model-1".to_string()),
+                    window_align_last_attempt_at: None,
+                    window_align_last_status: "never".to_string(),
+                    window_align_last_error: None,
                 },
             )
             .expect("save schedule");
@@ -1019,6 +1160,9 @@ mod tests {
                     quota_refresh_minutes: 5,
                     window_align_cron: "* * * * *".to_string(),
                     window_align_model_id: Some("model-1".to_string()),
+                    window_align_last_attempt_at: None,
+                    window_align_last_status: "never".to_string(),
+                    window_align_last_error: None,
                 },
             )
             .expect("save schedule");
@@ -1040,5 +1184,26 @@ mod tests {
             row.runtime.next_attempt_at,
             Some(now + PROVIDER_WINDOW_SECONDS)
         );
+    }
+
+    #[tokio::test]
+    async fn manual_trigger_records_last_attempt_result() {
+        let service = test_service(FakeRunner::supported_with(vec![Ok(
+            ProviderTriggerOutcome {
+                prompt_tokens: 1,
+                completion_tokens: 1,
+            },
+        )]));
+
+        let settings = service
+            .run_window_alignment_now("claude", "model-1")
+            .await
+            .expect("run manual trigger");
+
+        assert_eq!(settings.window_align_last_status, "success");
+        assert!(settings.window_align_last_attempt_at.is_some());
+        assert_eq!(settings.window_align_last_error, None);
+        assert_eq!(settings.window_align_cron, "");
+        assert_eq!(settings.window_align_model_id, None);
     }
 }

@@ -67,6 +67,7 @@ pub fn run() {
             commands::providers::get_provider_order,
             commands::providers::list_opencode_custom_providers,
             commands::providers::list_provider_trigger_models,
+            commands::providers::run_provider_window_alignment,
             commands::providers::set_provider_order,
             commands::providers::set_provider_schedule_settings,
             commands::app_config::get_copilot_github_token,

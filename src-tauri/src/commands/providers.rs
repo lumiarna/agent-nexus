@@ -69,3 +69,15 @@ pub async fn list_provider_trigger_models(
         .list_provider_trigger_models(&provider_id)
         .await
 }
+
+#[tauri::command]
+pub async fn run_provider_window_alignment(
+    state: State<'_, AppState>,
+    provider_id: String,
+    model_id: String,
+) -> AppResult<ProviderScheduleSettings> {
+    state
+        .provider_trigger
+        .run_window_alignment_now(&provider_id, &model_id)
+        .await
+}
