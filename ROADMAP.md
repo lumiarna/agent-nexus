@@ -1,7 +1,6 @@
 - Local 删除 Copy Task 时，应把目标位置的文件也删掉
 - 按 ESC 不应退出全屏
 - Sync Task，已经有删除线了，不需要再显示 Missing 字样（和 Project 面对齐）
-- Sync Task Group 排序未保存
 - 支持 Disable Global Skill (实现方式：备份到 Cloud，然后删除本地文件；软链接怎么办？)
 - 支持 Qoder
 - 窗口对齐验证
@@ -13,4 +12,4 @@
 - 窗口对齐
   - 模型选择器会超出窗口外
 - Token 数量单位用 M
-
+- Sync Group 排序未保存

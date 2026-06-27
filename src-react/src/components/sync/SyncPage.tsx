@@ -321,12 +321,6 @@ function TaskGroupCard({
             ⠿
           </span>
         ) : null}
-        <span
-          className="inline-block text-[10px] text-[#a99a89] transition-transform"
-          style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
-        >
-          ▸
-        </span>
         <div className="text-[14.5px] font-extrabold text-nexus-ink">{group.name}</div>
         <span className="text-[11px] text-[#b3a999]">
           {group.tasks.length} {group.tasks.length === 1 ? "task" : "tasks"}

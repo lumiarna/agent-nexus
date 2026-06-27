@@ -1,6 +1,6 @@
 ## Docs
 
-请先阅读 `CONTEXT.md` 和 `GOTCHAS.md`。
+务必先阅读 `CONTEXT.md` 和 `GOTCHAS.md`。
 
 ### 设计文档
 
@@ -9,8 +9,7 @@
 - `docs/design/Database Schema.md`
 - `docs/adr/`
 
-## 代码位置
+## 代码索引
 
-- `src-react/`
-- `src-tauri/`
-- 后端已实现功能：`src-tauri/tests`
+- 前端代码：`src-react/`
+- 后端代码：`src-tauri/`
