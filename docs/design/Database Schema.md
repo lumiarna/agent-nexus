@@ -47,7 +47,7 @@ CREATE TABLE projects (
     path TEXT NOT NULL,                               -- 当前本地仓库路径（可变）
     status TEXT NOT NULL DEFAULT 'active'             -- active | stale | hidden
         CHECK (status IN ('active', 'stale', 'hidden')),
-    sessions_dir TEXT NOT NULL DEFAULT '__sessions',  -- 会话目录模板
+    sessions_dir TEXT NOT NULL DEFAULT '.sessions',  -- 会话目录模板
     sort_index INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL

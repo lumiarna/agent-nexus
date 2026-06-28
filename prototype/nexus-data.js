@@ -44,13 +44,13 @@
 
   /* ---- Projects (Project Key == folder name, no edit) ------ */
   var PROJECTS = [
-    { id: "oll-context", name: "oll-context", status: "active", path: "D:/Workspace/oll-context", sessionsDir: "__sessions", skills: 2, sessions: 18, sync: 6 },
-    { id: "tap", name: "tap", status: "active", path: "D:/Workspace/tap", sessionsDir: "__sessions", skills: 1, sessions: 7, sync: 3 },
-    { id: "tap-kit", name: "tap-kit", status: "active", path: "D:/Workspace/tap-kit", sessionsDir: "__sessions", skills: 0, sessions: 3, sync: 2 },
-    { id: "awesome-vibe-coding", name: "awesome-vibe-coding", status: "active", path: "D:/Workspace/awesome-vibe-coding", sessionsDir: "docs/__sessions", sessionsNote: " · override", skills: 1, sessions: 5, sync: 2 },
-    { id: "agent-nexus", name: "agent-nexus", status: "active", path: "D:/Workspace/agent-nexus", sessionsDir: "__sessions", skills: 3, sessions: 12, sync: 4 },
-    { id: "legacy-cli", name: "legacy-cli", status: "stale", path: "E:/Old/legacy-cli", sessionsDir: "__sessions", skills: 1, sessions: 9, sync: 2 },
-    { id: "sandbox", name: "sandbox", status: "hidden", path: "D:/Workspace/sandbox", sessionsDir: "__sessions", skills: 0, sessions: 2, sync: 0 }
+    { id: "oll-context", name: "oll-context", status: "active", path: "D:/Workspace/oll-context", sessionsDir: ".sessions", skills: 2, sessions: 18, sync: 6 },
+    { id: "tap", name: "tap", status: "active", path: "D:/Workspace/tap", sessionsDir: ".sessions", skills: 1, sessions: 7, sync: 3 },
+    { id: "tap-kit", name: "tap-kit", status: "active", path: "D:/Workspace/tap-kit", sessionsDir: ".sessions", skills: 0, sessions: 3, sync: 2 },
+    { id: "awesome-vibe-coding", name: "awesome-vibe-coding", status: "active", path: "D:/Workspace/awesome-vibe-coding", sessionsDir: "docs/.sessions", sessionsNote: " · override", skills: 1, sessions: 5, sync: 2 },
+    { id: "agent-nexus", name: "agent-nexus", status: "active", path: "D:/Workspace/agent-nexus", sessionsDir: ".sessions", skills: 3, sessions: 12, sync: 4 },
+    { id: "legacy-cli", name: "legacy-cli", status: "stale", path: "E:/Old/legacy-cli", sessionsDir: ".sessions", skills: 1, sessions: 9, sync: 2 },
+    { id: "sandbox", name: "sandbox", status: "hidden", path: "D:/Workspace/sandbox", sessionsDir: ".sessions", skills: 0, sessions: 2, sync: 0 }
   ];
   // Project Key always derives from the folder name (UI offers no editor).
   PROJECTS.forEach(function (p) { p.key = p.name; });
@@ -102,28 +102,28 @@
 
   /* ---- Sessions -------------------------------------------- */
   var SESSIONS = [
-    { id: "s1", title: "260615-1059-Agent Nexus需求审视", project: "agent-nexus", file: "__sessions/260615-1059-Agent Nexus需求审视.md", size: "11.3 KB", updated: "2026-06-15 13:19", source: "both",
+    { id: "s1", title: "260615-1059-Agent Nexus需求审视", project: "agent-nexus", file: ".sessions/260615-1059-Agent Nexus需求审视.md", size: "11.3 KB", updated: "2026-06-15 13:19", source: "both",
       excerpt: "审视基于当前项目演化出的新项目需求边界、实体模型与范围优先级。",
       body: "# 主题一\n\n## 设计决策\n- 先不讨论实现，优先澄清产品定位、范围边界、实体关系与同步语义。\n- 一级导航命名最终确认：单数形式 Provider / Project / Skill / Prompt / Session / Sync。\n- Sync 语义确认：只做单向，仅支持 Backup 与 Distribution 两种单向模式。\n- Agent Matrix 作为高层快捷控制器，用户在表格内直接切换关系。" },
-    { id: "s2", title: "260615-1958-原型反馈B设计盘问", project: "agent-nexus", file: "__sessions/260615-1958-原型反馈B设计盘问.md", size: "2.5 KB", updated: "2026-06-15 20:06", source: "local",
+    { id: "s2", title: "260615-1958-原型反馈B设计盘问", project: "agent-nexus", file: ".sessions/260615-1958-原型反馈B设计盘问.md", size: "2.5 KB", updated: "2026-06-15 20:06", source: "local",
       excerpt: "围绕原型反馈B逐项澄清领域模型与页面交互边界。",
       body: "# 主题一\n\n## 设计决策\n- Project Key 默认取项目目录名，MVP 中 UI 不提供编辑入口。\n- Backup / Distribution / Restore/Pull 的方向与类型定义在 Task 层，不在 Task Group 层。\n- Task 的定时器（CRON）配置绑定在 Task 层，并支持创建后单独编辑。\n- Provider 卡片、Task Group、Task 都支持拖拽排序。\n- Session 主界面只显示 Cloud；WebDAV 仅出现在设置页面。" },
-    { id: "s3", title: "260615-1430-prototype-build-notes", project: "agent-nexus", file: "__sessions/260615-1430-prototype-build-notes.md", size: "3.1 KB", updated: "2026-06-15 14:30", source: "local",
+    { id: "s3", title: "260615-1430-prototype-build-notes", project: "agent-nexus", file: ".sessions/260615-1430-prototype-build-notes.md", size: "3.1 KB", updated: "2026-06-15 14:30", source: "local",
       excerpt: "Working notes while wiring up the six primary screens and the agent matrix interaction.",
       body: "# Prototype build notes\n\n- Top tab bar nav, native desktop chrome.\n- Agent Matrix collapsed to per-agent icons (source / target / none).\n- Session: Local/Cloud toggle, list + preview two-column.\n- Sync default sections moved to the bottom, collapsed." },
-    { id: "s4", title: "260612-1432-tap-builder-refactor", project: "oll-context", file: "__sessions/260612-1432-tap-builder-refactor.md", size: "8.7 KB", updated: "2026-06-12 14:32", source: "both",
+    { id: "s4", title: "260612-1432-tap-builder-refactor", project: "oll-context", file: ".sessions/260612-1432-tap-builder-refactor.md", size: "8.7 KB", updated: "2026-06-12 14:32", source: "both",
       excerpt: "Refactored the TAP builder skill and re-symlinked the canonical source into CodeX.",
       body: "# tap-builder refactor\n\n- Moved canonical source under .github/skills/tap-builder.\n- Re-created the CodeX placement as a symlink (auto target path).\n- disable-model-invocation left off for this skill." },
-    { id: "s5", title: "260610-0901-quota-endpoint-debug", project: "agent-nexus", file: "__sessions/260610-0901-quota-endpoint-debug.md", size: "5.4 KB", updated: "2026-06-10 09:01", source: "cloud",
+    { id: "s5", title: "260610-0901-quota-endpoint-debug", project: "agent-nexus", file: ".sessions/260610-0901-quota-endpoint-debug.md", size: "5.4 KB", updated: "2026-06-10 09:01", source: "cloud",
       excerpt: "Traced the DeepSeek 503 returned from the quota endpoint and added a retry path.",
       body: "# Quota endpoint debug\n\n- DeepSeek quota endpoint intermittently returns HTTP 503.\n- Provider card now surfaces \"Request failed\" with the last-success timestamp.\n- Added Retry as a diagnostic action." },
-    { id: "s6", title: "260608-1730-session-archive-design", project: "tap-kit", file: "__sessions/260608-1730-session-archive-design.md", size: "6.9 KB", updated: "2026-06-08 17:30", source: "cloud",
+    { id: "s6", title: "260608-1730-session-archive-design", project: "tap-kit", file: ".sessions/260608-1730-session-archive-design.md", size: "6.9 KB", updated: "2026-06-08 17:30", source: "cloud",
       excerpt: "Designed the Cloud archive layout keyed by stable project key, no device sub-layer.",
       body: "# Session archive design\n\n- Cloud layout keyed by <project key>.\n- No <device-id> sub-layer; same project dir is a merge point, not a conflict.\n- last-write-wins on same-name files." },
-    { id: "s7", title: "260605-1100-warp-config-sync", project: "awesome-vibe-coding", file: "docs/__sessions/260605-1100-warp-config-sync.md", size: "4.2 KB", updated: "2026-06-05 11:00", source: "cloud",
+    { id: "s7", title: "260605-1100-warp-config-sync", project: "awesome-vibe-coding", file: "docs/.sessions/260605-1100-warp-config-sync.md", size: "4.2 KB", updated: "2026-06-05 11:00", source: "cloud",
       excerpt: "Set up Warp config distribution from the canonical machine via copy, same-platform only.",
       body: "# Warp config sync\n\n- Generic File task from the Warp Config template.\n- Copies settings.toml + keybindings.yaml to Cloud.\n- Same-platform restore only." },
-    { id: "s8", title: "260611-0815-local-scratch", project: "tap", file: "__sessions/260611-0815-local-scratch.md", size: "1.2 KB", updated: "2026-06-11 08:15", source: "local",
+    { id: "s8", title: "260611-0815-local-scratch", project: "tap", file: ".sessions/260611-0815-local-scratch.md", size: "1.2 KB", updated: "2026-06-11 08:15", source: "local",
       excerpt: "Quick local scratch notes, not yet archived to Cloud.",
       body: "# Local scratch\n\n- Local-only notes for the tap repo.\n- Not yet archived — visible under Local source only." }
   ];
@@ -178,9 +178,9 @@
       { asset: "Global Instructions", relation: "Claude Code → Copilot", path: "~/.github/AGENTS.md", status: "ok" }
     ],
     backup: [
-      { asset: "oll-context", relation: "__sessions → Cloud", path: "cloud://agent-nexus/oll-context", status: "ok" },
-      { asset: "agent-nexus", relation: "__sessions → Cloud", path: "cloud://agent-nexus/agent-nexus", status: "pending" },
-      { asset: "tap", relation: "__sessions → Cloud", path: "cloud://agent-nexus/tap", status: "never" }
+      { asset: "oll-context", relation: ".sessions → Cloud", path: "cloud://agent-nexus/oll-context", status: "ok" },
+      { asset: "agent-nexus", relation: ".sessions → Cloud", path: "cloud://agent-nexus/agent-nexus", status: "pending" },
+      { asset: "tap", relation: ".sessions → Cloud", path: "cloud://agent-nexus/tap", status: "never" }
     ]
   };
 

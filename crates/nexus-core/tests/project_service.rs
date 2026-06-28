@@ -57,7 +57,7 @@ fn new_project_inherits_global_project_defaults() {
     let initial = service.get_project_defaults().expect("read defaults");
     assert_eq!(initial.custom_skills_dirs, vec!["skills".to_string()]);
     assert!(initial.extra_prompt_files.is_empty());
-    assert_eq!(initial.sessions_dir, "__sessions");
+    assert_eq!(initial.sessions_dir, ".sessions");
 
     service
         .set_default_custom_skills_dirs(vec![".nexus/skills".to_string()])
@@ -72,8 +72,14 @@ fn new_project_inherits_global_project_defaults() {
     let recorded = service
         .record_project(git_repo(&root, "agent-nexus"))
         .expect("record project");
-    assert_eq!(recorded.custom_skills_dirs, vec![".nexus/skills".to_string()]);
-    assert_eq!(recorded.extra_prompt_files, vec!["AGENTS.local.md".to_string()]);
+    assert_eq!(
+        recorded.custom_skills_dirs,
+        vec![".nexus/skills".to_string()]
+    );
+    assert_eq!(
+        recorded.extra_prompt_files,
+        vec!["AGENTS.local.md".to_string()]
+    );
     assert_eq!(recorded.sessions_dir, ".sessions");
 }
 
@@ -192,17 +198,17 @@ fn sets_sessions_dir_and_restores_default_when_cleared() {
         .expect("record project");
 
     // A freshly recorded project uses the default session directory.
-    assert_eq!(recorded.sessions_dir, "__sessions");
+    assert_eq!(recorded.sessions_dir, ".sessions");
 
     let overridden = service
-        .set_project_sessions_dir(recorded.id.clone(), "  .sessions/  ".to_string())
+        .set_project_sessions_dir(recorded.id.clone(), "  notes/  ".to_string())
         .expect("override sessions dir");
-    assert_eq!(overridden.sessions_dir, ".sessions");
+    assert_eq!(overridden.sessions_dir, "notes");
 
     let restored = service
         .set_project_sessions_dir(recorded.id, String::new())
         .expect("restore default sessions dir");
-    assert_eq!(restored.sessions_dir, "__sessions");
+    assert_eq!(restored.sessions_dir, ".sessions");
 }
 
 #[test]
@@ -383,7 +389,7 @@ fn hidden_status_survives_even_when_path_no_longer_exists() {
 }
 
 #[test]
-fn records_git_base_folder_and_lists_canonical_path() {
+fn records_git_base_folder_and_stores_canonical_path() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
     let root = TempDir::new().expect("create temp dir");
@@ -395,14 +401,60 @@ fn records_git_base_folder_and_lists_canonical_path() {
         .list_git_base_folders()
         .expect("list git base folders");
 
+    // Stored canonical; the temp dir is not under $HOME so display is unchanged.
     assert_eq!(recorded.path, canonical_display_path(root.path()));
-    #[cfg(windows)]
-    assert!(
-        !recorded.path.starts_with(r"\\?\"),
-        "recorded base folder should not expose a Windows verbatim path: {}",
-        recorded.path
-    );
     assert_eq!(folders, vec![recorded]);
+}
+
+#[test]
+#[serial_test::serial]
+fn records_git_base_folder_with_tilde_path() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let home = TempDir::new().expect("create temp home");
+    // Canonicalize so `collapse_home` (which matches against $HOME) sees the same
+    // form `canonicalize()` produces for the stored path (macOS /var -> /private/var).
+    let home_path = fs::canonicalize(home.path()).expect("canonicalize home");
+    fs::create_dir_all(home_path.join("Vault")).expect("create vault dir");
+
+    let previous = std::env::var_os("HOME");
+    std::env::set_var("HOME", &home_path);
+    let recorded = service.record_git_base_folder("~/Vault".to_string());
+    match previous {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+
+    let recorded = recorded.expect("record git base folder with tilde");
+    // Stored canonical, displayed collapsed back to `~`.
+    assert_eq!(recorded.path, "~/Vault");
+}
+
+#[test]
+#[serial_test::serial]
+fn scans_tilde_base_folder_resolves_home_and_collapses_display() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let home = TempDir::new().expect("create temp home");
+    let home_path = fs::canonicalize(home.path()).expect("canonicalize home");
+    fs::create_dir_all(home_path.join("Vault/repo/.git")).expect("create repo under vault");
+
+    let previous = std::env::var_os("HOME");
+    std::env::set_var("HOME", &home_path);
+    let scan = (|| {
+        service.record_git_base_folder("~/Vault".to_string())?;
+        service.scan_git_base_folders()
+    })();
+    match previous {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+
+    let scan = scan.expect("scan tilde base folder");
+    assert_eq!(scan.len(), 1);
+    assert_eq!(scan[0].key, "repo");
+    // Discovered repo path is also collapsed for display.
+    assert_eq!(scan[0].path, "~/Vault/repo");
 }
 
 #[test]

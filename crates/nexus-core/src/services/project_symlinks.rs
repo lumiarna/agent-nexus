@@ -113,12 +113,19 @@ impl ProjectSymlinkInventory {
                 .then_with(|| left.source_path.cmp(&right.source_path))
                 .then_with(|| left.target_path.cmp(&right.target_path))
         });
+        // Collapse to `~` only for display, after all internal identity matching
+        // (managed-target check, sorting) has run on the canonical paths.
+        for link in &mut links {
+            link.source_path = paths::collapse_home(&link.source_path);
+            link.target_path = paths::collapse_home(&link.target_path);
+            link.id = paths::collapse_home(&link.id);
+        }
         Ok(links)
     }
 
     pub fn delete_project_symlink(&self, target_path: String) -> AppResult<()> {
         let target_path = required_trimmed(&target_path, "project symlink target path")?;
-        remove_unmanaged_link_placement(Path::new(target_path))
+        remove_unmanaged_link_placement(&paths::resolve_local_path(target_path)?)
     }
 
     fn list_existing_project_roots(&self) -> AppResult<Vec<ProjectRoot>> {

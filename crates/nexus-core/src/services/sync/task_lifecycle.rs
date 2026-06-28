@@ -474,9 +474,11 @@ impl TaskLifecycle {
         let tx = conn.transaction()?;
 
         let group_exists = tx
-            .query_row("SELECT 1 FROM task_groups WHERE id = ?1", [&group_id], |_| {
-                Ok(())
-            })
+            .query_row(
+                "SELECT 1 FROM task_groups WHERE id = ?1",
+                [&group_id],
+                |_| Ok(()),
+            )
             .optional()?
             .is_some();
         if !group_exists {

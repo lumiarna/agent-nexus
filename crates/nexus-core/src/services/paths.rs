@@ -74,6 +74,26 @@ pub fn path_buf_for_comparison(path: PathBuf, label: &str) -> AppResult<PathBuf>
     Ok(PathBuf::from(path_to_string(&path, label)?))
 }
 
+/// Collapse a home-relative absolute path back to its `~` form for display. The
+/// inverse of [`resolve_local_path`]'s tilde handling: paths are stored canonical
+/// but shown with `~` so the UI never exposes a user's absolute home directory.
+/// Anything not under the home directory (or a path that is already `~`-relative)
+/// is returned unchanged.
+pub fn collapse_home(path: &str) -> String {
+    let Some(home) = home_dir().and_then(|home| home.to_str().map(ToOwned::to_owned)) else {
+        return path.to_string();
+    };
+    if path == home {
+        return "~".to_string();
+    }
+    if let Some(rest) = path.strip_prefix(&home) {
+        if rest.starts_with('/') || rest.starts_with('\\') {
+            return format!("~{rest}");
+        }
+    }
+    path.to_string()
+}
+
 #[cfg(windows)]
 fn normalize_display_path(path: &str) -> String {
     if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
@@ -118,6 +138,34 @@ mod tests {
                 home.join("foo")
             );
             assert_eq!(resolve_local_path("~").expect("resolve ~"), home);
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn collapse_home_replaces_home_prefix_with_tilde() {
+        let home = TempDir::new().expect("create temp home");
+        with_home(&home, |home| {
+            let home = home.to_str().expect("utf-8 home");
+            assert_eq!(collapse_home(home), "~");
+            assert_eq!(collapse_home(&format!("{home}/Vault")), "~/Vault");
+            assert_eq!(
+                collapse_home(&format!("{home}/Vault/Clipper")),
+                "~/Vault/Clipper"
+            );
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn collapse_home_passes_through_paths_outside_home() {
+        let home = TempDir::new().expect("create temp home");
+        with_home(&home, |home| {
+            let home = home.to_str().expect("utf-8 home");
+            // A sibling whose name merely starts with the home string must not match.
+            assert_eq!(collapse_home(&format!("{home}x/foo")), format!("{home}x/foo"));
+            assert_eq!(collapse_home("/opt/data"), "/opt/data");
+            assert_eq!(collapse_home("~/already"), "~/already");
         });
     }
 

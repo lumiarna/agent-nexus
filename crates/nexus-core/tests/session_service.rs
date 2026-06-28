@@ -152,7 +152,7 @@ fn scans_local_project_session_markdown_files() {
     let project = projects
         .record_project(repo.clone())
         .expect("record project");
-    let session_dir = Path::new(&repo).join("__sessions");
+    let session_dir = Path::new(&repo).join(".sessions");
     fs::create_dir_all(&session_dir).expect("create session dir");
     fs::write(
         session_dir.join("260618-2208-Session本地数据接入.md"),
@@ -179,10 +179,7 @@ updated: 2026-06-18T22:08:31
     assert_eq!(rows[0].title, "Session本地数据接入");
     assert_eq!(rows[0].project, project.id);
     assert_eq!(rows[0].project_name, "agent-nexus");
-    assert_eq!(
-        rows[0].file,
-        "__sessions/260618-2208-Session本地数据接入.md"
-    );
+    assert_eq!(rows[0].file, ".sessions/260618-2208-Session本地数据接入.md");
     assert_eq!(rows[0].source, "local");
     assert_eq!(
         rows[0].excerpt,
@@ -231,7 +228,7 @@ async fn scans_cloud_project_session_markdown_files_from_webdav() {
     assert_eq!(rows[0].title, "Cloud Session 接线");
     assert_eq!(rows[0].project, project.id);
     assert_eq!(rows[0].project_name, "agent-nexus");
-    assert_eq!(rows[0].file, "__sessions/260625-cloud.md");
+    assert_eq!(rows[0].file, ".sessions/260625-cloud.md");
     assert_eq!(rows[0].source, "cloud");
     assert_eq!(rows[0].excerpt, "从 Cloud 聚合会话索引并按需读取正文。");
     assert_eq!(rows[0].body, "");
@@ -341,7 +338,7 @@ fn scan_local_sessions_does_not_follow_directory_symlinks() {
     projects
         .record_project(repo.clone())
         .expect("record project");
-    let session_dir = Path::new(&repo).join("__sessions");
+    let session_dir = Path::new(&repo).join(".sessions");
     fs::create_dir_all(&session_dir).expect("create session dir");
     fs::write(session_dir.join("local.md"), "# Local\n").expect("write local session");
     std::os::unix::fs::symlink(Path::new(&repo), session_dir.join("repo-loop"))
@@ -350,5 +347,5 @@ fn scan_local_sessions_does_not_follow_directory_symlinks() {
     let rows = sessions.scan_local_sessions().expect("scan local sessions");
 
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].file, "__sessions/local.md");
+    assert_eq!(rows[0].file, ".sessions/local.md");
 }

@@ -18,7 +18,7 @@ use crate::{
 };
 
 /// Default Session Directory leaf restored when the override is cleared.
-const DEFAULT_SESSIONS_DIR: &str = "__sessions";
+const DEFAULT_SESSIONS_DIR: &str = ".sessions";
 
 /// Custom skills dir a new Project inherits when no global default is configured.
 /// Mirrors the `projects.custom_skills_dirs` column default so behavior is unchanged
@@ -122,7 +122,12 @@ impl ProjectService {
         let mut projects = rows.collect::<Result<Vec<_>, _>>()?;
 
         for project in &mut projects {
-            if project.status == "active" && !Path::new(&project.path).exists() {
+            // `path` is collapsed to `~` for display; resolve it back before the
+            // on-disk staleness check (an unresolvable path counts as missing).
+            let exists = paths::resolve_local_path(&project.path)
+                .map(|path| path.exists())
+                .unwrap_or(false);
+            if project.status == "active" && !exists {
                 project.status = "stale".to_string();
             }
         }
@@ -338,7 +343,7 @@ impl ProjectService {
     }
 
     /// Override the Project Session Directory. An empty input restores the default
-    /// `__sessions` template. Session Directory stays single-valued by design.
+    /// `.sessions` template. Session Directory stays single-valued by design.
     pub fn set_project_sessions_dir(&self, project_id: String, dir: String) -> AppResult<Project> {
         let id = project_id.trim();
         if id.is_empty() {
@@ -374,7 +379,7 @@ impl ProjectService {
 
     /// Read the global Project Defaults applied to brand-new projects. Unset list
     /// settings fall back to their column defaults (`skills` for custom skills dirs,
-    /// none for extra prompt files); an unset session dir falls back to `__sessions`.
+    /// none for extra prompt files); an unset session dir falls back to `.sessions`.
     pub fn get_project_defaults(&self) -> AppResult<ProjectDefaults> {
         let conn = self.db.connection()?;
         Ok(read_project_defaults_from(&conn)?)
@@ -382,10 +387,7 @@ impl ProjectService {
 
     /// Replace the default custom skills dirs new projects inherit. Validated by the
     /// same rules as the per-Project setter (dedup, reject fixed Agent dirs).
-    pub fn set_default_custom_skills_dirs(
-        &self,
-        dirs: Vec<String>,
-    ) -> AppResult<ProjectDefaults> {
+    pub fn set_default_custom_skills_dirs(&self, dirs: Vec<String>) -> AppResult<ProjectDefaults> {
         let value = validate_custom_skills_dirs(dirs)?.join("\n");
         let conn = self.db.connection()?;
         write_setting(&conn, DEFAULT_CUSTOM_SKILLS_DIRS_KEY, &value)?;
@@ -394,10 +396,7 @@ impl ProjectService {
 
     /// Replace the default extra prompt files new projects inherit. Validated by the
     /// same rules as the per-Project setter (prompt glob, no primary-file collision).
-    pub fn set_default_extra_prompt_files(
-        &self,
-        files: Vec<String>,
-    ) -> AppResult<ProjectDefaults> {
+    pub fn set_default_extra_prompt_files(&self, files: Vec<String>) -> AppResult<ProjectDefaults> {
         let value = validate_extra_prompt_files(files)?.join("\n");
         let conn = self.db.connection()?;
         write_setting(&conn, DEFAULT_EXTRA_PROMPT_FILES_KEY, &value)?;
@@ -405,7 +404,7 @@ impl ProjectService {
     }
 
     /// Replace the default Session Directory new projects inherit. An empty input
-    /// restores the `__sessions` default.
+    /// restores the `.sessions` default.
     pub fn set_default_sessions_dir(&self, dir: String) -> AppResult<ProjectDefaults> {
         let value = normalize_sessions_dir(&dir);
         let conn = self.db.connection()?;
@@ -418,6 +417,9 @@ impl ProjectService {
     }
 
     pub fn record_git_base_folder(&self, path: String) -> AppResult<GitBaseFolder> {
+        // Persist the canonical path (resolving `~`/env forms) so equivalent inputs
+        // dedupe; the `~` form is restored only at the display boundary via
+        // `collapse_home` in `git_base_folder_from_row`.
         let canonical_path = validate_directory_path(&path, "git base folder path")?;
         let path = path_to_string(&canonical_path)?;
         let now = now_epoch_seconds()?;
@@ -505,7 +507,8 @@ impl ProjectService {
         let mut repositories = Vec::new();
 
         for folder in folders {
-            repositories.extend(discover_git_repositories(Path::new(&folder.path))?);
+            let base = paths::resolve_local_path(&folder.path)?;
+            repositories.extend(discover_git_repositories(&base)?);
         }
 
         self.mark_recorded_repositories(repositories)
@@ -574,7 +577,7 @@ fn validate_directory_path(path: &str, label: &str) -> AppResult<PathBuf> {
         return Err(AppError::Validation(format!("{label} is required")));
     }
 
-    let raw_path = Path::new(path.trim());
+    let raw_path = paths::resolve_local_path(path.trim())?;
     if !raw_path.exists() {
         return Err(AppError::Validation(format!(
             "{label} does not exist: {}",
@@ -618,7 +621,7 @@ fn discover_git_repositories(base: &Path) -> AppResult<Vec<DiscoveredRepo>> {
         let canonical_path = path.canonicalize()?;
         repositories.push(DiscoveredRepo {
             key: project_key(&canonical_path)?,
-            path: path_to_string(&canonical_path)?,
+            path: paths::collapse_home(&path_to_string(&canonical_path)?),
             state: "new".to_string(),
         });
     }
@@ -644,7 +647,7 @@ fn project_from_row(row: &Row<'_>) -> rusqlite::Result<Project> {
         id: row.get(0)?,
         name: row.get(1)?,
         status: row.get(2)?,
-        path: row.get(3)?,
+        path: paths::collapse_home(&row.get::<_, String>(3)?),
         sessions_dir: row.get(4)?,
         sessions_note: row.get(5)?,
         skills: row.get(6)?,
@@ -749,7 +752,7 @@ fn validate_extra_prompt_files(files: Vec<String>) -> AppResult<Vec<String>> {
     Ok(stored)
 }
 
-/// Normalize a Session Directory override: an empty input restores the `__sessions`
+/// Normalize a Session Directory override: an empty input restores the `.sessions`
 /// default, otherwise the value is normalized like any other custom dir.
 fn normalize_sessions_dir(dir: &str) -> String {
     let trimmed = dir.trim();
@@ -835,7 +838,7 @@ fn prompt_file_stems() -> Vec<String> {
 fn git_base_folder_from_row(row: &Row<'_>) -> rusqlite::Result<GitBaseFolder> {
     Ok(GitBaseFolder {
         id: row.get(0)?,
-        path: row.get(1)?,
+        path: paths::collapse_home(&row.get::<_, String>(1)?),
         added_at: row.get(2)?,
     })
 }

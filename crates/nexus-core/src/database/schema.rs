@@ -122,7 +122,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             path TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'active'
                 CHECK (status IN ('active', 'stale', 'hidden')),
-            sessions_dir TEXT NOT NULL DEFAULT '__sessions',
+            sessions_dir TEXT NOT NULL DEFAULT '.sessions',
             custom_skills_dirs TEXT NOT NULL DEFAULT 'skills',
             extra_prompt_files TEXT NOT NULL DEFAULT '',
             sort_index INTEGER,

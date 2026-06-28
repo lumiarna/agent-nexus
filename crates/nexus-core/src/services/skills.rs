@@ -153,16 +153,15 @@ impl SkillService {
             let Some(skill) = agent.skill else {
                 continue;
             };
-            if let Some(dir) = expand_home(skill.global_dir) {
-                sources.extend(discover_skill_sources(
-                    agent.name,
-                    SOURCE_KIND_AGENT,
-                    "global",
-                    None,
-                    None,
-                    &dir,
-                )?);
-            }
+            let dir = paths::resolve_local_path(skill.global_dir)?;
+            sources.extend(discover_skill_sources(
+                agent.name,
+                SOURCE_KIND_AGENT,
+                "global",
+                None,
+                None,
+                &dir,
+            )?);
         }
 
         for project in &projects {
@@ -184,7 +183,7 @@ impl SkillService {
             // Project custom skills dirs: extra Project custom sources with no Agent
             // owner. They are scanned in addition to the fixed Agent dirs above.
             for custom_dir in &project.custom_dirs {
-                let dir = resolve_custom_dir(&project.path, custom_dir);
+                let dir = resolve_custom_dir(&project.path, custom_dir)?;
                 sources.extend(discover_skill_sources(
                     "",
                     SOURCE_KIND_PROJECT_CUSTOM,
@@ -542,14 +541,13 @@ fn discover_skill_sources(
 
 /// Resolve a Project custom skills dir against the Project root. Absolute paths and
 /// `~`-prefixed paths are used as-is; relative paths join the Project root.
-fn resolve_custom_dir(project_root: &Path, dir: &str) -> PathBuf {
+fn resolve_custom_dir(project_root: &Path, dir: &str) -> AppResult<PathBuf> {
     let trimmed = dir.trim();
-    if let Some(expanded) = expand_home(trimmed) {
-        if expanded.is_absolute() {
-            return expanded;
-        }
+    let resolved = paths::resolve_local_path(trimmed)?;
+    if resolved.is_absolute() {
+        return Ok(resolved);
     }
-    project_root.join(trimmed)
+    Ok(project_root.join(trimmed))
 }
 
 fn read_skill_metadata(skill_dir: &Path) -> AppResult<SkillMetadata> {
@@ -650,7 +648,9 @@ fn target_path_for_parts(
     // A Project custom skill propagates to each Agent's *global* skills dir as a
     // managed Global placement, even though its scope stays `project`.
     if scope == "global" || source_kind == SOURCE_KIND_PROJECT_CUSTOM {
-        return Ok(expand_home(skill.global_dir).map(|dir| dir.join(dir_name)));
+        return Ok(Some(
+            paths::resolve_local_path(skill.global_dir)?.join(dir_name),
+        ));
     }
 
     let Some(project_path) = project_path else {
@@ -668,19 +668,11 @@ fn skill_from_row(row: &Row<'_>, conn: &rusqlite::Connection) -> rusqlite::Resul
         scope: row.get(2)?,
         project_id: row.get(3)?,
         desc: row.get(4)?,
-        path: row.get(5)?,
+        path: paths::collapse_home(&row.get::<_, String>(5)?),
         disabled: row.get::<_, i64>(6)? != 0,
         source_kind: row.get(7)?,
         source_agent: row.get(8)?,
     })
-}
-
-fn expand_home(path: &str) -> Option<PathBuf> {
-    if let Some(rest) = path.strip_prefix("~/") {
-        return paths::home_dir().map(|home| home.join(rest));
-    }
-
-    Some(PathBuf::from(path))
 }
 
 fn skill_dir_name(path: &Path) -> AppResult<String> {

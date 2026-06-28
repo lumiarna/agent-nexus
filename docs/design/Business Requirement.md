@@ -139,7 +139,7 @@
 ### Session
 
 - 对于每个 Project，生成系统托管的 Session Backup Copy Task
-  - Source：`Local {{project_dir}}/__sessions/`
+  - Source：`Local {{project_dir}}/.sessions/`
   - Target：`Cloud Session/{{project_key}}/`
   - Schedule 默认值：`0 * * * *`，允许逐 Task 调整
 - Session Backup 在 System-managed records 中复用 Task Group UI，支持 Run、Run Group、Schedule；不支持修改 Source/Target/Action、新增、删除或拖拽排序

@@ -9,7 +9,7 @@ test("maps backend Session Backup tasks into a system-managed Task Group", () =>
     direction: "Push" as const,
     action: "Copy" as const,
     sourceType: "Local" as const,
-    source: "/workspace/agent-nexus/__sessions/",
+    source: "/workspace/agent-nexus/.sessions/",
     targetType: "Cloud" as const,
     target: "Session/agent-nexus/",
     schedule: "0 * * * *",

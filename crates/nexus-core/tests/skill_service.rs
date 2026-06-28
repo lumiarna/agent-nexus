@@ -370,3 +370,32 @@ description: Run project tests
         .expect("read SKILL.md")
         .contains("disable-model-invocation: false"));
 }
+
+#[test]
+#[serial]
+fn scan_skills_errors_when_home_is_unset() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let skills = SkillService::new(db);
+
+    let previous_home = env::var_os("HOME");
+    let previous_userprofile = env::var_os("USERPROFILE");
+    env::remove_var("HOME");
+    env::remove_var("USERPROFILE");
+
+    let result = skills.scan_skills();
+
+    match previous_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+    match previous_userprofile {
+        Some(value) => env::set_var("USERPROFILE", value),
+        None => env::remove_var("USERPROFILE"),
+    }
+
+    let error = result.expect_err("scan should fail when '~' cannot be resolved");
+    assert!(
+        error.to_string().contains("cannot resolve '~'"),
+        "unexpected error: {error}"
+    );
+}

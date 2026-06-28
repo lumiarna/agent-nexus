@@ -217,7 +217,7 @@ fn lists_session_backup_copy_task_from_project_template() {
     assert_eq!(backup.task.source_type, "Local");
     assert_eq!(
         backup.task.source,
-        format!("{}/__sessions/", project.path.trim_end_matches('/'))
+        format!("{}/.sessions/", project.path.trim_end_matches('/'))
     );
     assert_eq!(backup.task.target_type, "Cloud");
     assert_eq!(backup.task.target, "Session/agent-nexus/");
@@ -239,7 +239,7 @@ fn project_template_does_not_reinterpret_variable_values() {
 
     assert_eq!(
         backups[0].task.source,
-        format!("{}/__sessions/", project.path.trim_end_matches('/'))
+        format!("{}/.sessions/", project.path.trim_end_matches('/'))
     );
 }
 
@@ -277,11 +277,9 @@ async fn automatically_pushes_due_session_backup_and_records_status() {
     let sync = SyncService::new(db, request_logger());
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "agent-nexus");
-    fs::create_dir_all(Path::new(&repo).join("__sessions")).expect("create sessions dir");
+    fs::create_dir_all(Path::new(&repo).join(".sessions")).expect("create sessions dir");
     fs::write(
-        Path::new(&repo)
-            .join("__sessions")
-            .join("260623-session.md"),
+        Path::new(&repo).join(".sessions").join("260623-session.md"),
         "# Session\n",
     )
     .expect("write session");
@@ -2278,7 +2276,7 @@ async fn session_backup_skips_unchanged_files_and_pushes_only_changed() {
     let sync = SyncService::new(db, request_logger());
     let root = TempDir::new().expect("create temp dir");
     let repo = git_repo(&root, "agent-nexus");
-    let sessions_dir = Path::new(&repo).join("__sessions");
+    let sessions_dir = Path::new(&repo).join(".sessions");
     fs::create_dir_all(&sessions_dir).expect("create sessions dir");
     fs::write(sessions_dir.join("a.md"), "# A\n").expect("write a");
     fs::write(sessions_dir.join("b.md"), "# B\n").expect("write b");

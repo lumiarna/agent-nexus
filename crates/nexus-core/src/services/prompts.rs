@@ -165,6 +165,7 @@ impl PromptService {
 
         for row in &mut rows {
             row.prompt.content = fs::read_to_string(&row.prompt.path)?;
+            row.prompt.path = paths::collapse_home(&row.prompt.path);
         }
         Ok(rows.into_iter().map(|row| row.prompt).collect())
     }
@@ -457,6 +458,7 @@ impl PromptService {
             .optional()?
             .ok_or_else(|| AppError::Validation("prompt was not found".to_string()))?;
         prompt.content = fs::read_to_string(&prompt.path)?;
+        prompt.path = paths::collapse_home(&prompt.path);
         Ok(prompt)
     }
 

@@ -54,7 +54,7 @@ export const projectsApi = {
   },
 
   /** Override the Project Session Directory. An empty string restores the default
-   *  `__sessions` template. Session Directory stays single-valued by design.
+   *  `.sessions` template. Session Directory stays single-valued by design.
    *  Returns the updated Project. */
   setSessionsDir(projectId: string, dir: string): Promise<Project> {
     return invokeCommand<Project>("set_project_sessions_dir", { projectId, dir });
@@ -78,7 +78,7 @@ export const projectsApi = {
   },
 
   /** Replace the default Session Directory new projects inherit. An empty string
-   *  restores the `__sessions` default. Returns the updated defaults. */
+   *  restores the `.sessions` default. Returns the updated defaults. */
   setDefaultSessionsDir(dir: string): Promise<ProjectDefaults> {
     return invokeCommand<ProjectDefaults>("set_default_sessions_dir", { dir });
   },

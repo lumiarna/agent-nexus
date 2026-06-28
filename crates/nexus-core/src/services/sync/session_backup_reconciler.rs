@@ -121,7 +121,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .expect("load task");
-        assert_eq!(source, "/workspace/agent-nexus/__sessions/");
+        assert_eq!(source, "/workspace/agent-nexus/.sessions/");
         assert_eq!(target, "Session/agent-nexus/");
         assert_eq!(schedule, SESSION_BACKUP_SCHEDULE);
     }
@@ -143,7 +143,7 @@ mod tests {
                     schedule, last_status, created_at, updated_at
                  )
                  VALUES (
-                    'session-backup:missing', ?1, 'Push', 'Copy', 'Local', '/missing/__sessions/',
+                    'session-backup:missing', ?1, 'Push', 'Copy', 'Local', '/missing/.sessions/',
                     'Cloud', 'Session/missing/', ?2, 'never', 0, 0
                  )",
                 params![SESSION_BACKUP_GROUP_ID, SESSION_BACKUP_SCHEDULE],

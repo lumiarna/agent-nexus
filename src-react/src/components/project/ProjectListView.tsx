@@ -508,7 +508,7 @@ export function ProjectListView({
         busy={setDefaultSessionsDir.isPending}
         messages={{
           set: (canonical) => `Default session dir set · ${canonical}`,
-          cleared: "Default session dir restored to __sessions",
+          cleared: "Default session dir restored to .sessions",
         }}
         help={
           <>

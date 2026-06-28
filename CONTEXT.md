@@ -183,7 +183,7 @@ _Avoid_: Generic symlink task, manual sync relation
 _Avoid_: Prompt sync config editor
 
 **Session Backup**:
-围绕 `Session` 归档建立的系统托管 `Sync` 类型。每个 `Project` 默认物化一个 Copy Task：Source `Local {{project_dir}}/__sessions/`、Target `Cloud Session/{{project_key}}/`、Schedule `0 * * * *`。Source、Target 与 Action 由系统维护；Schedule 首次采用默认值，之后允许用户逐 Task 调整。UI 复用 Task Group，可运行单 Task 或 Run Group，但不允许新增、删除或排序系统 Task。它负责把本地 `Session` 目录归档到 Cloud，而不是管理会话内容本身。
+围绕 `Session` 归档建立的系统托管 `Sync` 类型。每个 `Project` 默认物化一个 Copy Task：Source `Local {{project_dir}}/.sessions/`、Target `Cloud Session/{{project_key}}/`、Schedule `0 * * * *`。Source、Target 与 Action 由系统维护；Schedule 首次采用默认值，之后允许用户逐 Task 调整。UI 复用 Task Group，可运行单 Task 或 Run Group，但不允许新增、删除或排序系统 Task。它负责把本地 `Session` 目录归档到 Cloud，而不是管理会话内容本身。
 _Avoid_: Session viewer, session search
 
 **Push**:
@@ -205,7 +205,7 @@ _Avoid_: Cloud cache, merged archive
 _Avoid_: Local session, mixed source view
 
 **Session Directory**:
-一个 `Project` 的本地会话目录。默认模板是 `{{project_dir}}/__sessions/`，可被 project-level override 覆写为单值字符串。每个 `Project` 始终只有一个 `Session Directory`——这是有意识的约束,不是 MVP 临时限制:Session 是 `Archivable Content`,没有 Distributable Asset 那样的"独立 source"概念可对应,多 dir 不会带来新的可观测维度,只会增加合并扫描的歧义;UI 编辑入口仅在 Project 详情 Session card 暴露。
+一个 `Project` 的本地会话目录。默认模板是 `{{project_dir}}/.sessions/`，可被 project-level override 覆写为单值字符串。每个 `Project` 始终只有一个 `Session Directory`——这是有意识的约束,不是 MVP 临时限制:Session 是 `Archivable Content`,没有 Distributable Asset 那样的"独立 source"概念可对应,多 dir 不会带来新的可观测维度,只会增加合并扫描的歧义;UI 编辑入口仅在 Project 详情 Session card 暴露。
 _Avoid_: Multi-root session source, fixed hardcoded path, session source vector
 
 ## Boundaries
