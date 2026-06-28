@@ -28,6 +28,7 @@ use crate::{
 
 use super::{
     file_state::{FileState, FileStateMap},
+    local_copy::LocalCopy,
     normalize_webdav_settings, read_webdav_settings,
     session_backup_reconciler::SessionBackupReconciler,
     CreateTaskGroupInput, CreateTaskInput, SessionBackup, Task, TaskGroup, WebdavSettings,
@@ -625,7 +626,7 @@ impl TaskLifecycle {
                     let conn = self.db.connection()?;
                     FileState::load(&conn, &task.id)?
                 };
-                copy_local_to_local(task, &file_states)?;
+                LocalCopy::run(task, &file_states)?;
                 let source = resolve_local_path(&task.source)?;
                 let conn = self.db.connection()?;
                 FileState::record(&conn, &task.id, &source)?;
@@ -967,28 +968,6 @@ fn remote_segments(settings: &WebdavSettings, cloud_path: &str) -> AppResult<Vec
     }
 }
 
-fn copy_local_to_local(task: &Task, file_states: &FileStateMap) -> AppResult<()> {
-    let source = resolve_local_path(&task.source)?;
-    let target = resolve_local_path(&task.target)?;
-
-    if !source.exists() {
-        return Err(AppError::Validation(format!(
-            "local source does not exist: {}",
-            task.source
-        )));
-    }
-
-    if fs::metadata(&source)?.is_file() {
-        let rel_path = required_file_name(&source)?;
-        if !FileState::should_skip(&source, &rel_path, file_states)? {
-            copy_local_file(&source, &target)?;
-        }
-    } else {
-        copy_local_directory(&source, &target, file_states)?;
-    }
-    Ok(())
-}
-
 fn should_skip_missing_session_backup_source(task: &Task) -> AppResult<bool> {
     if !task.id.starts_with("session-backup:") || task.source_type != "Local" {
         return Ok(false);
@@ -996,54 +975,6 @@ fn should_skip_missing_session_backup_source(task: &Task) -> AppResult<bool> {
 
     let source = resolve_local_path(&task.source)?;
     Ok(!source.exists())
-}
-
-fn copy_local_directory(source: &Path, target: &Path, file_states: &FileStateMap) -> AppResult<()> {
-    let effective_target = if target.exists() && target.is_dir() {
-        let name = required_file_name(source)?;
-        target.join(name)
-    } else {
-        target.to_path_buf()
-    };
-    copy_directory_tree(source, &effective_target, file_states, source)
-}
-
-fn copy_local_file(source: &Path, target: &Path) -> AppResult<()> {
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::copy(source, target)?;
-    Ok(())
-}
-
-fn copy_directory_tree(
-    source: &Path,
-    target: &Path,
-    file_states: &FileStateMap,
-    source_root: &Path,
-) -> AppResult<()> {
-    fs::create_dir_all(target)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let path = entry.path();
-        let dest = target.join(entry.file_name());
-        let metadata = fs::metadata(&path)?;
-        if metadata.is_dir() {
-            copy_directory_tree(&path, &dest, file_states, source_root)?;
-        } else {
-            let rel_path = path
-                .strip_prefix(source_root)
-                .map_err(|_| {
-                    AppError::Internal("failed to compute relative path for copy".to_string())
-                })?
-                .to_string_lossy()
-                .replace('\\', "/");
-            if !FileState::should_skip(&path, &rel_path, file_states)? {
-                copy_local_file(&path, &dest)?;
-            }
-        }
-    }
-    Ok(())
 }
 
 fn required_file_name(path: &Path) -> AppResult<String> {

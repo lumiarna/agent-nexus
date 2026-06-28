@@ -1,6 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 mod file_state;
+mod local_copy;
 mod session_backup_reconciler;
 mod task_lifecycle;
 
