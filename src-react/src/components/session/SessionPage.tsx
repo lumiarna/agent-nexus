@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dot, Input } from "@/components/ui/primitives";
 import { Chip, Segmented } from "@/components/ui/segmented";
+import { Markdown } from "@/components/ui/markdown";
 import { useNav } from "@/lib/nav";
 import { useProjectsQuery } from "@/lib/query/projects";
 import {
@@ -341,12 +342,18 @@ export function SessionPage() {
                 granularity; Archive and Pull are separate one-way tasks.
               </div>
 
-              <div className="mt-[18px] whitespace-pre-wrap rounded-[14px] border border-nexus-panel bg-[#f8f3ea] px-[22px] py-5 font-mono text-[12px] leading-[1.7] text-[#4a4138]">
-                {previewError
-                  ? `Session preview failed: ${previewError}`
-                  : isPreviewLoading
-                    ? "Loading session preview..."
-                    : previewBody}
+              <div className="mt-[18px] rounded-[14px] border border-nexus-panel bg-nexus-card px-[22px] py-5">
+                {previewError ? (
+                  <div className="font-mono text-[12px] leading-[1.7] text-nexus-crit">
+                    Session preview failed: {previewError}
+                  </div>
+                ) : isPreviewLoading ? (
+                  <div className="font-mono text-[12px] leading-[1.7] text-[#9a8f80]">
+                    Loading session preview...
+                  </div>
+                ) : (
+                  <Markdown>{previewBody}</Markdown>
+                )}
               </div>
             </div>
           ) : (
