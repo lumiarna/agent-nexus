@@ -327,6 +327,66 @@ async fn scan_cloud_sessions_returns_empty_when_remote_directory_is_missing() {
     assert!(requests[0].starts_with("PROPFIND"));
 }
 
+#[test]
+fn scan_local_sessions_reflects_a_changed_session_dir() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sessions = SessionService::new(db, request_logger());
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "agent-nexus");
+    let project = projects
+        .record_project(repo.clone())
+        .expect("record project");
+
+    // Default `.sessions` holds one file; a custom `notes` dir holds another.
+    let default_dir = Path::new(&repo).join(".sessions");
+    fs::create_dir_all(&default_dir).expect("create default session dir");
+    fs::write(default_dir.join("default.md"), "# Default\n").expect("write default session");
+    let custom_dir = Path::new(&repo).join("notes");
+    fs::create_dir_all(&custom_dir).expect("create custom session dir");
+    fs::write(custom_dir.join("custom.md"), "# Custom\n").expect("write custom session");
+
+    let before = sessions.scan_local_sessions().expect("scan default dir");
+    assert_eq!(before.len(), 1);
+    assert_eq!(before[0].file, ".sessions/default.md");
+
+    // Overriding the Session Directory takes effect on the very next scan — no
+    // rebuild, no manual cache priming — the same contract as custom skills dirs.
+    projects
+        .set_project_sessions_dir(project.id.clone(), "notes".to_string())
+        .expect("override session dir");
+
+    let after = sessions.scan_local_sessions().expect("scan custom dir");
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].file, "notes/custom.md");
+}
+
+#[test]
+fn scan_local_sessions_ignores_nested_subdirectories() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sessions = SessionService::new(db, request_logger());
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "agent-nexus");
+    projects
+        .record_project(repo.clone())
+        .expect("record project");
+    let session_dir = Path::new(&repo).join(".sessions");
+    fs::create_dir_all(&session_dir).expect("create session dir");
+    fs::write(session_dir.join("top.md"), "# Top\n").expect("write top session");
+    // A stray nested directory (e.g. a misplaced build cache) carrying its own
+    // markdown must stay out of the Session listing: the Session Directory is a flat
+    // store of session files, not a tree to crawl.
+    let nested = session_dir.join(".pycache").join("deep");
+    fs::create_dir_all(&nested).expect("create nested dir");
+    fs::write(nested.join("buried.md"), "# Buried\n").expect("write buried markdown");
+
+    let rows = sessions.scan_local_sessions().expect("scan local sessions");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].file, ".sessions/top.md");
+}
+
 #[cfg(unix)]
 #[test]
 fn scan_local_sessions_does_not_follow_directory_symlinks() {

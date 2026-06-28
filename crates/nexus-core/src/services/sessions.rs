@@ -215,9 +215,7 @@ impl SessionService {
                 )));
             }
 
-            let mut files = Vec::new();
-            collect_markdown_files(&session_root, &mut files)?;
-            for file in files {
+            for file in collect_markdown_files(&session_root)? {
                 discovered.push(read_local_session_file(&root, &session_root, &file)?);
             }
         }
@@ -628,21 +626,23 @@ fn resolve_session_root(project_path: &Path, sessions_dir: &str) -> PathBuf {
     }
 }
 
-fn collect_markdown_files(dir: &Path, files: &mut Vec<PathBuf>) -> AppResult<()> {
+/// Collect the markdown session files directly under `dir`. The Session Directory is
+/// a flat store of session files, so subdirectories (and directory symlinks) are never
+/// descended into — a stray nested tree like a misplaced build cache stays out of the
+/// listing instead of being crawled.
+fn collect_markdown_files(dir: &Path) -> AppResult<Vec<PathBuf>> {
+    let mut files = Vec::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
-        let file_type = entry.file_type()?;
         let path = entry.path();
-        if file_type.is_dir() {
-            collect_markdown_files(&path, files)?;
-        } else if file_type.is_file()
+        if entry.file_type()?.is_file()
             && path.extension().and_then(|value| value.to_str()) == Some("md")
         {
             files.push(path);
         }
     }
     files.sort();
-    Ok(())
+    Ok(files)
 }
 
 fn read_session_index_text(path: &Path) -> AppResult<String> {

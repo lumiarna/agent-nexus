@@ -6,6 +6,7 @@ import { projectSymlinkKeys } from "@/lib/query/projectSymlinkInventory";
 import { promptKeys } from "@/lib/query/prompts";
 import { sessionKeys } from "@/lib/query/sessions";
 import { skillKeys } from "@/lib/query/skills";
+import { syncKeys } from "@/lib/query/sync";
 import type { Project, ProjectDefaults } from "@/types";
 
 export { createDeleteProjectMutationOptions };
@@ -111,8 +112,12 @@ export function useSetProjectSessionsDirMutation() {
       queryClient.setQueryData<Project[]>(projectKeys.all, (current) =>
         current ? current.map((p) => (p.id === project.id ? project : p)) : current,
       );
-      // The Session Directory moved — local sessions resolve from the new path.
-      await queryClient.invalidateQueries({ queryKey: sessionKeys.local });
+      // The Session Directory moved — local sessions resolve from the new path, and
+      // the Session Backup task source is re-materialized from it on next read.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: sessionKeys.local }),
+        queryClient.invalidateQueries({ queryKey: syncKeys.sessionBackups }),
+      ]);
     },
   });
 }

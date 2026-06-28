@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 mod file_state;
 mod session_backup_reconciler;
@@ -21,7 +21,6 @@ const WEBDAV_USER_SETTING: &str = "webdav_user";
 const WEBDAV_PASS_SETTING: &str = "webdav_pass";
 const WEBDAV_REMOTE_ROOT_SETTING: &str = "webdav_remote_root";
 const DEFAULT_WEBDAV_REMOTE_ROOT: &str = "agent-nexus-sync";
-const SESSION_BACKUP_SOURCE_TEMPLATE: &str = "{{project_dir}}/.sessions/";
 const SESSION_BACKUP_TARGET_TEMPLATE: &str = "Session/{{project_key}}/";
 const SESSION_BACKUP_SCHEDULE: &str = "0 * * * *";
 const SESSION_BACKUP_GROUP_ID: &str = "system:session-backup";
@@ -194,6 +193,19 @@ impl SyncService {
 
     pub fn reorder_tasks(&self, group_id: String, task_ids: Vec<String>) -> AppResult<TaskGroup> {
         self.task_lifecycle.reorder_tasks(group_id, task_ids)
+    }
+}
+
+/// Build the Session Backup Copy source for a Project: its Session Directory with a
+/// trailing slash. A relative `sessions_dir` resolves against the Project root; an
+/// absolute one stands alone — mirroring how the Session scan resolves the same dir,
+/// so the backup always follows the Project's configured Session Directory.
+fn session_backup_source(project_dir: &str, sessions_dir: &str) -> String {
+    let sessions_dir = sessions_dir.trim().trim_end_matches('/');
+    if Path::new(sessions_dir).is_absolute() {
+        format!("{sessions_dir}/")
+    } else {
+        format!("{}/{sessions_dir}/", project_dir.trim_end_matches('/'))
     }
 }
 

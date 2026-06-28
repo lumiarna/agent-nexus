@@ -163,7 +163,10 @@ mod tests {
         with_home(&home, |home| {
             let home = home.to_str().expect("utf-8 home");
             // A sibling whose name merely starts with the home string must not match.
-            assert_eq!(collapse_home(&format!("{home}x/foo")), format!("{home}x/foo"));
+            assert_eq!(
+                collapse_home(&format!("{home}x/foo")),
+                format!("{home}x/foo")
+            );
             assert_eq!(collapse_home("/opt/data"), "/opt/data");
             assert_eq!(collapse_home("~/already"), "~/already");
         });
