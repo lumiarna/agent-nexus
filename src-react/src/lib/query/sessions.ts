@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { sessionsApi } from "@/lib/api/sessions";
 import { isTauriRuntime } from "@/lib/runtime";
+import { projectKeys } from "@/lib/query/projects";
 
 export const sessionKeys = {
   local: ["sessions", "local"] as const,
@@ -11,9 +12,14 @@ export const sessionKeys = {
 };
 
 export function useLocalSessionsQuery() {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: sessionKeys.local,
-    queryFn: sessionsApi.scanLocal,
+    queryFn: async () => {
+      const sessions = await sessionsApi.scanLocal();
+      void queryClient.invalidateQueries({ queryKey: projectKeys.all });
+      return sessions;
+    },
     enabled: isTauriRuntime(),
   });
 }
@@ -27,9 +33,14 @@ export function useLocalSessionQuery(id: string | null, enabled: boolean) {
 }
 
 export function useCloudSessionsQuery() {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: sessionKeys.cloud,
-    queryFn: sessionsApi.scanCloud,
+    queryFn: async () => {
+      const sessions = await sessionsApi.scanCloud();
+      void queryClient.invalidateQueries({ queryKey: projectKeys.all });
+      return sessions;
+    },
     enabled: isTauriRuntime(),
   });
 }

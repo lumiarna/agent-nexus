@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { promptsApi, type SetPromptTargetInput } from "@/lib/api/prompts";
 import { isTauriRuntime } from "@/lib/runtime";
+import { projectKeys } from "@/lib/query/projects";
 import type { Prompt } from "@/types";
 
 export const promptKeys = {
@@ -14,9 +15,14 @@ function replacePrompt(current: Prompt[] | undefined, next: Prompt): Prompt[] {
 }
 
 export function usePromptsQuery() {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: promptKeys.all,
-    queryFn: promptsApi.scan,
+    queryFn: async () => {
+      const prompts = await promptsApi.scan();
+      void queryClient.invalidateQueries({ queryKey: projectKeys.all });
+      return prompts;
+    },
     enabled: isTauriRuntime(),
   });
 }
