@@ -16,7 +16,7 @@ use crate::{
     services::{
         cron::{cron_schedule_matches, normalize_task_schedule},
         outbound_request_log::OutboundRequestLogger,
-        paths::resolve_local_path,
+        paths::{collapse_home, resolve_local_path},
         placement::{
             create_task_link_placement, remove_created_task_link_placements,
             task_link_placement_for_task, task_link_placements_for_group, task_link_state,
@@ -181,9 +181,11 @@ impl TaskLifecycle {
                     direction: row.get(2)?,
                     action: row.get(3)?,
                     source_type: row.get(4)?,
-                    source: row.get(5)?,
+                    // Display-only: collapse `$HOME` to `~`. Execution reads tasks via
+                    // `task_from_row` (canonical) and re-resolves, so this never feeds fs ops.
+                    source: collapse_home(&row.get::<_, String>(5)?),
                     target_type: row.get(6)?,
-                    target: row.get(7)?,
+                    target: collapse_home(&row.get::<_, String>(7)?),
                     schedule: row.get(8)?,
                     last_run_at: row.get(9)?,
                     status: row.get(10)?,

@@ -226,6 +226,34 @@ fn lists_session_backup_copy_task_from_project_template() {
 }
 
 #[test]
+#[serial]
+fn session_backup_source_is_collapsed_to_tilde_for_display() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db, request_logger());
+    let root = TempDir::new().expect("create temp dir");
+    // Canonicalize so the recorded (canonical) project path lands under $HOME.
+    let home = fs::canonicalize(root.path()).expect("canonicalize home");
+
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", &home);
+    let result = (|| {
+        projects.record_project(git_repo(&root, "agent-nexus"))?;
+        sync.list_session_backups()
+    })();
+    match previous_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    let backups = result.expect("list session backups");
+    assert_eq!(backups.len(), 1);
+    // Local source under $HOME is displayed collapsed; the cloud target is relative.
+    assert_eq!(backups[0].task.source, "~/agent-nexus/.sessions/");
+    assert_eq!(backups[0].task.target, "Session/agent-nexus/");
+}
+
+#[test]
 fn project_template_does_not_reinterpret_variable_values() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
