@@ -1,4 +1,4 @@
-import type { GitBaseFolder, Project, ScanResult } from "@/types";
+import type { GitBaseFolder, Project, ProjectDefaults, ScanResult } from "@/types";
 import { invokeCommand } from "@/lib/api/tauri";
 
 export const projectsApi = {
@@ -58,5 +58,28 @@ export const projectsApi = {
    *  Returns the updated Project. */
   setSessionsDir(projectId: string, dir: string): Promise<Project> {
     return invokeCommand<Project>("set_project_sessions_dir", { projectId, dir });
+  },
+
+  /** Read the global Project Defaults applied to brand-new projects at creation. */
+  getDefaults(): Promise<ProjectDefaults> {
+    return invokeCommand<ProjectDefaults>("get_project_defaults");
+  },
+
+  /** Replace the default custom skills dirs new projects inherit. Same validation
+   *  as the per-Project setter. Returns the updated defaults. */
+  setDefaultCustomSkillsDirs(dirs: string[]): Promise<ProjectDefaults> {
+    return invokeCommand<ProjectDefaults>("set_default_custom_skills_dirs", { dirs });
+  },
+
+  /** Replace the default extra prompt files new projects inherit. Same validation
+   *  as the per-Project setter. Returns the updated defaults. */
+  setDefaultExtraPromptFiles(files: string[]): Promise<ProjectDefaults> {
+    return invokeCommand<ProjectDefaults>("set_default_extra_prompt_files", { files });
+  },
+
+  /** Replace the default Session Directory new projects inherit. An empty string
+   *  restores the `__sessions` default. Returns the updated defaults. */
+  setDefaultSessionsDir(dir: string): Promise<ProjectDefaults> {
+    return invokeCommand<ProjectDefaults>("set_default_sessions_dir", { dir });
   },
 };

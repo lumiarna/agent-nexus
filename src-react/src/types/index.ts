@@ -71,6 +71,15 @@ export interface Project {
   extraPromptFiles?: string[];
 }
 
+/** Global defaults a brand-new Project inherits at creation. A snapshot applied
+ *  once in `record_project`; editing them never retro-applies to existing projects,
+ *  which keep their own per-Project overrides. */
+export interface ProjectDefaults {
+  customSkillsDirs: string[];
+  extraPromptFiles: string[];
+  sessionsDir: string;
+}
+
 export interface GitBaseFolder {
   id: string;
   path: string;

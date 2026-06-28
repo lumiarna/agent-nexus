@@ -113,7 +113,7 @@ export function ProjectPage({ initialProjectId }: { initialProjectId?: string })
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !add.isPending) void add.submit();
               }}
-              placeholder="/Users/lumiarna/Workspace/agent-nexus"
+              placeholder="~/Workspace/agent-nexus"
               className="w-full rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055] outline-none focus:border-nexus-accent"
               autoFocus
             />

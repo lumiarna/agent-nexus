@@ -48,6 +48,59 @@ fn defaults_custom_skills_dirs_to_skills_and_replaces_with_dedup() {
 }
 
 #[test]
+fn new_project_inherits_global_project_defaults() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+    let root = TempDir::new().expect("create temp dir");
+
+    // Unset defaults match the column defaults.
+    let initial = service.get_project_defaults().expect("read defaults");
+    assert_eq!(initial.custom_skills_dirs, vec!["skills".to_string()]);
+    assert!(initial.extra_prompt_files.is_empty());
+    assert_eq!(initial.sessions_dir, "__sessions");
+
+    service
+        .set_default_custom_skills_dirs(vec![".nexus/skills".to_string()])
+        .expect("set default skills dirs");
+    service
+        .set_default_extra_prompt_files(vec!["AGENTS.local.md".to_string()])
+        .expect("set default prompt files");
+    service
+        .set_default_sessions_dir("  .sessions/  ".to_string())
+        .expect("set default sessions dir");
+
+    let recorded = service
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+    assert_eq!(recorded.custom_skills_dirs, vec![".nexus/skills".to_string()]);
+    assert_eq!(recorded.extra_prompt_files, vec!["AGENTS.local.md".to_string()]);
+    assert_eq!(recorded.sessions_dir, ".sessions");
+}
+
+#[test]
+fn project_defaults_reject_invalid_entries_and_keep_empty_list() {
+    let db = Database::open_in_memory().expect("open in-memory database");
+    let service = ProjectService::new(db.into());
+
+    // The same validation as the per-Project setters applies.
+    let skills_error = service
+        .set_default_custom_skills_dirs(vec![".claude/skills".to_string()])
+        .expect_err("agent dir must be rejected");
+    assert!(skills_error.to_string().contains("fixed agent skills dir"));
+
+    let prompt_error = service
+        .set_default_extra_prompt_files(vec!["README.md".to_string()])
+        .expect_err("non-glob prompt file must be rejected");
+    assert!(prompt_error.to_string().contains("prompt glob"));
+
+    // An explicit empty list is stored as "none", distinct from the unset default.
+    let defaults = service
+        .set_default_custom_skills_dirs(Vec::new())
+        .expect("clear default skills dirs");
+    assert!(defaults.custom_skills_dirs.is_empty());
+}
+
+#[test]
 fn rejects_custom_skills_dir_that_is_a_fixed_agent_dir() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());

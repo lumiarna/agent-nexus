@@ -6,13 +6,14 @@ import { projectSymlinkKeys } from "@/lib/query/projectSymlinkInventory";
 import { promptKeys } from "@/lib/query/prompts";
 import { sessionKeys } from "@/lib/query/sessions";
 import { skillKeys } from "@/lib/query/skills";
-import type { Project } from "@/types";
+import type { Project, ProjectDefaults } from "@/types";
 
 export { createDeleteProjectMutationOptions };
 
 export const projectKeys = {
   all: ["projects"] as const,
   gitBaseFolders: ["projects", "gitBaseFolders"] as const,
+  defaults: ["projects", "defaults"] as const,
 };
 
 export function useProjectsQuery() {
@@ -114,6 +115,46 @@ export function useSetProjectSessionsDirMutation() {
       await queryClient.invalidateQueries({ queryKey: sessionKeys.local });
     },
   });
+}
+
+export function useProjectDefaultsQuery() {
+  return useQuery({
+    queryKey: projectKeys.defaults,
+    queryFn: projectsApi.getDefaults,
+  });
+}
+
+/** Shared cache update for the three Project Defaults setters — each returns the
+ *  full updated defaults, so we just write it back to the single defaults query. */
+function useSetProjectDefaultsMutation<TVars>(
+  mutationFn: (vars: TVars) => Promise<ProjectDefaults>,
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn,
+    onSuccess: (defaults: ProjectDefaults) => {
+      queryClient.setQueryData<ProjectDefaults>(projectKeys.defaults, defaults);
+    },
+  });
+}
+
+export function useSetDefaultCustomSkillsDirsMutation() {
+  return useSetProjectDefaultsMutation((dirs: string[]) =>
+    projectsApi.setDefaultCustomSkillsDirs(dirs),
+  );
+}
+
+export function useSetDefaultExtraPromptFilesMutation() {
+  return useSetProjectDefaultsMutation((files: string[]) =>
+    projectsApi.setDefaultExtraPromptFiles(files),
+  );
+}
+
+export function useSetDefaultSessionsDirMutation() {
+  return useSetProjectDefaultsMutation((dir: string) =>
+    projectsApi.setDefaultSessionsDir(dir),
+  );
 }
 
 export function useGitBaseFoldersQuery() {

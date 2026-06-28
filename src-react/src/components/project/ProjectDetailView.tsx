@@ -28,6 +28,11 @@ import {
 import { useSessionBackupsQuery } from "@/lib/query/sync";
 import { palette, srcAgentOf, targetAgentsOf } from "@/lib/tokens";
 import type { AgentName, Project, Prompt, Skill, TaskStatus } from "@/types";
+import {
+  matchesPromptGlob,
+  renderPromptFileBadge,
+  renderSkillDirBadge,
+} from "./customSourceFields";
 import { getErrorMessage } from "./getErrorMessage";
 import { DEFAULT_SESSIONS_DIR } from "./projectShared";
 import { SingleValueConfigModal } from "./SingleValueConfigModal";
@@ -40,21 +45,6 @@ type DetailSource = "local" | "cloud";
 const PROJECT_PROMPT_AGENTS: AgentName[] = AGENTS.filter(
   (agent) => agent.projectPromptFile,
 ).map((agent) => agent.name);
-
-/** Per-agent glob an Extra Prompt File must match (e.g. `AGENTS.md` → `AGENTS*.md`). */
-const PROMPT_FILE_GLOBS = AGENTS.filter((agent) => agent.projectPromptFile).map(
-  (agent) => {
-    const file = agent.projectPromptFile as string;
-    const stem = file.replace(/\.md$/i, "");
-    return { agent: agent.name, glob: `${stem}*.md`, re: new RegExp(`^${stem}.*\\.md$`, "i") };
-  },
-);
-
-/** True when the basename of `file` matches an Agent prompt-file glob. */
-function matchesPromptGlob(file: string): boolean {
-  const base = file.trim().replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
-  return PROMPT_FILE_GLOBS.some((g) => g.re.test(base));
-}
 
 function taskStatusSummary(status: TaskStatus): { label: string; fg: string; dot: string } {
   if (status === "ok") return { label: "OK", fg: "#5f7a3e", dot: palette.good };
@@ -587,20 +577,7 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
           duplicate: "Directory already added",
         }}
         emptyHint="No custom skills dirs. Relative paths resolve against the Project root."
-        renderBadge={(dir) => {
-          const external = /^(~|\/|[A-Za-z]:[\\/])/.test(dir);
-          return (
-            <span
-              className="flex-none rounded-[5px] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em]"
-              style={{
-                color: external ? "#9a6f0a" : "#5f7a3e",
-                background: external ? "#f7eccb" : "#e9eed8",
-              }}
-            >
-              {external ? "External" : "In repo"}
-            </span>
-          );
-        }}
+        renderBadge={renderSkillDirBadge}
         help={
           <>
             Each dir is scanned for real Skill folders (containing{" "}
@@ -633,16 +610,7 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
           duplicate: "File already added",
         }}
         emptyHint="No extra prompt files. Paths resolve against the Project root."
-        renderBadge={(file) => {
-          const owner = PROMPT_FILE_GLOBS.find((g) =>
-            g.re.test(file.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? ""),
-          )?.agent;
-          return owner ? (
-            <span className="flex-none rounded-[5px] bg-[#e9eed8] px-[7px] py-0.5 text-[9.5px] font-bold uppercase tracking-[.04em] text-[#5f7a3e]">
-              {owner}
-            </span>
-          ) : null;
-        }}
+        renderBadge={renderPromptFileBadge}
         help={
           <>
             Each file&apos;s name must match an Agent prompt-file glob —{" "}

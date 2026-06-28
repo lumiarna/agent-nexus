@@ -156,8 +156,8 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
     }
   }
 
-  function toggleTrayVisible(providerId: string) {
-    setTrayVisible((current) => ({ ...current, [providerId]: !current[providerId] }));
+  function setTrayVisibility(providerId: string, visible: boolean) {
+    setTrayVisible((current) => ({ ...current, [providerId]: visible }));
   }
 
   return {
@@ -169,7 +169,7 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
     gridRef,
     handleDragEnd,
     setCardVisibility,
-    toggleTrayVisible,
+    setTrayVisibility,
     setTrayMetric,
   };
 }

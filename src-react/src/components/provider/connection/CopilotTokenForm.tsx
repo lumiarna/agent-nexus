@@ -1,22 +1,24 @@
-import { ConnectionField, ConnectionSection, useConnectionFormState } from "./shared";
+import { ConnectionField, ConnectionFields } from "./shared";
 
 export interface CopilotTokenFormProps {
-  load: () => Promise<string>;
-  onSave: (token: string) => Promise<void>;
+  value: string;
+  onChange: (token: string) => void;
 }
 
-/** Provider Connection Params editor for Copilot — a single GitHub token. */
-export function CopilotTokenForm({ load, onSave }: CopilotTokenFormProps) {
-  const { value, setValue, saving, save } = useConnectionFormState("", load, onSave);
+/**
+ * Controlled Provider Connection Params editor for Copilot — a single GitHub
+ * token. Stateless and button-less; the Configure modal commits it on Save.
+ */
+export function CopilotTokenForm({ value, onChange }: CopilotTokenFormProps) {
   return (
-    <ConnectionSection saving={saving} onSave={() => void save()}>
+    <ConnectionFields>
       <ConnectionField
         label="GitHub token"
         type="password"
         className="font-mono"
         placeholder="gho_... or ghp_..."
         value={value}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         hint={
           <>
             A Copilot-scoped GitHub token used only to read quota. Leave empty to fall back to
@@ -25,6 +27,6 @@ export function CopilotTokenForm({ load, onSave }: CopilotTokenFormProps) {
           </>
         }
       />
-    </ConnectionSection>
+    </ConnectionFields>
   );
 }

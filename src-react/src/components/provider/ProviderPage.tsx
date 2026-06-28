@@ -49,7 +49,7 @@ import { cn } from "@/lib/utils";
 import type { Provider, TrayMetric } from "@/types";
 import type { ProviderQuotaSnapshot } from "@/lib/api/providers";
 import { WindowAlignmentSection } from "./WindowAlignmentSection";
-import { connectionFormFor } from "./connection/registry";
+import { connectionEditorFor } from "./connection/registry";
 import { getErrorMessage } from "./getErrorMessage";
 import { useProviderDisplayPrefs } from "./useProviderDisplayPrefs";
 
@@ -167,6 +167,12 @@ export function ProviderPage() {
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [windowAlignTriggering, setWindowAlignTriggering] = useState(false);
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
+  // Pending edits for the open Configure modal — committed together on its single
+  // footer Save, discarded on Cancel. `null` means "untouched, use the live value".
+  const [connValue, setConnValue] = useState<unknown>(null);
+  const [connDirty, setConnDirty] = useState(false);
+  const [pendingCardVisible, setPendingCardVisible] = useState<boolean | null>(null);
+  const [pendingTrayVisible, setPendingTrayVisible] = useState<boolean | null>(null);
 
   const providerIds = useMemo(
     () => providerCatalog.map((provider) => provider.id),
@@ -210,6 +216,35 @@ export function ProviderPage() {
     setWindowAlignCron(openSchedule?.windowAlignCron ?? "");
     setWindowAlignModelId(openSchedule?.windowAlignModelId ?? null);
   }, [configId, openSchedule]);
+
+  // Load the connection params for the provider being configured and reset every
+  // pending edit whenever the modal opens on a different provider (or closes).
+  useEffect(() => {
+    setConnDirty(false);
+    setPendingCardVisible(null);
+    setPendingTrayVisible(null);
+
+    const editor = configId ? connectionEditorFor(configId) : null;
+    if (!editor) {
+      setConnValue(null);
+      return;
+    }
+
+    setConnValue(editor.empty);
+    if (!isTauriRuntime()) return;
+    let active = true;
+    editor
+      .load()
+      .then((loaded) => {
+        if (active) setConnValue(loaded);
+      })
+      .catch(() => {
+        if (active) setConnValue(editor.empty);
+      });
+    return () => {
+      active = false;
+    };
+  }, [configId]);
 
   const isAnyRefreshing =
     Object.values(quotaQueries).some((q) => q.isFetching) ||
@@ -306,7 +341,11 @@ export function ProviderPage() {
   const columns: Provider[][] = Array.from({ length: display.colCount }, () => []);
   visible.forEach((p, i) => columns[i % display.colCount].push(p));
 
-  const connectionForm = cfg ? connectionFormFor(cfg.id, { refreshProvider }) : null;
+  const connectionEditor = cfg ? connectionEditorFor(cfg.id) : null;
+  const cardVisibleNow = cfg
+    ? pendingCardVisible ?? (display.cardVisible[cfg.id] !== false)
+    : false;
+  const trayVisibleNow = cfg ? (pendingTrayVisible ?? !!display.trayVisible[cfg.id]) : false;
 
   return (
     <ScreenScroll>
@@ -559,7 +598,12 @@ export function ProviderPage() {
                 <div className="mb-3 text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
                   Connection parameters
                 </div>
-                {connectionForm ?? (
+                {connectionEditor ? (
+                  connectionEditor.render(connValue ?? connectionEditor.empty, (next) => {
+                    setConnValue(next);
+                    setConnDirty(true);
+                  })
+                ) : (
                   <div className="rounded-[12px] border border-nexus-border bg-nexus-bg px-[14px] py-[13px] text-[12px] leading-[1.5] text-[#8a7a68]">
                     No extra connection parameters needed for {cfg.name} — quota is read from the
                     existing credential source.
@@ -573,9 +617,7 @@ export function ProviderPage() {
                 </div>
                 <div className="flex flex-col gap-0.5">
                   <div
-                    onClick={() => {
-                      void display.setCardVisibility(cfg.id, display.cardVisible[cfg.id] === false);
-                    }}
+                    onClick={() => setPendingCardVisible(!cardVisibleNow)}
                     className="flex cursor-pointer items-center justify-between gap-3 rounded-[11px] px-[13px] py-[11px] hover:bg-nexus-sand"
                   >
                     <div>
@@ -586,10 +628,10 @@ export function ProviderPage() {
                         Affects this page only
                       </div>
                     </div>
-                    <Toggle checked={display.cardVisible[cfg.id] !== false} onChange={() => {}} />
+                    <Toggle checked={cardVisibleNow} onChange={() => {}} />
                   </div>
                   <div
-                    onClick={() => display.toggleTrayVisible(cfg.id)}
+                    onClick={() => setPendingTrayVisible(!trayVisibleNow)}
                     className="flex cursor-pointer items-center justify-between gap-3 rounded-[11px] px-[13px] py-[11px] hover:bg-nexus-sand"
                   >
                     <div>
@@ -600,7 +642,7 @@ export function ProviderPage() {
                         Separate surface — independent of the card above
                       </div>
                     </div>
-                    <Toggle checked={!!display.trayVisible[cfg.id]} onChange={() => {}} />
+                    <Toggle checked={trayVisibleNow} onChange={() => {}} />
                   </div>
                 </div>
                 <div className="mt-2.5 rounded-[11px] border border-nexus-border bg-nexus-bg px-[13px] py-[11px] text-[11.5px] leading-[1.5] text-[#8a7a68]">
@@ -655,7 +697,11 @@ export function ProviderPage() {
                   const n = cfg.name;
                   if (isTauriRuntime()) {
                     setScheduleSaving(true);
+                    const connectionChanged = !!connectionEditor && connDirty;
                     try {
+                      if (connectionChanged) {
+                        await connectionEditor.save(connValue);
+                      }
                       await setProviderScheduleSettings.mutateAsync({
                         providerId: cfg.id,
                         settings: {
@@ -664,12 +710,20 @@ export function ProviderPage() {
                           windowAlignModelId: cfg.id === "claude" ? windowAlignModelId : null,
                         },
                       });
+                      if (pendingCardVisible !== null) {
+                        await display.setCardVisibility(cfg.id, pendingCardVisible);
+                      }
                     } catch {
-                      toast.error("Failed to save schedule settings");
+                      toast.error("Failed to save settings");
                       setScheduleSaving(false);
                       return;
                     }
+                    if (pendingTrayVisible !== null) {
+                      display.setTrayVisibility(cfg.id, pendingTrayVisible);
+                    }
                     setScheduleSaving(false);
+                    // Re-poll quota so new connection params take effect immediately.
+                    if (connectionChanged) refreshProvider(cfg.id);
                   }
                   setConfigId(null);
                   toast(`Saved preferences for ${n}`);

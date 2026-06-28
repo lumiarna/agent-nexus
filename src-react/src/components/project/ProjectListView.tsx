@@ -19,11 +19,24 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/primitives";
 import { ScreenScroll } from "@/components/shell/screen";
-import { useReorderProjectsMutation } from "@/lib/query/projects";
+import {
+  useProjectDefaultsQuery,
+  useReorderProjectsMutation,
+  useSetDefaultCustomSkillsDirsMutation,
+  useSetDefaultExtraPromptFilesMutation,
+  useSetDefaultSessionsDirMutation,
+} from "@/lib/query/projects";
 import { cn } from "@/lib/utils";
 import type { Project } from "@/types";
+import {
+  matchesPromptGlob,
+  renderPromptFileBadge,
+  renderSkillDirBadge,
+} from "./customSourceFields";
 import { getErrorMessage } from "./getErrorMessage";
 import { DEFAULT_SESSIONS_DIR } from "./projectShared";
+import { SingleValueConfigModal } from "./SingleValueConfigModal";
+import { StringListConfigModal } from "./StringListConfigModal";
 
 // drag | key+path | skill | prompt | session | ⋯
 const LIST_COLS = "20px 1.6fr 1fr 1fr 1fr 36px";
@@ -154,9 +167,18 @@ export function ProjectListView({
   onRequestDelete,
 }: ProjectListViewProps) {
   const reorderProjects = useReorderProjectsMutation();
+  const defaultsQuery = useProjectDefaultsQuery();
+  const setDefaultSkillsDirs = useSetDefaultCustomSkillsDirsMutation();
+  const setDefaultPromptFiles = useSetDefaultExtraPromptFilesMutation();
+  const setDefaultSessionsDir = useSetDefaultSessionsDirMutation();
   const [order, setOrder] = useState<string[]>([]);
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const [skillsDefaultsOpen, setSkillsDefaultsOpen] = useState(false);
+  const [promptDefaultsOpen, setPromptDefaultsOpen] = useState(false);
+  const [sessionDefaultOpen, setSessionDefaultOpen] = useState(false);
+
+  const defaults = defaultsQuery.data;
 
   useEffect(() => {
     setOrder((current) => {
@@ -345,10 +367,158 @@ export function ProjectListView({
         </div>
       ) : null}
 
+      {/* Defaults for new projects */}
+      <Card className="mt-[18px] p-5">
+        <div className="mb-1 flex items-center gap-3">
+          <span className="text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
+            Defaults for new projects
+          </span>
+        </div>
+        <p className="mb-3 text-[11.5px] text-[#9a8f80]">
+          Applied as a snapshot when a project is first recorded. Each project can override
+          these later in its detail page; changing a default never touches existing projects.
+        </p>
+        <div className="flex flex-col gap-0.5">
+          {[
+            {
+              key: "skills",
+              label: "Custom skills dirs",
+              summary:
+                defaults && defaults.customSkillsDirs.length > 0
+                  ? defaults.customSkillsDirs.join("  ·  ")
+                  : "None",
+              onClick: () => setSkillsDefaultsOpen(true),
+            },
+            {
+              key: "prompts",
+              label: "Custom prompt files",
+              summary:
+                defaults && defaults.extraPromptFiles.length > 0
+                  ? defaults.extraPromptFiles.join("  ·  ")
+                  : "None",
+              onClick: () => setPromptDefaultsOpen(true),
+            },
+            {
+              key: "session",
+              label: "Session dir",
+              summary: defaults ? defaults.sessionsDir : DEFAULT_SESSIONS_DIR,
+              onClick: () => setSessionDefaultOpen(true),
+            },
+          ].map((row) => (
+            <button
+              key={row.key}
+              onClick={row.onClick}
+              disabled={!defaults}
+              className="grid items-center gap-3.5 rounded-[10px] p-[11px] text-left hover:bg-nexus-sand disabled:cursor-wait"
+              style={{ gridTemplateColumns: "180px 1fr auto" }}
+            >
+              <span className="text-[12.5px] font-bold text-nexus-body">{row.label}</span>
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#a99a89]">
+                {row.summary}
+              </span>
+              <span className="justify-self-end text-[11.5px] font-semibold text-nexus-accent">
+                Edit
+              </span>
+            </button>
+          ))}
+        </div>
+      </Card>
+
       <p className="mt-3.5 text-[11.5px] text-[#b3a999]">
         Project identity is the folder name — used as a stable key for cross-device merge.
         Status set is <b className="text-[#9a8f80]">active / stale / hidden</b>.
       </p>
+
+      {/* Default custom skills dirs modal */}
+      <StringListConfigModal
+        open={skillsDefaultsOpen}
+        onClose={() => setSkillsDefaultsOpen(false)}
+        title="Default custom skills dirs"
+        subtitle="Inherited by new projects as their initial custom skills dirs"
+        items={defaults?.customSkillsDirs ?? []}
+        onAdd={(dirs) => setDefaultSkillsDirs.mutateAsync(dirs)}
+        onRemove={(dirs) => setDefaultSkillsDirs.mutateAsync(dirs)}
+        placeholder="skills  ·  .nexus/skills  ·  /abs/path/to/skills"
+        addLabel="Add dir"
+        initialInput="skills"
+        busy={setDefaultSkillsDirs.isPending}
+        messages={{
+          added: (dir) => `Added default skills dir · ${dir}`,
+          removed: (dir) => `Removed default skills dir · ${dir}`,
+          duplicate: "Directory already added",
+        }}
+        emptyHint="No default skills dirs. New projects start with none."
+        renderBadge={renderSkillDirBadge}
+        help={
+          <>
+            New projects inherit this list at creation; relative paths resolve against each
+            project root. A dir that resolves to a fixed Agent project skills dir is rejected.
+            Editing this list does not change projects that already exist.
+          </>
+        }
+      />
+
+      {/* Default extra prompt files modal */}
+      <StringListConfigModal
+        open={promptDefaultsOpen}
+        onClose={() => setPromptDefaultsOpen(false)}
+        title="Default custom prompt files"
+        subtitle="Inherited by new projects as their initial extra prompt files"
+        items={defaults?.extraPromptFiles ?? []}
+        onAdd={(files) => setDefaultPromptFiles.mutateAsync(files)}
+        onRemove={(files) => setDefaultPromptFiles.mutateAsync(files)}
+        validate={(file) =>
+          matchesPromptGlob(file) ? null : "File must match AGENTS*.md or CLAUDE*.md"
+        }
+        placeholder="AGENTS.local.md  ·  docs/CLAUDE.md"
+        addLabel="Add file"
+        busy={setDefaultPromptFiles.isPending}
+        messages={{
+          added: (file) => `Added default prompt file · ${file}`,
+          removed: (file) => `Removed default prompt file · ${file}`,
+          duplicate: "File already added",
+        }}
+        emptyHint="No default prompt files. New projects start with none."
+        renderBadge={renderPromptFileBadge}
+        help={
+          <>
+            Each file&apos;s name must match an Agent prompt-file glob —{" "}
+            <span className="font-mono">AGENTS*.md</span> (Generic Agent) or{" "}
+            <span className="font-mono">CLAUDE*.md</span> (Claude Code). New projects inherit
+            this list at creation; editing it does not change projects that already exist.
+          </>
+        }
+      />
+
+      {/* Default session dir modal */}
+      <SingleValueConfigModal
+        open={sessionDefaultOpen}
+        onClose={() => setSessionDefaultOpen(false)}
+        title="Default session dir"
+        subtitle="Inherited by new projects as their initial Session Directory"
+        label="Session directory"
+        initialValue={
+          defaults && defaults.sessionsDir !== DEFAULT_SESSIONS_DIR ? defaults.sessionsDir : ""
+        }
+        placeholder={DEFAULT_SESSIONS_DIR}
+        onSubmit={async (dir) => {
+          const next = await setDefaultSessionsDir.mutateAsync(dir);
+          return next.sessionsDir;
+        }}
+        busy={setDefaultSessionsDir.isPending}
+        messages={{
+          set: (canonical) => `Default session dir set · ${canonical}`,
+          cleared: "Default session dir restored to __sessions",
+        }}
+        help={
+          <>
+            New projects inherit this Session Directory at creation; relative paths resolve
+            against each project root. Leave empty to restore the default{" "}
+            <span className="font-mono">{DEFAULT_SESSIONS_DIR}</span>. Editing it does not change
+            projects that already exist.
+          </>
+        }
+      />
 
       {/* Overflow menu */}
       {menu ? (

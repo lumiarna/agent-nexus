@@ -7,7 +7,7 @@ use std::{
 };
 
 use rusqlite::{params, OptionalExtension, Row};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
@@ -19,6 +19,16 @@ use crate::{
 
 /// Default Session Directory leaf restored when the override is cleared.
 const DEFAULT_SESSIONS_DIR: &str = "__sessions";
+
+/// Custom skills dir a new Project inherits when no global default is configured.
+/// Mirrors the `projects.custom_skills_dirs` column default so behavior is unchanged
+/// until the user edits the Project Defaults.
+const DEFAULT_CUSTOM_SKILLS_DIR: &str = "skills";
+
+/// Settings keys for the global Project Defaults applied at new-project creation.
+const DEFAULT_CUSTOM_SKILLS_DIRS_KEY: &str = "DEFAULT_CUSTOM_SKILLS_DIRS";
+const DEFAULT_EXTRA_PROMPT_FILES_KEY: &str = "DEFAULT_EXTRA_PROMPT_FILES";
+const DEFAULT_SESSIONS_DIR_KEY: &str = "DEFAULT_SESSIONS_DIR";
 
 /// Columns shared by every Project read, in the order `project_from_row` expects.
 const PROJECT_SELECT_COLUMNS: &str = r#"
@@ -74,6 +84,18 @@ pub struct DiscoveredRepo {
     pub path: String,
     pub key: String,
     pub state: String,
+}
+
+/// Global defaults a brand-new `Project` inherits at creation. They are a snapshot
+/// applied once in `record_project`; later edits never retro-apply to existing
+/// projects, which keep their own per-Project overrides. Validated by the same
+/// rules as the per-Project setters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDefaults {
+    pub custom_skills_dirs: Vec<String>,
+    pub extra_prompt_files: Vec<String>,
+    pub sessions_dir: String,
 }
 
 #[derive(Clone)]
@@ -195,15 +217,26 @@ impl ProjectService {
                 id
             }
             None => {
+                let defaults = self.read_project_defaults(&tx)?;
                 let id = Uuid::new_v4().to_string();
                 tx.execute(
                     r#"
                     INSERT INTO projects (
-                        id, name, key, path, status, sessions_dir, created_at, updated_at
+                        id, name, key, path, status,
+                        sessions_dir, custom_skills_dirs, extra_prompt_files,
+                        created_at, updated_at
                     )
-                    VALUES (?1, ?2, ?2, ?3, 'active', '__sessions', ?4, ?4)
+                    VALUES (?1, ?2, ?2, ?3, 'active', ?4, ?5, ?6, ?7, ?7)
                     "#,
-                    params![id, key, path, now],
+                    params![
+                        id,
+                        key,
+                        path,
+                        defaults.sessions_dir,
+                        defaults.custom_skills_dirs.join("\n"),
+                        defaults.extra_prompt_files.join("\n"),
+                        now,
+                    ],
                 )?;
                 id
             }
@@ -238,37 +271,7 @@ impl ProjectService {
             return Err(AppError::Validation("project id is required".to_string()));
         }
 
-        let agent_dirs: HashSet<String> = agent_capability_surfaces()
-            .iter()
-            .filter_map(|agent| {
-                agent
-                    .skill
-                    .map(|skill| normalize_custom_dir(skill.project_dir))
-            })
-            .collect();
-
-        let mut seen = HashSet::new();
-        let mut stored = Vec::new();
-        for dir in dirs {
-            let trimmed = dir.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let normalized = normalize_custom_dir(trimmed);
-            if normalized.is_empty() {
-                continue;
-            }
-            if agent_dirs.contains(&normalized) {
-                return Err(AppError::Validation(format!(
-                    "custom skills dir conflicts with a fixed agent skills dir: {normalized}"
-                )));
-            }
-            if seen.insert(normalized) {
-                stored.push(trimmed.to_string());
-            }
-        }
-
-        let value = stored.join("\n");
+        let value = validate_custom_skills_dirs(dirs)?.join("\n");
         let now = now_epoch_seconds()?;
         let conn = self.db.connection()?;
         let changed = conn.execute(
@@ -308,35 +311,7 @@ impl ProjectService {
             return Err(AppError::Validation("project id is required".to_string()));
         }
 
-        let primary_files: HashSet<String> = prompt_primary_files();
-
-        let mut seen = HashSet::new();
-        let mut stored = Vec::new();
-        for file in files {
-            let trimmed = file.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let normalized = normalize_custom_dir(trimmed);
-            if normalized.is_empty() {
-                continue;
-            }
-            if primary_files.contains(&normalized) {
-                return Err(AppError::Validation(format!(
-                    "extra prompt file collides with an auto-discovered primary prompt file: {normalized}"
-                )));
-            }
-            if !matches_prompt_glob(&normalized) {
-                return Err(AppError::Validation(format!(
-                    "extra prompt file does not match a prompt glob (AGENTS*.md / CLAUDE*.md): {trimmed}"
-                )));
-            }
-            if seen.insert(normalized) {
-                stored.push(trimmed.to_string());
-            }
-        }
-
-        let value = stored.join("\n");
+        let value = validate_extra_prompt_files(files)?.join("\n");
         let now = now_epoch_seconds()?;
         let conn = self.db.connection()?;
         let changed = conn.execute(
@@ -370,12 +345,7 @@ impl ProjectService {
             return Err(AppError::Validation("project id is required".to_string()));
         }
 
-        let trimmed = dir.trim();
-        let value = if trimmed.is_empty() {
-            DEFAULT_SESSIONS_DIR.to_string()
-        } else {
-            normalize_custom_dir(trimmed)
-        };
+        let value = normalize_sessions_dir(&dir);
 
         let now = now_epoch_seconds()?;
         let conn = self.db.connection()?;
@@ -400,6 +370,51 @@ impl ProjectService {
         )
         .optional()?
         .ok_or_else(|| AppError::Validation("project was not found".to_string()))
+    }
+
+    /// Read the global Project Defaults applied to brand-new projects. Unset list
+    /// settings fall back to their column defaults (`skills` for custom skills dirs,
+    /// none for extra prompt files); an unset session dir falls back to `__sessions`.
+    pub fn get_project_defaults(&self) -> AppResult<ProjectDefaults> {
+        let conn = self.db.connection()?;
+        Ok(read_project_defaults_from(&conn)?)
+    }
+
+    /// Replace the default custom skills dirs new projects inherit. Validated by the
+    /// same rules as the per-Project setter (dedup, reject fixed Agent dirs).
+    pub fn set_default_custom_skills_dirs(
+        &self,
+        dirs: Vec<String>,
+    ) -> AppResult<ProjectDefaults> {
+        let value = validate_custom_skills_dirs(dirs)?.join("\n");
+        let conn = self.db.connection()?;
+        write_setting(&conn, DEFAULT_CUSTOM_SKILLS_DIRS_KEY, &value)?;
+        Ok(read_project_defaults_from(&conn)?)
+    }
+
+    /// Replace the default extra prompt files new projects inherit. Validated by the
+    /// same rules as the per-Project setter (prompt glob, no primary-file collision).
+    pub fn set_default_extra_prompt_files(
+        &self,
+        files: Vec<String>,
+    ) -> AppResult<ProjectDefaults> {
+        let value = validate_extra_prompt_files(files)?.join("\n");
+        let conn = self.db.connection()?;
+        write_setting(&conn, DEFAULT_EXTRA_PROMPT_FILES_KEY, &value)?;
+        Ok(read_project_defaults_from(&conn)?)
+    }
+
+    /// Replace the default Session Directory new projects inherit. An empty input
+    /// restores the `__sessions` default.
+    pub fn set_default_sessions_dir(&self, dir: String) -> AppResult<ProjectDefaults> {
+        let value = normalize_sessions_dir(&dir);
+        let conn = self.db.connection()?;
+        write_setting(&conn, DEFAULT_SESSIONS_DIR_KEY, &value)?;
+        Ok(read_project_defaults_from(&conn)?)
+    }
+
+    fn read_project_defaults(&self, conn: &rusqlite::Connection) -> AppResult<ProjectDefaults> {
+        read_project_defaults_from(conn).map_err(Into::into)
     }
 
     pub fn record_git_base_folder(&self, path: String) -> AppResult<GitBaseFolder> {
@@ -659,6 +674,130 @@ pub(crate) fn normalize_custom_dir(dir: &str) -> String {
     let normalized = dir.trim().replace('\\', "/");
     let normalized = normalized.strip_prefix("./").unwrap_or(&normalized);
     normalized.trim_end_matches('/').to_string()
+}
+
+/// Trim, normalize, and de-duplicate a custom skills dir list, rejecting any dir
+/// that resolves to a fixed Agent project skills dir. Returns the stored entries in
+/// their original form. Shared by the per-Project setter and the Project Defaults.
+fn validate_custom_skills_dirs(dirs: Vec<String>) -> AppResult<Vec<String>> {
+    let agent_dirs: HashSet<String> = agent_capability_surfaces()
+        .iter()
+        .filter_map(|agent| {
+            agent
+                .skill
+                .map(|skill| normalize_custom_dir(skill.project_dir))
+        })
+        .collect();
+
+    let mut seen = HashSet::new();
+    let mut stored = Vec::new();
+    for dir in dirs {
+        let trimmed = dir.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let normalized = normalize_custom_dir(trimmed);
+        if normalized.is_empty() {
+            continue;
+        }
+        if agent_dirs.contains(&normalized) {
+            return Err(AppError::Validation(format!(
+                "custom skills dir conflicts with a fixed agent skills dir: {normalized}"
+            )));
+        }
+        if seen.insert(normalized) {
+            stored.push(trimmed.to_string());
+        }
+    }
+
+    Ok(stored)
+}
+
+/// Trim, normalize, and de-duplicate an extra prompt file list, rejecting files that
+/// do not match a prompt glob (`AGENTS*.md` / `CLAUDE*.md`) or collide with an
+/// auto-discovered primary prompt file. Shared by the per-Project setter and the
+/// Project Defaults.
+fn validate_extra_prompt_files(files: Vec<String>) -> AppResult<Vec<String>> {
+    let primary_files: HashSet<String> = prompt_primary_files();
+
+    let mut seen = HashSet::new();
+    let mut stored = Vec::new();
+    for file in files {
+        let trimmed = file.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let normalized = normalize_custom_dir(trimmed);
+        if normalized.is_empty() {
+            continue;
+        }
+        if primary_files.contains(&normalized) {
+            return Err(AppError::Validation(format!(
+                "extra prompt file collides with an auto-discovered primary prompt file: {normalized}"
+            )));
+        }
+        if !matches_prompt_glob(&normalized) {
+            return Err(AppError::Validation(format!(
+                "extra prompt file does not match a prompt glob (AGENTS*.md / CLAUDE*.md): {trimmed}"
+            )));
+        }
+        if seen.insert(normalized) {
+            stored.push(trimmed.to_string());
+        }
+    }
+
+    Ok(stored)
+}
+
+/// Normalize a Session Directory override: an empty input restores the `__sessions`
+/// default, otherwise the value is normalized like any other custom dir.
+fn normalize_sessions_dir(dir: &str) -> String {
+    let trimmed = dir.trim();
+    if trimmed.is_empty() {
+        DEFAULT_SESSIONS_DIR.to_string()
+    } else {
+        normalize_custom_dir(trimmed)
+    }
+}
+
+/// Read the global Project Defaults from `settings`, falling back to the same column
+/// defaults a project would otherwise get. Unset list keys distinguish from a stored
+/// empty list: no row means "inherit the column default", an empty row means "none".
+fn read_project_defaults_from(conn: &rusqlite::Connection) -> rusqlite::Result<ProjectDefaults> {
+    let custom_skills_dirs = match read_setting(conn, DEFAULT_CUSTOM_SKILLS_DIRS_KEY)? {
+        Some(value) => parse_dir_list(&value),
+        None => vec![DEFAULT_CUSTOM_SKILLS_DIR.to_string()],
+    };
+    let extra_prompt_files = read_setting(conn, DEFAULT_EXTRA_PROMPT_FILES_KEY)?
+        .map(|value| parse_dir_list(&value))
+        .unwrap_or_default();
+    let sessions_dir = read_setting(conn, DEFAULT_SESSIONS_DIR_KEY)?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_SESSIONS_DIR.to_string());
+
+    Ok(ProjectDefaults {
+        custom_skills_dirs,
+        extra_prompt_files,
+        sessions_dir,
+    })
+}
+
+fn read_setting(conn: &rusqlite::Connection, key: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![key],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+}
+
+fn write_setting(conn: &rusqlite::Connection, key: &str, value: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    )?;
+    Ok(())
 }
 
 /// The auto-discovered primary project prompt filenames (`AGENTS.md` / `CLAUDE.md`).

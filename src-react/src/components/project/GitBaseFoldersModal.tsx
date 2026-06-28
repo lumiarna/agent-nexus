@@ -41,7 +41,7 @@ export function GitBaseFoldersModal({
                   void baseFolders.add();
                 }
               }}
-              placeholder="/Users/lumiarna/Workspace"
+              placeholder="~/Workspace"
               className="min-w-0 flex-1 rounded-[10px] border border-nexus-border2 bg-nexus-sand px-3 py-[9px] font-mono text-[12px] text-[#6a6055] outline-none focus:border-nexus-accent"
             />
             <Button

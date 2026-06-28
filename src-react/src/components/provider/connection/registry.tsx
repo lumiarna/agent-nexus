@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { toast } from "sonner";
-import { providersApi } from "@/lib/api/providers";
+import { providersApi, type OpenCodeGoConnectionParams } from "@/lib/api/providers";
 import { ApiKeyForm } from "./ApiKeyForm";
 import { CopilotTokenForm } from "./CopilotTokenForm";
 import { OpenCodeGoConnectionForm } from "./OpenCodeGoConnectionForm";
@@ -30,89 +29,74 @@ const API_KEY_PROVIDER_HINTS: Record<string, ApiKeyProviderHint> = {
   },
 };
 
-export interface ConnectionContext {
-  /** Re-poll the provider's quota after its connection params change. */
-  refreshProvider: (providerId: string) => void;
-}
-
 /**
- * `providerId → connection form` registry (the front-end mirror of the back-end
- * `provider_quota_adapters()` registry). Each entry binds the form's injected
- * `load` / `onSave` to the matching Tauri command; the form components stay free
- * of provider branching and of Tauri imports.
+ * A provider's connection-parameter editor, lifted out of the form component so
+ * the Configure modal can own the value and commit every section through its one
+ * footer Save (no more per-form Save button). `load`/`save` bind to the matching
+ * Tauri command; `render` is a controlled, button-less field group.
+ *
+ * Values are erased to `unknown` at this registry boundary and re-narrowed inside
+ * each entry — the per-provider value shapes (string key vs. workspace+cookie)
+ * don't share a type, and the modal only stores/forwards the opaque value.
  *
  * Adding a provider with connection params = one new form file + one entry here.
  */
-const FIXED_FORMS: Record<string, (ctx: ConnectionContext) => ReactNode> = {
-  copilot: (ctx) => (
-    <CopilotTokenForm
-      key="copilot"
-      load={() => providersApi.getCopilotGithubToken().then((token) => token ?? "")}
-      onSave={async (token) => {
-        try {
-          await providersApi.setCopilotGithubToken(token.trim());
-        } catch {
-          toast.error("Failed to save Copilot GitHub token");
-          return;
-        }
-        toast("Saved Copilot GitHub token");
-        ctx.refreshProvider("copilot");
-      }}
-    />
-  ),
-  "opencode-go": (ctx) => (
-    <OpenCodeGoConnectionForm
-      key="opencode-go"
-      load={() => providersApi.getOpenCodeGoConnectionParams()}
-      onSave={async ({ workspaceId, authCookie }) => {
-        try {
-          await providersApi.setOpenCodeGoConnectionParams({
-            workspaceId: workspaceId.trim(),
-            authCookie: authCookie.trim(),
-          });
-        } catch {
-          toast.error("Failed to save OpenCode Go connection params");
-          return;
-        }
-        toast("Saved OpenCode Go connection params");
-        ctx.refreshProvider("opencode-go");
-      }}
-    />
-  ),
+export interface ConnectionEditor {
+  /** Value shown before `load` resolves and when no runtime/credential exists. */
+  empty: unknown;
+  /** Read the persisted value (only called inside the desktop runtime). */
+  load: () => Promise<unknown>;
+  /** Persist the edited value. */
+  save: (value: unknown) => Promise<void>;
+  /** Render the controlled fields for `value`; `onChange` reports edits. */
+  render: (value: unknown, onChange: (next: unknown) => void) => ReactNode;
+}
+
+const FIXED_EDITORS: Record<string, ConnectionEditor> = {
+  copilot: {
+    empty: "",
+    load: () => providersApi.getCopilotGithubToken().then((token) => token ?? ""),
+    save: (value) => providersApi.setCopilotGithubToken((value as string).trim()),
+    render: (value, onChange) => (
+      <CopilotTokenForm value={value as string} onChange={onChange} />
+    ),
+  },
+  "opencode-go": {
+    empty: { workspaceId: "", authCookie: "" } satisfies OpenCodeGoConnectionParams,
+    load: () => providersApi.getOpenCodeGoConnectionParams(),
+    save: (value) => {
+      const params = value as OpenCodeGoConnectionParams;
+      return providersApi.setOpenCodeGoConnectionParams({
+        workspaceId: params.workspaceId.trim(),
+        authCookie: params.authCookie.trim(),
+      });
+    },
+    render: (value, onChange) => (
+      <OpenCodeGoConnectionForm value={value as OpenCodeGoConnectionParams} onChange={onChange} />
+    ),
+  },
 };
 
 /**
- * Render the Provider Connection Params form for `providerId`, or `null` when
- * the provider needs none (pure OAuth/keychain providers such as claude/codex).
+ * Return the connection editor for `providerId`, or `null` when the provider
+ * needs none (pure OAuth/keychain providers such as claude/codex).
  */
-export function connectionFormFor(
-  providerId: string,
-  ctx: ConnectionContext,
-): ReactNode | null {
-  const fixed = FIXED_FORMS[providerId];
-  if (fixed) return fixed(ctx);
+export function connectionEditorFor(providerId: string): ConnectionEditor | null {
+  const fixed = FIXED_EDITORS[providerId];
+  if (fixed) return fixed;
 
   const hint = API_KEY_PROVIDER_HINTS[providerId];
   if (hint) {
-    return (
-      <ApiKeyForm
-        key={providerId}
-        hint={hint}
-        load={() =>
-          providersApi.getProviderConnectionParams(providerId).then((params) => params.apiKey)
-        }
-        onSave={async (apiKey) => {
-          try {
-            await providersApi.setProviderConnectionParams(providerId, { apiKey: apiKey.trim() });
-          } catch {
-            toast.error(`Failed to save ${hint.savedLabel}`);
-            return;
-          }
-          toast(`Saved ${hint.savedLabel}`);
-          ctx.refreshProvider(providerId);
-        }}
-      />
-    );
+    return {
+      empty: "",
+      load: () =>
+        providersApi.getProviderConnectionParams(providerId).then((params) => params.apiKey),
+      save: (value) =>
+        providersApi.setProviderConnectionParams(providerId, { apiKey: (value as string).trim() }),
+      render: (value, onChange) => (
+        <ApiKeyForm hint={hint} value={value as string} onChange={onChange} />
+      ),
+    };
   }
 
   return null;
