@@ -9,7 +9,7 @@ use std::{
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use time::{format_description::well_known::Rfc3339, Date, OffsetDateTime};
 
 use crate::{
     database::Database,
@@ -263,14 +263,15 @@ impl ProviderTriggerService {
                 continue;
             };
 
-            if let Some(next_allowed_at) = row
-                .runtime
-                .last_success_at
-                .and_then(|last_success_at| last_success_at.checked_add(PROVIDER_WINDOW_SECONDS))
-                .filter(|next_allowed_at| *next_allowed_at > now_epoch_seconds)
-            {
-                self.update_next_attempt_at(&row.provider_id, next_allowed_at)?;
-                continue;
+            if let Some(last_success_at) = row.runtime.last_success_at {
+                let next_allowed_at = next_window_alignment_attempt_after_success(
+                    &row.settings.window_align_cron,
+                    last_success_at,
+                )?;
+                if next_allowed_at > now_epoch_seconds {
+                    self.update_next_attempt_at(&row.provider_id, next_allowed_at)?;
+                    continue;
+                }
             }
 
             let Some(_run_guard) = self.try_begin_window_alignment(&row.provider_id)? else {
@@ -283,10 +284,10 @@ impl ProviderTriggerService {
                         &row.settings.window_align_cron,
                         now_epoch_seconds,
                     )?;
-                    let next_attempt_at = now_epoch_seconds
-                        .checked_add(PROVIDER_WINDOW_SECONDS)
-                        .map(|cooldown_at| next_anchor.max(cooldown_at))
-                        .unwrap_or(next_anchor);
+                    let next_attempt_at = next_window_alignment_attempt_after_success(
+                        &row.settings.window_align_cron,
+                        now_epoch_seconds,
+                    )?;
                     self.record_success(
                         &row.provider_id,
                         now_epoch_seconds,
@@ -740,10 +741,20 @@ fn next_runtime_for_save(
     let anchor_at =
         next_cron_occurrence_after_local(&settings.window_align_cron, now_epoch_seconds - 60)?;
     let last_success_at = existing.and_then(|row| row.runtime.last_success_at);
-    let next_attempt_at = last_success_at
-        .and_then(|last_success_at| last_success_at.checked_add(PROVIDER_WINDOW_SECONDS))
-        .map(|cooldown_at| anchor_at.max(cooldown_at))
-        .unwrap_or(anchor_at);
+    let next_attempt_at = match last_success_at {
+        Some(last_success_at) => {
+            let success_based = next_window_alignment_attempt_after_success(
+                &settings.window_align_cron,
+                last_success_at,
+            )?;
+            if success_based > now_epoch_seconds {
+                success_based
+            } else {
+                anchor_at
+            }
+        }
+        None => anchor_at,
+    };
 
     Ok(WindowAlignmentRuntime {
         anchor_at: Some(anchor_at),
@@ -782,7 +793,7 @@ fn normalize_schedule_settings(
 
     let window_align_cron = settings.window_align_cron.trim().to_string();
     if !window_align_cron.is_empty() {
-        validate_cron_schedule(&window_align_cron)?;
+        validate_daily_window_alignment_schedule(&window_align_cron)?;
     }
 
     Ok(ProviderScheduleSettings {
@@ -804,6 +815,42 @@ fn is_window_alignment_active(settings: &ProviderScheduleSettings) -> bool {
             .window_align_model_id
             .as_deref()
             .is_some_and(|model_id| !model_id.trim().is_empty())
+}
+
+fn next_window_alignment_attempt_after_success(
+    schedule: &str,
+    last_success_at: i64,
+) -> AppResult<i64> {
+    let cooldown_at = last_success_at
+        .checked_add(PROVIDER_WINDOW_SECONDS)
+        .ok_or_else(|| AppError::Validation("window alignment time overflow".to_string()))?;
+    if local_date(cooldown_at)? > local_date(last_success_at)? {
+        let next_daily_start = next_cron_occurrence_after_local(schedule, last_success_at)?;
+        Ok(next_daily_start.max(cooldown_at))
+    } else {
+        Ok(cooldown_at)
+    }
+}
+
+fn validate_daily_window_alignment_schedule(schedule: &str) -> AppResult<()> {
+    validate_cron_schedule(schedule)?;
+    let fields = schedule.split_whitespace().collect::<Vec<_>>();
+    let minute = fields[0].parse::<u8>().ok();
+    let hour = fields[1].parse::<u8>().ok();
+    if minute.is_none() || hour.is_none() || !fields[2..].iter().all(|field| *field == "*") {
+        return Err(AppError::Validation(
+            "window alignment must be a single local daily time".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn local_date(epoch_seconds: i64) -> AppResult<Date> {
+    let utc = OffsetDateTime::from_unix_timestamp(epoch_seconds)
+        .map_err(|error| AppError::Validation(format!("invalid schedule time: {error}")))?;
+    let offset = time::UtcOffset::local_offset_at(utc)
+        .map_err(|error| AppError::Internal(format!("read local timezone offset: {error}")))?;
+    Ok(utc.to_offset(offset).date())
 }
 
 fn normalize_provider_id(provider_id: &str) -> AppResult<&str> {
@@ -1190,6 +1237,18 @@ mod tests {
         ProviderTriggerService::with_runner(db, Arc::new(runner))
     }
 
+    fn next_minute_start() -> i64 {
+        let now = current_epoch_seconds();
+        now - now.rem_euclid(60) + 60
+    }
+
+    fn daily_cron_for(epoch_seconds: i64) -> String {
+        let utc = OffsetDateTime::from_unix_timestamp(epoch_seconds).expect("test timestamp");
+        let offset = time::UtcOffset::local_offset_at(utc).expect("local offset");
+        let local = utc.to_offset(offset);
+        format!("{} {} * * *", local.minute(), local.hour())
+    }
+
     #[test]
     fn default_schedule_settings_are_inactive() {
         let service = test_service(FakeRunner::default());
@@ -1270,6 +1329,8 @@ mod tests {
 
     #[tokio::test]
     async fn retryable_failure_schedules_five_minute_retry() {
+        let now = next_minute_start();
+        let schedule = daily_cron_for(now);
         let service = test_service(FakeRunner::supported_with(vec![Err(
             ProviderTriggerError::Retryable("temporary failure".to_string()),
         )]));
@@ -1278,7 +1339,7 @@ mod tests {
                 "claude",
                 ProviderScheduleSettings {
                     quota_refresh_minutes: 5,
-                    window_align_cron: "* * * * *".to_string(),
+                    window_align_cron: schedule,
                     window_align_model_id: Some("model-1".to_string()),
                     window_align_last_attempt_at: None,
                     window_align_last_status: "never".to_string(),
@@ -1287,7 +1348,6 @@ mod tests {
             )
             .expect("save schedule");
 
-        let now = current_epoch_seconds() + 60;
         service
             .run_due_window_alignment(now)
             .await
@@ -1308,6 +1368,8 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_failure_stops_automatic_retry() {
+        let now = next_minute_start();
+        let schedule = daily_cron_for(now);
         let service = test_service(FakeRunner::supported_with(vec![Err(
             ProviderTriggerError::Terminal("auth expired".to_string()),
         )]));
@@ -1316,7 +1378,7 @@ mod tests {
                 "claude",
                 ProviderScheduleSettings {
                     quota_refresh_minutes: 5,
-                    window_align_cron: "* * * * *".to_string(),
+                    window_align_cron: schedule,
                     window_align_model_id: Some("model-1".to_string()),
                     window_align_last_attempt_at: None,
                     window_align_last_status: "never".to_string(),
@@ -1325,7 +1387,6 @@ mod tests {
             )
             .expect("save schedule");
 
-        let now = current_epoch_seconds() + 60;
         service
             .run_due_window_alignment(now)
             .await
@@ -1343,6 +1404,8 @@ mod tests {
 
     #[tokio::test]
     async fn success_delays_next_attempt_until_five_hour_cooldown() {
+        let now = next_minute_start();
+        let schedule = daily_cron_for(now);
         let service = test_service(FakeRunner::supported_with(vec![Ok(
             ProviderTriggerOutcome {
                 prompt_tokens: 1,
@@ -1354,7 +1417,7 @@ mod tests {
                 "claude",
                 ProviderScheduleSettings {
                     quota_refresh_minutes: 5,
-                    window_align_cron: "* * * * *".to_string(),
+                    window_align_cron: schedule.clone(),
                     window_align_model_id: Some("model-1".to_string()),
                     window_align_last_attempt_at: None,
                     window_align_last_status: "never".to_string(),
@@ -1363,7 +1426,6 @@ mod tests {
             )
             .expect("save schedule");
 
-        let now = current_epoch_seconds() + 60;
         service
             .run_due_window_alignment(now)
             .await
@@ -1378,8 +1440,38 @@ mod tests {
         assert_eq!(row.runtime.last_status, "success");
         assert_eq!(
             row.runtime.next_attempt_at,
-            Some(now + PROVIDER_WINDOW_SECONDS)
+            Some(
+                next_window_alignment_attempt_after_success(&schedule, now).expect("next attempt")
+            )
         );
+    }
+
+    #[test]
+    fn success_that_rolls_into_tomorrow_uses_later_of_daily_start_and_cooldown() {
+        let mut success_at = next_minute_start();
+        for offset_minutes in 0..(3 * 24 * 60) {
+            let candidate = success_at + offset_minutes * 60;
+            let utc = OffsetDateTime::from_unix_timestamp(candidate).expect("test timestamp");
+            let offset = time::UtcOffset::local_offset_at(utc).expect("local offset");
+            let local = utc.to_offset(offset);
+            if local.hour() == 22 && local.minute() == 0 {
+                success_at = candidate;
+                break;
+            }
+        }
+
+        let next_attempt = next_window_alignment_attempt_after_success("0 5 * * *", success_at)
+            .expect("next attempt");
+        let cooldown_at = success_at + PROVIDER_WINDOW_SECONDS;
+        let daily_start =
+            next_cron_occurrence_after_local("0 5 * * *", success_at).expect("daily start");
+
+        assert_eq!(
+            local_date(cooldown_at).expect("cooldown date")
+                > local_date(success_at).expect("success date"),
+            true
+        );
+        assert_eq!(next_attempt, daily_start.max(cooldown_at));
     }
 
     #[tokio::test]

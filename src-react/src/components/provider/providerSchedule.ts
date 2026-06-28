@@ -1,10 +1,10 @@
 /**
  * Per-provider scheduling settings surfaced inside the ⚙️ Configure modal:
  *  - quota refresh cadence (drives the front-end react-query poll interval)
- *  - window alignment (a back-end cron that fires a minimal billable request so the
- *    rolling quota window resets on the user's schedule)
+ *  - window alignment (a daily local start time plus 5-hour cadence that fires a
+ *    minimal billable request so the rolling quota window resets predictably)
  *
- * Window alignment is active only when BOTH a cron and a model are set; leaving
+ * Window alignment is active only when BOTH a start time and a model are set; leaving
  * either blank turns it off.
  */
 
@@ -18,9 +18,12 @@ export const QUOTA_REFRESH_PRESETS: { label: string; minutes: number }[] = [
   { label: "1 hour", minutes: 60 },
 ];
 
-export const WINDOW_ALIGN_CRON_PRESETS: { label: string; expr: string }[] = [
-  { label: "05·10·15·20", expr: "0 5,10,15,20 * * *" },
-  { label: "08·13·18·23", expr: "0 8,13,18,23 * * *" },
+export const WINDOW_ALIGN_START_TIME_PRESETS: { label: string; value: string }[] = [
+  { label: "01:00", value: "01:00" },
+  { label: "02:00", value: "02:00" },
+  { label: "03:00", value: "03:00" },
+  { label: "04:00", value: "04:00" },
+  { label: "05:00", value: "05:00" },
 ];
 
 /** Quota polling is interval-natured; convert the configured minutes to react-query ms. */
@@ -31,23 +34,41 @@ export function quotaRefreshIntervalMs(minutes: number | null | undefined): numb
 
 const pad2 = (n: number) => n.toString().padStart(2, "0");
 
-/** Describe a `minute hours * * *` daily cron; otherwise stay honest about being custom/empty. */
-export function windowAlignCronHuman(expr: string): string {
-  const trimmed = expr.trim();
-  if (!trimmed) return "Add a time and model to enable window alignment.";
-  const match = /^(\d{1,2})\s+([\d,]+)\s+\*\s+\*\s+\*$/.exec(trimmed);
-  if (!match) return "Custom schedule expression.";
-  const minute = Number(match[1]);
-  if (minute > 59) return "Custom schedule expression.";
-  const hours = match[2].split(",").map(Number);
-  if (hours.some((hour) => Number.isNaN(hour) || hour > 23)) return "Custom schedule expression.";
-  const times = hours.map((hour) => `${pad2(hour)}:${pad2(minute)}`).join(" · ");
-  return `Every day at ${times}.`;
+export function windowAlignStartTimeToCron(value: string): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour > 23 || minute > 59) {
+    return "";
+  }
+  return `${minute} ${hour} * * *`;
 }
 
-/** Window alignment fires only when both a cron and a model are present. */
-export function isWindowAlignActive(cron: string, modelId: string | null | undefined): boolean {
-  return cron.trim().length > 0 && typeof modelId === "string" && modelId.trim().length > 0;
+export function windowAlignCronToStartTime(expr: string): string {
+  const match = /^(\d{1,2})\s+([\d,]+)\s+\*\s+\*\s+\*$/.exec(expr.trim());
+  if (!match) return "";
+  const minute = Number(match[1]);
+  const hour = Number(match[2].split(",")[0]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour > 23 || minute > 59) {
+    return "";
+  }
+  return `${pad2(hour)}:${pad2(minute)}`;
+}
+
+export function windowAlignStartTimeHuman(value: string): string {
+  const normalized = windowAlignCronToStartTime(windowAlignStartTimeToCron(value));
+  if (!normalized) return "Add a local first trigger time and model to enable window alignment.";
+  return `Every day starts at ${normalized} local time; later attempts follow the 5-hour window.`;
+}
+
+/** Window alignment fires only when both a start time and a model are present. */
+export function isWindowAlignActive(startTime: string, modelId: string | null | undefined): boolean {
+  return (
+    windowAlignStartTimeToCron(startTime).length > 0 &&
+    typeof modelId === "string" &&
+    modelId.trim().length > 0
+  );
 }
 
 export function windowAlignLastAttemptLabel(epochSeconds: number | null | undefined): string {

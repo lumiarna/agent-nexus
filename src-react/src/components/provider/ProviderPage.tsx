@@ -28,6 +28,8 @@ import {
   DEFAULT_QUOTA_REFRESH_MINUTES,
   QUOTA_REFRESH_PRESETS,
   quotaRefreshIntervalMs,
+  windowAlignCronToStartTime,
+  windowAlignStartTimeToCron,
 } from "@/components/provider/providerSchedule";
 import {
   fallbackAgentCapabilities,
@@ -162,7 +164,7 @@ export function ProviderPage() {
 
   const [configId, setConfigId] = useState<string | null>(null);
   const [quotaRefreshMinutes, setQuotaRefreshMinutes] = useState(DEFAULT_QUOTA_REFRESH_MINUTES);
-  const [windowAlignCron, setWindowAlignCron] = useState("");
+  const [windowAlignStartTime, setWindowAlignStartTime] = useState("");
   const [windowAlignModelId, setWindowAlignModelId] = useState<string | null>(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [windowAlignTriggering, setWindowAlignTriggering] = useState(false);
@@ -213,7 +215,7 @@ export function ProviderPage() {
   useEffect(() => {
     if (!configId) return;
     setQuotaRefreshMinutes(openSchedule?.quotaRefreshMinutes ?? DEFAULT_QUOTA_REFRESH_MINUTES);
-    setWindowAlignCron(openSchedule?.windowAlignCron ?? "");
+    setWindowAlignStartTime(windowAlignCronToStartTime(openSchedule?.windowAlignCron ?? ""));
     setWindowAlignModelId(openSchedule?.windowAlignModelId ?? null);
   }, [configId, openSchedule]);
 
@@ -674,8 +676,8 @@ export function ProviderPage() {
               <WindowAlignmentSection
                 providerName={cfg.name}
                 supported={triggerSupported}
-                cron={windowAlignCron}
-                onCronChange={setWindowAlignCron}
+                startTime={windowAlignStartTime}
+                onStartTimeChange={setWindowAlignStartTime}
                 modelId={windowAlignModelId}
                 onModelChange={setWindowAlignModelId}
                 modelOptions={modelOptions}
@@ -706,7 +708,10 @@ export function ProviderPage() {
                         providerId: cfg.id,
                         settings: {
                           quotaRefreshMinutes,
-                          windowAlignCron: cfg.id === "claude" ? windowAlignCron.trim() : "",
+                          windowAlignCron:
+                            cfg.id === "claude"
+                              ? windowAlignStartTimeToCron(windowAlignStartTime)
+                              : "",
                           windowAlignModelId: cfg.id === "claude" ? windowAlignModelId : null,
                         },
                       });

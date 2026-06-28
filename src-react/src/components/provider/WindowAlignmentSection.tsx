@@ -1,12 +1,11 @@
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/primitives";
 import { Chip } from "@/components/ui/segmented";
 import { Select } from "@/components/ui/select";
 import {
-  WINDOW_ALIGN_CRON_PRESETS,
+  WINDOW_ALIGN_START_TIME_PRESETS,
   isWindowAlignActive,
-  windowAlignCronHuman,
   windowAlignLastAttemptLabel,
+  windowAlignStartTimeHuman,
   windowAlignStatusLabel,
 } from "@/components/provider/providerSchedule";
 import type { ProviderScheduleSettings, ProviderTriggerModel } from "@/lib/api/providers";
@@ -15,8 +14,8 @@ export interface WindowAlignmentSectionProps {
   providerName: string;
   /** Whether the back-end implements window alignment for this provider. */
   supported: boolean;
-  cron: string;
-  onCronChange: (cron: string) => void;
+  startTime: string;
+  onStartTimeChange: (startTime: string) => void;
   modelId: string | null;
   onModelChange: (modelId: string | null) => void;
   modelOptions: ProviderTriggerModel[];
@@ -37,8 +36,8 @@ export interface WindowAlignmentSectionProps {
 export function WindowAlignmentSection({
   providerName,
   supported,
-  cron,
-  onCronChange,
+  startTime,
+  onStartTimeChange,
   modelId,
   onModelChange,
   modelOptions,
@@ -54,7 +53,7 @@ export function WindowAlignmentSection({
         Window alignment
       </div>
       <div className="mb-3 text-[11px] leading-[1.5] text-[#a99a89]">
-        Fire a minimal request at set times so the rolling quota window resets on your schedule.
+        Fire a minimal request from a local daily start time, then follow the 5-hour window.
         Set both a time and a model to turn it on — this makes a real, billable call.
       </div>
       {!supported ? (
@@ -65,25 +64,21 @@ export function WindowAlignmentSection({
       ) : (
         <div className="flex flex-col gap-[13px]">
           <div>
-            <Input
-              className="font-mono"
-              placeholder="0 5,10,15,20 * * *"
-              value={cron}
-              onChange={(e) => onCronChange(e.target.value)}
-            />
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {WINDOW_ALIGN_CRON_PRESETS.map((preset) => (
+            <div className="flex flex-wrap gap-1.5">
+              {WINDOW_ALIGN_START_TIME_PRESETS.map((preset) => (
                 <Chip
-                  key={preset.expr}
+                  key={preset.value}
                   mono
-                  active={cron === preset.expr}
-                  onClick={() => onCronChange(preset.expr)}
+                  active={startTime === preset.value}
+                  onClick={() => onStartTimeChange(preset.value)}
                 >
-                  {preset.expr}
+                  {preset.label}
                 </Chip>
               ))}
             </div>
-            <div className="mt-2.5 text-[11px] text-[#b3a999]">{windowAlignCronHuman(cron)}</div>
+            <div className="mt-2.5 text-[11px] text-[#b3a999]">
+              {windowAlignStartTimeHuman(startTime)}
+            </div>
           </div>
           <div className="block">
             <div className="mb-1.5 text-[12px] font-semibold text-[#6a6055]">Trigger model</div>
@@ -101,7 +96,7 @@ export function WindowAlignmentSection({
               disabled={modelsLoading}
             />
             <div className="mt-[5px] text-[11px] text-[#b3a999]">
-              {isWindowAlignActive(cron, modelId)
+              {isWindowAlignActive(startTime, modelId)
                 ? "Active — alignment fires on the schedule above."
                 : "Inactive — set both a time and a model to enable."}
             </div>

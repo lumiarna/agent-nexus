@@ -4,11 +4,13 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_QUOTA_REFRESH_MINUTES,
   QUOTA_REFRESH_PRESETS,
-  WINDOW_ALIGN_CRON_PRESETS,
+  WINDOW_ALIGN_START_TIME_PRESETS,
   isWindowAlignActive,
   quotaRefreshIntervalMs,
-  windowAlignCronHuman,
+  windowAlignCronToStartTime,
   windowAlignLastAttemptLabel,
+  windowAlignStartTimeHuman,
+  windowAlignStartTimeToCron,
   windowAlignStatusLabel,
 } from "../src/components/provider/providerSchedule.js";
 
@@ -28,32 +30,37 @@ test("quota refresh minutes convert to react-query milliseconds", () => {
   assert.equal(quotaRefreshIntervalMs(0), 60_000);
 });
 
-test("window alignment presets lead with the 05/10/15/20 schedule", () => {
-  assert.equal(WINDOW_ALIGN_CRON_PRESETS[0].expr, "0 5,10,15,20 * * *");
-});
-
-test("window alignment cron humanizes the minute-hours daily shape", () => {
-  assert.equal(
-    windowAlignCronHuman("0 5,10,15,20 * * *"),
-    "Every day at 05:00 · 10:00 · 15:00 · 20:00.",
+test("window alignment presets expose a single local first trigger time", () => {
+  assert.deepEqual(
+    WINDOW_ALIGN_START_TIME_PRESETS.map((preset) => preset.value),
+    ["01:00", "02:00", "03:00", "04:00", "05:00"],
   );
-  assert.equal(windowAlignCronHuman("0 9 * * *"), "Every day at 09:00.");
 });
 
-test("window alignment cron describes empty and custom expressions honestly", () => {
+test("window alignment converts between local first trigger time and daily cron", () => {
+  assert.equal(windowAlignStartTimeToCron("05:00"), "0 5 * * *");
+  assert.equal(windowAlignStartTimeToCron("8:30"), "30 8 * * *");
+  assert.equal(windowAlignCronToStartTime("30 8 * * *"), "08:30");
+  assert.equal(windowAlignCronToStartTime("0 5,10,15,20 * * *"), "05:00");
+});
+
+test("window alignment start time describes empty and valid values", () => {
   assert.equal(
-    windowAlignCronHuman("   "),
-    "Add a time and model to enable window alignment.",
+    windowAlignStartTimeHuman(""),
+    "Add a local first trigger time and model to enable window alignment.",
   );
-  assert.equal(windowAlignCronHuman("*/5 * * * *"), "Custom schedule expression.");
-  assert.equal(windowAlignCronHuman("0 99 * * *"), "Custom schedule expression.");
+  assert.equal(
+    windowAlignStartTimeHuman("05:00"),
+    "Every day starts at 05:00 local time; later attempts follow the 5-hour window.",
+  );
 });
 
-test("window alignment requires both a cron and a model to be active", () => {
-  assert.equal(isWindowAlignActive("0 9 * * *", "claude-haiku-4-5-20251001"), true);
+test("window alignment requires both a start time and a model to be active", () => {
+  assert.equal(isWindowAlignActive("09:00", "claude-haiku-4-5-20251001"), true);
   assert.equal(isWindowAlignActive("", "claude-haiku-4-5-20251001"), false);
-  assert.equal(isWindowAlignActive("0 9 * * *", ""), false);
-  assert.equal(isWindowAlignActive("0 9 * * *", null), false);
+  assert.equal(isWindowAlignActive("09:00", ""), false);
+  assert.equal(isWindowAlignActive("09:00", null), false);
+  assert.equal(isWindowAlignActive("25:00", "claude-haiku-4-5-20251001"), false);
 });
 
 test("window alignment last run labels show empty and known statuses", () => {

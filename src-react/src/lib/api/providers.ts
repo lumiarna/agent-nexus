@@ -44,7 +44,7 @@ export interface ProviderDisplayPreferences {
 export interface ProviderScheduleSettings {
   /** Front-end quota poll cadence, in minutes. */
   quotaRefreshMinutes: number;
-  /** Back-end window-alignment cron; "" means off. */
+  /** Back-end window-alignment daily local cron; "" means off. */
   windowAlignCron: string;
   /** Model the alignment request uses; null/"" means off. */
   windowAlignModelId: string | null;
