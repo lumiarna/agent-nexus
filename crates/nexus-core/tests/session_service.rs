@@ -254,6 +254,55 @@ async fn scans_cloud_project_session_markdown_files_from_webdav() {
 }
 
 #[tokio::test]
+async fn scans_same_local_and_cloud_session_as_one_both_source_row() {
+    let body = cloud_session_body();
+    let listing = cloud_listing(body);
+    let (url, _requests, server) = spawn_webdav_server(vec![
+        http_response("207 Multi-Status", &listing),
+        http_response("200 OK", body),
+    ]);
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db.clone(), request_logger());
+    let sessions = SessionService::new(db.clone(), request_logger());
+    let root = TempDir::new().expect("create temp dir");
+    let repo = git_repo(&root, "agent-nexus");
+    projects
+        .record_project(repo.clone())
+        .expect("record project");
+    let session_dir = Path::new(&repo).join(".sessions");
+    fs::create_dir_all(&session_dir).expect("create session dir");
+    fs::write(session_dir.join("260625-cloud.md"), body).expect("write local copy");
+    sync.save_webdav_settings(WebdavSettingsInput {
+        url,
+        user: String::new(),
+        pass: String::new(),
+        remote_root: "agent-nexus-sync".to_string(),
+    })
+    .expect("save webdav settings");
+
+    sessions.scan_local_sessions().expect("scan local sessions");
+    let cloud_rows = sessions
+        .scan_cloud_sessions()
+        .await
+        .expect("scan cloud sessions");
+    let local_rows = sessions.list_local_sessions().expect("list local sessions");
+
+    assert_eq!(local_rows.len(), 1);
+    assert_eq!(cloud_rows.len(), 1);
+    assert_eq!(local_rows[0].id, cloud_rows[0].id);
+    assert_eq!(local_rows[0].source, "both");
+    assert_eq!(cloud_rows[0].source, "both");
+    let conn = db.connection().expect("get connection");
+    let row_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM session_index", [], |row| row.get(0))
+        .expect("count indexed sessions");
+    assert_eq!(row_count, 1);
+
+    server.join().expect("join webdav server");
+}
+
+#[tokio::test]
 async fn scan_cloud_sessions_reuses_cached_metadata_for_unchanged_files() {
     let body = cloud_session_body();
     let listing = cloud_listing(body);

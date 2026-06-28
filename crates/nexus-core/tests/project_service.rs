@@ -540,8 +540,8 @@ fn deleting_project_cascades_to_skills_and_sessions() {
     )
     .expect("seed skill");
     conn.execute(
-        "INSERT INTO session_index (id, project_id, title, file_path, source, updated_at) \
-         VALUES ('se1', ?1, 'Session A', '/fake/session-a', 'local', 0)",
+        "INSERT INTO session_index (project_id, title, file_path, source, updated_at) \
+         VALUES (?1, 'Session A', '/fake/session-a', 1, 0)",
         params![recorded.id],
     )
     .expect("seed session");
@@ -571,20 +571,14 @@ fn list_projects_counts_same_local_and_cloud_session_once() {
 
     let conn = db.connection().expect("get connection");
     conn.execute(
-        "INSERT INTO session_index (id, project_id, title, file_path, source, updated_at) \
-         VALUES ('local-1', ?1, 'Session A', 'same.md', 'local', 0)",
+        "INSERT INTO session_index (project_id, title, file_path, source, updated_at) \
+         VALUES (?1, 'Session A', 'same.md', 3, 0)",
         params![recorded.id],
     )
-    .expect("seed local session");
+    .expect("seed both-source session");
     conn.execute(
-        "INSERT INTO session_index (id, project_id, title, file_path, source, updated_at) \
-         VALUES ('cloud-1', ?1, 'Session A', 'same.md', 'cloud', 0)",
-        params![recorded.id],
-    )
-    .expect("seed cloud session");
-    conn.execute(
-        "INSERT INTO session_index (id, project_id, title, file_path, source, updated_at) \
-         VALUES ('cloud-2', ?1, 'Session B', 'cloud-only.md', 'cloud', 0)",
+        "INSERT INTO session_index (project_id, title, file_path, source, updated_at) \
+         VALUES (?1, 'Session B', 'cloud-only.md', 2, 0)",
         params![recorded.id],
     )
     .expect("seed cloud-only session");

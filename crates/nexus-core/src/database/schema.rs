@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 17;
+const CURRENT_SCHEMA_VERSION: i64 = 18;
 
 /// Default Project custom skills directory — every Project scans `<root>/skills`
 /// as a Project custom source unless the user edits the list.
@@ -82,6 +82,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 17 {
             migrate_to_v17(conn)?;
         }
+        if current < 18 {
+            migrate_to_v18(conn)?;
+        }
     }
 
     Ok(())
@@ -113,7 +116,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (17);
+        INSERT INTO schema_version (version) VALUES (18);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -216,14 +219,15 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         );
 
         CREATE TABLE session_index (
-            id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL,
             title TEXT NOT NULL,
             file_path TEXT NOT NULL,
+            id TEXT GENERATED ALWAYS AS ('session:' || project_id || ':' || file_path) STORED,
             excerpt TEXT,
-            source TEXT NOT NULL CHECK (source IN ('local', 'cloud', 'both')),
+            source INTEGER NOT NULL CHECK (source IN (0, 1, 2, 3)),
             size_bytes INTEGER,
             updated_at INTEGER NOT NULL,
+            PRIMARY KEY (project_id, file_path),
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
@@ -872,6 +876,99 @@ fn migrate_to_v17(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
+fn migrate_to_v18(conn: &Connection) -> AppResult<()> {
+    // Sessions are identified by Project + relative file path. `source` is a bitmask:
+    // 1 = local, 2 = cloud, 3 = both.
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        DROP TABLE IF EXISTS session_fts;
+        CREATE TABLE session_index_v18 (
+            project_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            id TEXT GENERATED ALWAYS AS ('session:' || project_id || ':' || file_path) STORED,
+            excerpt TEXT,
+            source INTEGER NOT NULL CHECK (source IN (0, 1, 2, 3)),
+            size_bytes INTEGER,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (project_id, file_path),
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        INSERT INTO session_index_v18 (
+            project_id, title, file_path, excerpt, source, size_bytes, updated_at
+        )
+        SELECT
+            s.project_id,
+            (
+                SELECT latest.title
+                FROM session_index latest
+                WHERE latest.project_id = s.project_id
+                    AND latest.file_path = s.file_path
+                ORDER BY latest.updated_at DESC, latest.source
+                LIMIT 1
+            ) AS title,
+            s.file_path,
+            COALESCE(
+                (
+                    SELECT local.excerpt
+                    FROM session_index local
+                    WHERE local.project_id = s.project_id
+                        AND local.file_path = s.file_path
+                        AND local.source IN ('local', 'both')
+                    ORDER BY local.updated_at DESC
+                    LIMIT 1
+                ),
+                (
+                    SELECT cloud.excerpt
+                    FROM session_index cloud
+                    WHERE cloud.project_id = s.project_id
+                        AND cloud.file_path = s.file_path
+                        AND cloud.source IN ('cloud', 'both')
+                    ORDER BY cloud.updated_at DESC
+                    LIMIT 1
+                )
+            ) AS excerpt,
+            (
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM session_index local
+                    WHERE local.project_id = s.project_id
+                        AND local.file_path = s.file_path
+                        AND local.source IN ('local', 'both')
+                ) THEN 1 ELSE 0 END
+            ) + (
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM session_index cloud
+                    WHERE cloud.project_id = s.project_id
+                        AND cloud.file_path = s.file_path
+                        AND cloud.source IN ('cloud', 'both')
+                ) THEN 2 ELSE 0 END
+            ) AS source,
+            MAX(COALESCE(s.size_bytes, 0)) AS size_bytes,
+            MAX(s.updated_at) AS updated_at
+        FROM session_index s
+        GROUP BY s.project_id, s.file_path;
+        DROP TABLE session_index;
+        ALTER TABLE session_index_v18 RENAME TO session_index;
+        CREATE INDEX idx_session_index_project ON session_index(project_id);
+        CREATE INDEX idx_session_index_source ON session_index(source);
+        CREATE VIRTUAL TABLE session_fts USING fts5(
+            title, excerpt,
+            content=session_index,
+            content_rowid=rowid
+        );
+        INSERT INTO session_fts(session_fts) VALUES ('rebuild');
+        UPDATE schema_version SET version = 18;
+        COMMIT;
+        "#,
+    )
+    .inspect_err(|_| {
+        let _ = conn.execute("ROLLBACK", params![]);
+    })?;
+
+    Ok(())
+}
+
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
     if task_column_exists(conn, column)? {
         return Ok(());
@@ -948,6 +1045,16 @@ mod tests {
                 name TEXT NOT NULL,
                 canonical_path TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE session_index (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                excerpt TEXT,
+                source TEXT NOT NULL CHECK (source IN ('local', 'cloud', 'both')),
+                size_bytes INTEGER,
                 updated_at INTEGER NOT NULL
             );
             CREATE TABLE task_groups (
@@ -1079,6 +1186,73 @@ mod tests {
             .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
             .expect("read schema version");
         assert_eq!(version, 15);
+    }
+
+    #[test]
+    fn migrate_to_v18_collapses_duplicate_session_sources() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (17);
+            CREATE TABLE projects (id TEXT PRIMARY KEY);
+            INSERT INTO projects (id) VALUES ('p1');
+            CREATE TABLE session_index (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                excerpt TEXT,
+                source TEXT NOT NULL CHECK (source IN ('local', 'cloud', 'both')),
+                size_bytes INTEGER,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            CREATE VIRTUAL TABLE session_fts USING fts5(
+                title, excerpt,
+                content=session_index,
+                content_rowid=rowid
+            );
+            INSERT INTO session_index (
+                id, project_id, title, file_path, excerpt, source, size_bytes, updated_at
+            ) VALUES (
+                'local:p1:same.md', 'p1', 'Local Session', 'same.md', 'Local excerpt', 'local', 10, 1
+            );
+            INSERT INTO session_index (
+                id, project_id, title, file_path, excerpt, source, size_bytes, updated_at
+            ) VALUES (
+                'cloud:p1:same.md', 'p1', 'Cloud Session', 'same.md', 'Cloud excerpt', 'cloud', 20, 2
+            );
+            INSERT INTO session_index (
+                id, project_id, title, file_path, excerpt, source, size_bytes, updated_at
+            ) VALUES (
+                'cloud:p1:cloud-only.md', 'p1', 'Cloud Only', 'cloud-only.md', 'Only', 'cloud', 5, 3
+            );
+            "#,
+        )
+        .expect("seed v17 session schema");
+
+        migrate_to_v18(&conn).expect("migrate sessions to v18");
+
+        let row_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_index", [], |row| row.get(0))
+            .expect("count collapsed sessions");
+        assert_eq!(row_count, 2);
+        let (id, title, excerpt, source): (String, String, String, i64) = conn
+            .query_row(
+                "SELECT id, title, excerpt, source FROM session_index WHERE file_path = 'same.md'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read collapsed session");
+        assert_eq!(id, "session:p1:same.md");
+        assert_eq!(title, "Cloud Session");
+        assert_eq!(excerpt, "Local excerpt");
+        assert_eq!(source, 3);
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, 18);
     }
 
     #[test]

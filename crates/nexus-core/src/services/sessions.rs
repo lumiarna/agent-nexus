@@ -17,6 +17,8 @@ use crate::{
 };
 
 const MAX_SESSION_INDEX_BYTES: u64 = 64 * 1024;
+const LOCAL_SOURCE_BIT: i64 = 1;
+const CLOUD_SOURCE_BIT: i64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,7 +51,6 @@ struct ProjectSessionRoot {
 
 #[derive(Debug, Clone)]
 struct DiscoveredLocalSession {
-    id: String,
     title: String,
     project_id: String,
     file_path: String,
@@ -60,7 +61,6 @@ struct DiscoveredLocalSession {
 
 #[derive(Debug, Clone)]
 struct DiscoveredCloudSession {
-    id: String,
     title: String,
     project_id: String,
     file_path: String,
@@ -106,14 +106,14 @@ impl SessionService {
     }
 
     pub fn list_local_sessions(&self) -> AppResult<Vec<Session>> {
-        self.list_sessions("local")
+        self.list_sessions(LOCAL_SOURCE_BIT)
     }
 
     pub fn list_cloud_sessions(&self) -> AppResult<Vec<Session>> {
-        self.list_sessions("cloud")
+        self.list_sessions(CLOUD_SOURCE_BIT)
     }
 
-    fn list_sessions(&self, source: &str) -> AppResult<Vec<Session>> {
+    fn list_sessions(&self, source_bit: i64) -> AppResult<Vec<Session>> {
         let conn = self.db.connection()?;
         let mut stmt = conn.prepare(
             r#"
@@ -136,11 +136,11 @@ impl SessionService {
                 COALESCE(s.excerpt, '')
             FROM session_index s
             JOIN projects p ON p.id = s.project_id
-            WHERE s.source = ?1
+            WHERE (s.source & ?1) != 0
             ORDER BY s.updated_at DESC, s.title, s.file_path
             "#,
         )?;
-        let rows = stmt.query_map([source], indexed_session_from_row)?;
+        let rows = stmt.query_map([source_bit], indexed_session_from_row)?;
         let indexed = rows.collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
         drop(conn);
@@ -152,17 +152,17 @@ impl SessionService {
     }
 
     pub fn get_local_session(&self, id: String) -> AppResult<Session> {
-        let indexed = self.get_indexed_session(id, "local")?;
+        let indexed = self.get_indexed_session(id, LOCAL_SOURCE_BIT)?;
         session_with_local_body_from_indexed(indexed)
     }
 
     pub async fn get_cloud_session(&self, id: String) -> AppResult<Session> {
-        let indexed = self.get_indexed_session(id, "cloud")?;
+        let indexed = self.get_indexed_session(id, CLOUD_SOURCE_BIT)?;
         let settings = self.webdav_settings()?;
         session_with_cloud_body_from_indexed(indexed, &settings, &self.request_logger).await
     }
 
-    fn get_indexed_session(&self, id: String, source: &str) -> AppResult<IndexedSession> {
+    fn get_indexed_session(&self, id: String, source_bit: i64) -> AppResult<IndexedSession> {
         let id = id.trim();
         if id.is_empty() {
             return Err(AppError::Validation("session id is required".to_string()));
@@ -190,9 +190,9 @@ impl SessionService {
                 COALESCE(s.excerpt, '')
             FROM session_index s
             JOIN projects p ON p.id = s.project_id
-            WHERE s.id = ?1 AND s.source = ?2
+            WHERE s.id = ?1 AND (s.source & ?2) != 0
             "#,
-            params![id, source],
+            params![id, source_bit],
             indexed_session_from_row,
         )?;
         drop(conn);
@@ -230,26 +230,36 @@ impl SessionService {
 
         let mut conn = self.db.connection()?;
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM session_index WHERE source = 'local'", [])?;
+        tx.execute(
+            "UPDATE session_index SET source = source & ?1 WHERE (source & ?2) != 0",
+            params![CLOUD_SOURCE_BIT, LOCAL_SOURCE_BIT],
+        )?;
         for session in &discovered {
             tx.execute(
                 r#"
                 INSERT INTO session_index (
-                    id, project_id, title, file_path, excerpt, source, size_bytes, updated_at
+                    project_id, title, file_path, excerpt, source, size_bytes, updated_at
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, 'local', ?6, ?7)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                ON CONFLICT(project_id, file_path) DO UPDATE SET
+                    title = excluded.title,
+                    excerpt = excluded.excerpt,
+                    source = session_index.source | excluded.source,
+                    size_bytes = excluded.size_bytes,
+                    updated_at = excluded.updated_at
                 "#,
                 params![
-                    session.id,
                     session.project_id,
                     session.title,
                     session.file_path,
                     session.excerpt,
+                    LOCAL_SOURCE_BIT,
                     session.size_bytes,
                     session.updated_at,
                 ],
             )?;
         }
+        tx.execute("DELETE FROM session_index WHERE source = 0", [])?;
         tx.execute(
             "INSERT INTO session_fts(session_fts) VALUES ('rebuild')",
             [],
@@ -299,26 +309,36 @@ impl SessionService {
 
         let mut conn = self.db.connection()?;
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM session_index WHERE source = 'cloud'", [])?;
+        tx.execute(
+            "UPDATE session_index SET source = source & ?1 WHERE (source & ?2) != 0",
+            params![LOCAL_SOURCE_BIT, CLOUD_SOURCE_BIT],
+        )?;
         for session in &discovered {
             tx.execute(
                 r#"
                 INSERT INTO session_index (
-                    id, project_id, title, file_path, excerpt, source, size_bytes, updated_at
+                    project_id, title, file_path, excerpt, source, size_bytes, updated_at
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, 'cloud', ?6, ?7)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                ON CONFLICT(project_id, file_path) DO UPDATE SET
+                    title = excluded.title,
+                    excerpt = excluded.excerpt,
+                    source = session_index.source | excluded.source,
+                    size_bytes = excluded.size_bytes,
+                    updated_at = excluded.updated_at
                 "#,
                 params![
-                    session.id,
                     session.project_id,
                     session.title,
                     session.file_path,
                     session.excerpt,
+                    CLOUD_SOURCE_BIT,
                     session.size_bytes,
                     session.updated_at,
                 ],
             )?;
         }
+        tx.execute("DELETE FROM session_index WHERE source = 0", [])?;
         tx.execute(
             "INSERT INTO session_fts(session_fts) VALUES ('rebuild')",
             [],
@@ -359,7 +379,6 @@ impl SessionService {
         let mut stmt = conn.prepare(
             r#"
             SELECT
-                id,
                 project_id,
                 title,
                 file_path,
@@ -367,18 +386,17 @@ impl SessionService {
                 updated_at,
                 COALESCE(excerpt, '')
             FROM session_index
-            WHERE source = 'cloud'
+            WHERE (source & ?1) != 0
             "#,
         )?;
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map([CLOUD_SOURCE_BIT], |row| {
             Ok(DiscoveredCloudSession {
-                id: row.get(0)?,
-                project_id: row.get(1)?,
-                title: row.get(2)?,
-                file_path: row.get(3)?,
-                size_bytes: row.get(4)?,
-                updated_at: row.get(5)?,
-                excerpt: row.get(6)?,
+                project_id: row.get(0)?,
+                title: row.get(1)?,
+                file_path: row.get(2)?,
+                size_bytes: row.get(3)?,
+                updated_at: row.get(4)?,
+                excerpt: row.get(5)?,
             })
         })?;
         let mut sessions = HashMap::new();
@@ -467,6 +485,7 @@ async fn session_with_cloud_body_from_indexed(
 
 fn indexed_session_from_row(row: &Row<'_>) -> rusqlite::Result<IndexedSession> {
     let project_path: String = row.get(5)?;
+    let source_bits: i64 = row.get(11)?;
     Ok(IndexedSession {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -479,9 +498,18 @@ fn indexed_session_from_row(row: &Row<'_>) -> rusqlite::Result<IndexedSession> {
         display_file: row.get(8)?,
         size_bytes: row.get(9)?,
         updated: row.get(10)?,
-        source: row.get(11)?,
+        source: session_source_label(source_bits)?.to_string(),
         excerpt: row.get(12)?,
     })
+}
+
+fn session_source_label(source_bits: i64) -> rusqlite::Result<&'static str> {
+    match source_bits {
+        LOCAL_SOURCE_BIT => Ok("local"),
+        CLOUD_SOURCE_BIT => Ok("cloud"),
+        bits if bits == LOCAL_SOURCE_BIT | CLOUD_SOURCE_BIT => Ok("both"),
+        other => Err(rusqlite::Error::IntegralValueOutOfRange(11, other)),
+    }
 }
 
 fn read_local_session_file(
@@ -503,7 +531,6 @@ fn read_local_session_file(
         .as_secs() as i64;
 
     Ok(DiscoveredLocalSession {
-        id: format!("local:{}:{}", project.id, file_path),
         title: parsed.title,
         project_id: project.id.clone(),
         file_path,
@@ -584,7 +611,6 @@ async fn read_cloud_session_file(
         parse_session_markdown(&text, fallback_title_from_path(Path::new(&file.file_path))?);
 
     Ok(DiscoveredCloudSession {
-        id: format!("cloud:{}:{}", project.id, file.file_path),
         title: parsed.title,
         project_id: project.id.clone(),
         file_path: file.file_path,

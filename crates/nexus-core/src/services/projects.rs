@@ -39,7 +39,7 @@ const PROJECT_SELECT_COLUMNS: &str = r#"
     p.sessions_dir,
     NULL AS sessions_note,
     (SELECT COUNT(*) FROM skills WHERE project_id = p.id) AS skills,
-    (SELECT COUNT(DISTINCT file_path) FROM session_index WHERE project_id = p.id) AS sessions,
+    (SELECT COUNT(*) FROM session_index WHERE project_id = p.id) AS sessions,
     0 AS sync,
     p.key,
     p.custom_skills_dirs,
