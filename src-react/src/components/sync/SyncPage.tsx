@@ -538,9 +538,10 @@ function TaskGroupRow({
       </div>
       <div className="col-span-6 flex min-w-0 items-center gap-1.5">
         <LocationTag type={task.sourceType} />
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]" title={task.source}>
           {task.source}
         </span>
+        {task.source ? <CopyPathButton path={task.source} /> : null}
       </div>
       <div className="col-start-8 flex items-center justify-center" title={task.action}>
         <ActionBadge action={task.action} />
@@ -552,10 +553,15 @@ function TaskGroupRow({
             "overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px]",
             linkMissing ? "text-[#b55440] line-through" : "text-[#8a8073]",
           )}
-          title={linkMissing ? "Placement missing — symlink/junction was removed out-of-band" : undefined}
+          title={
+            linkMissing
+              ? `Placement missing — symlink/junction was removed out-of-band\n${task.target}`
+              : task.target
+          }
         >
           {task.target || "—"}
         </span>
+        {task.target ? <CopyPathButton path={task.target} /> : null}
       </div>
       <div className="col-span-2 flex items-center justify-end gap-[9px]">
         {status ? (
