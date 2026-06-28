@@ -561,6 +561,41 @@ fn deleting_project_cascades_to_skills_and_sessions() {
 }
 
 #[test]
+fn list_projects_counts_same_local_and_cloud_session_once() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = ProjectService::new(db.clone());
+    let root = TempDir::new().expect("create temp dir");
+    let recorded = service
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+
+    let conn = db.connection().expect("get connection");
+    conn.execute(
+        "INSERT INTO session_index (id, project_id, title, file_path, source, updated_at) \
+         VALUES ('local-1', ?1, 'Session A', 'same.md', 'local', 0)",
+        params![recorded.id],
+    )
+    .expect("seed local session");
+    conn.execute(
+        "INSERT INTO session_index (id, project_id, title, file_path, source, updated_at) \
+         VALUES ('cloud-1', ?1, 'Session A', 'same.md', 'cloud', 0)",
+        params![recorded.id],
+    )
+    .expect("seed cloud session");
+    conn.execute(
+        "INSERT INTO session_index (id, project_id, title, file_path, source, updated_at) \
+         VALUES ('cloud-2', ?1, 'Session B', 'cloud-only.md', 'cloud', 0)",
+        params![recorded.id],
+    )
+    .expect("seed cloud-only session");
+    drop(conn);
+
+    let projects = service.list_projects().expect("list projects");
+
+    assert_eq!(projects[0].sessions, 2);
+}
+
+#[test]
 fn rejects_empty_project_id_on_delete() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
