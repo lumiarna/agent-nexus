@@ -7,12 +7,13 @@ use nexus_core::{
         outbound_request_log::OutboundRequestLogger,
         provider_quota::{
             claude_code_quota_from_usage_response, codex_quota_from_usage_response,
-            copilot_quota_from_usage_response, deepseek_balance_quota_from_usage_response,
-            llm_gateway_quota_from_headers_at, minimax_token_plan_cn_quota_from_usage_response,
-            opencode_go_quota_from_html, openrouter_credits_quota_from_usage_response,
-            parse_opencode_copilot_token, parse_opencode_custom_providers,
-            parse_opencode_provider_token, ClaudeCodeUsageBucket, ClaudeCodeUsageResponse,
-            CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse, CopilotQuotaDetail,
+            codex_reset_credit_windows, copilot_quota_from_usage_response,
+            deepseek_balance_quota_from_usage_response, llm_gateway_quota_from_headers_at,
+            minimax_token_plan_cn_quota_from_usage_response, opencode_go_quota_from_html,
+            openrouter_credits_quota_from_usage_response, parse_opencode_copilot_token,
+            parse_opencode_custom_providers, parse_opencode_provider_token, ClaudeCodeUsageBucket,
+            ClaudeCodeUsageResponse, CodexRateLimit, CodexRateLimitWindow, CodexResetCredit,
+            CodexResetCreditsResponse, CodexUsageResponse, CopilotQuotaDetail,
             CopilotQuotaSnapshots, CopilotUsageResponse, DeepSeekBalanceInfo,
             DeepSeekBalanceResponse, MiniMaxTokenPlanCnModelRemain,
             MiniMaxTokenPlanCnUsageResponse, OpenRouterCreditsData, OpenRouterCreditsResponse,
@@ -420,6 +421,53 @@ fn codex_usage_drops_windows_without_used_percent() {
     assert_eq!(snapshot.windows[0].used, 70);
     assert_eq!(snapshot.primary, Some(70));
     assert_eq!(snapshot.windows[0].reset_at, None);
+}
+
+#[test]
+fn codex_reset_credits_map_available_credits_to_value_only_windows() {
+    let windows = codex_reset_credit_windows(CodexResetCreditsResponse {
+        credits: vec![
+            CodexResetCredit {
+                status: Some("available".to_string()),
+                title: Some("Full reset (Weekly + 5 hr)".to_string()),
+                expires_at: Some("2026-07-22T19:22:24.080059Z".to_string()),
+            },
+            CodexResetCredit {
+                status: Some("available".to_string()),
+                title: Some("Full reset (Weekly + 5 hr)".to_string()),
+                expires_at: Some("2026-07-15T19:22:24.080059Z".to_string()),
+            },
+            CodexResetCredit {
+                status: Some("redeemed".to_string()),
+                title: Some("Already used".to_string()),
+                expires_at: Some("2026-08-01T00:00:00Z".to_string()),
+            },
+        ],
+    });
+
+    // Redeemed credits are dropped; available ones are sorted soonest-expiry first.
+    assert_eq!(windows.len(), 2);
+    assert_eq!(windows[0].label, "Full reset (Weekly + 5 hr)");
+    assert_eq!(windows[0].value_label.as_deref(), Some("Expires Jul 15"));
+    assert!(windows[0].value_only);
+    assert_eq!(windows[0].used, 0);
+    assert_eq!(windows[0].reset_at, None);
+    assert_eq!(windows[1].value_label.as_deref(), Some("Expires Jul 22"));
+}
+
+#[test]
+fn codex_reset_credits_fall_back_when_title_or_expiry_missing() {
+    let windows = codex_reset_credit_windows(CodexResetCreditsResponse {
+        credits: vec![CodexResetCredit {
+            status: Some("available".to_string()),
+            title: None,
+            expires_at: None,
+        }],
+    });
+
+    assert_eq!(windows.len(), 1);
+    assert_eq!(windows[0].label, "Reset credit");
+    assert_eq!(windows[0].value_label.as_deref(), Some("Available"));
 }
 
 #[test]

@@ -27,7 +27,8 @@ pub use providers::{
         claude_code_quota_from_usage_response, ClaudeCodeUsageBucket, ClaudeCodeUsageResponse,
     },
     codex::{
-        codex_quota_from_usage_response, CodexRateLimit, CodexRateLimitWindow, CodexUsageResponse,
+        codex_quota_from_usage_response, codex_reset_credit_windows, CodexRateLimit,
+        CodexRateLimitWindow, CodexResetCredit, CodexResetCreditsResponse, CodexUsageResponse,
     },
     configured::{
         deepseek_balance_quota_from_usage_response,
@@ -132,6 +133,14 @@ type CodexUsageFuture<'a> = Pin<
             + 'a,
     >,
 >;
+type CodexResetCreditsFuture<'a> = Pin<
+    Box<
+        dyn Future<
+                Output = Result<providers::codex::CodexResetCreditsResponse, ProviderQuotaPollError>,
+            > + Send
+            + 'a,
+    >,
+>;
 type CopilotUsageFuture<'a> = Pin<
     Box<
         dyn Future<
@@ -192,6 +201,11 @@ pub(crate) trait ProviderUsageTransport: Send + Sync {
         access_token: &'a str,
         account_id: Option<&'a str>,
     ) -> CodexUsageFuture<'a>;
+    fn codex_reset_credits<'a>(
+        &'a self,
+        access_token: &'a str,
+        account_id: Option<&'a str>,
+    ) -> CodexResetCreditsFuture<'a>;
     fn copilot_usage<'a>(&'a self, token: &'a str) -> CopilotUsageFuture<'a>;
     fn opencode_go_page<'a>(
         &'a self,
@@ -392,6 +406,18 @@ impl ProviderUsageTransport for HttpUsageTransport {
         ))
     }
 
+    fn codex_reset_credits<'a>(
+        &'a self,
+        access_token: &'a str,
+        account_id: Option<&'a str>,
+    ) -> CodexResetCreditsFuture<'a> {
+        Box::pin(providers::codex::fetch_reset_credits(
+            access_token,
+            account_id,
+            &self.request_logger,
+        ))
+    }
+
     fn copilot_usage<'a>(&'a self, token: &'a str) -> CopilotUsageFuture<'a> {
         Box::pin(providers::copilot::fetch_usage(token, &self.request_logger))
     }
@@ -551,6 +577,14 @@ mod tests {
             Box::pin(async { unreachable!("codex usage is not part of this test") })
         }
 
+        fn codex_reset_credits<'a>(
+            &'a self,
+            _access_token: &'a str,
+            _account_id: Option<&'a str>,
+        ) -> CodexResetCreditsFuture<'a> {
+            Box::pin(async { unreachable!("codex reset credits is not part of this test") })
+        }
+
         fn copilot_usage<'a>(&'a self, _token: &'a str) -> CopilotUsageFuture<'a> {
             Box::pin(async { unreachable!("copilot usage is not part of this test") })
         }
@@ -620,6 +654,14 @@ mod tests {
             _account_id: Option<&'a str>,
         ) -> CodexUsageFuture<'a> {
             Box::pin(async { unreachable!("codex usage is not part of this test") })
+        }
+
+        fn codex_reset_credits<'a>(
+            &'a self,
+            _access_token: &'a str,
+            _account_id: Option<&'a str>,
+        ) -> CodexResetCreditsFuture<'a> {
+            Box::pin(async { unreachable!("codex reset credits is not part of this test") })
         }
 
         fn copilot_usage<'a>(&'a self, _token: &'a str) -> CopilotUsageFuture<'a> {

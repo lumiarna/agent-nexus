@@ -4,6 +4,7 @@ use std::{
 };
 
 use serde::Deserialize;
+use time::{format_description::well_known::Rfc3339, Month, OffsetDateTime, UtcOffset};
 
 use crate::{
     error::{AppError, AppResult},
@@ -22,6 +23,8 @@ use super::super::{
 
 pub(crate) const PROVIDER_ID: &str = "codex";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+const RESET_CREDITS_URL: &str = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
+const RESET_CREDIT_AVAILABLE_STATUS: &str = "available";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct CodexUsageResponse {
@@ -40,6 +43,20 @@ pub struct CodexRateLimitWindow {
     pub used_percent: Option<f64>,
     pub limit_window_seconds: Option<i64>,
     pub reset_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct CodexResetCreditsResponse {
+    #[serde(default)]
+    pub credits: Vec<CodexResetCredit>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct CodexResetCredit {
+    pub status: Option<String>,
+    pub title: Option<String>,
+    /// RFC3339 timestamp in UTC, e.g. "2026-07-15T19:22:24.080059Z".
+    pub expires_at: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -76,7 +93,10 @@ impl ProviderQuotaAdapter for CodexQuotaAdapter {
             let usage = usage_transport
                 .codex_usage(&credentials.access_token, credentials.account_id.as_deref())
                 .await;
-            derive_snapshot(credentials, usage)
+            let reset_credits = usage_transport
+                .codex_reset_credits(&credentials.access_token, credentials.account_id.as_deref())
+                .await;
+            derive_snapshot(credentials, usage, reset_credits)
         })
     }
 }
@@ -124,15 +144,95 @@ pub fn codex_quota_from_usage_response(
     }
 }
 
+/// Map the available rate-limit reset credits to value-only windows, soonest
+/// expiry first. Each credit becomes one row showing its title and expiry date;
+/// redeemed or expired credits are dropped.
+pub fn codex_reset_credit_windows(response: CodexResetCreditsResponse) -> Vec<ProviderQuotaWindow> {
+    let mut credits = response
+        .credits
+        .into_iter()
+        .filter(|credit| credit.status.as_deref() == Some(RESET_CREDIT_AVAILABLE_STATUS))
+        .collect::<Vec<_>>();
+    credits.sort_by_key(|credit| {
+        credit
+            .expires_at
+            .as_deref()
+            .and_then(parse_rfc3339)
+            .map(|expiry| expiry.unix_timestamp())
+    });
+
+    credits
+        .into_iter()
+        .map(|credit| {
+            let label = credit
+                .title
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| "Reset credit".to_string());
+            let value_label = credit
+                .expires_at
+                .as_deref()
+                .and_then(format_reset_credit_expiry)
+                .unwrap_or_else(|| "Available".to_string());
+            ProviderQuotaWindow {
+                label,
+                kind: ProviderQuotaWindowKind::Rolling,
+                used: 0,
+                value_label: Some(value_label),
+                value_only: true,
+                reset_at: None,
+                unlimited: false,
+            }
+        })
+        .collect()
+}
+
+fn parse_rfc3339(value: &str) -> Option<OffsetDateTime> {
+    OffsetDateTime::parse(value, &Rfc3339).ok()
+}
+
+fn format_reset_credit_expiry(expires_at: &str) -> Option<String> {
+    let expiry = parse_rfc3339(expires_at)?.to_offset(UtcOffset::UTC);
+    Some(format!(
+        "Expires {} {}",
+        month_abbreviation(expiry.month()),
+        expiry.day()
+    ))
+}
+
+fn month_abbreviation(month: Month) -> &'static str {
+    match month {
+        Month::January => "Jan",
+        Month::February => "Feb",
+        Month::March => "Mar",
+        Month::April => "Apr",
+        Month::May => "May",
+        Month::June => "Jun",
+        Month::July => "Jul",
+        Month::August => "Aug",
+        Month::September => "Sep",
+        Month::October => "Oct",
+        Month::November => "Nov",
+        Month::December => "Dec",
+    }
+}
+
 fn derive_snapshot(
     credentials: CodexCredentials,
     usage: Result<CodexUsageResponse, ProviderQuotaPollError>,
+    reset_credits: Result<CodexResetCreditsResponse, ProviderQuotaPollError>,
 ) -> ProviderQuotaSnapshot {
     let CodexCredentials { plan, source, .. } = credentials;
     match usage {
         Ok(response) => {
             let mut snapshot = codex_quota_from_usage_response(PROVIDER_ID, plan, response);
             snapshot.credential = Some(source);
+            // Reset credits are supplementary; a failure fetching them must not
+            // degrade an otherwise healthy usage snapshot.
+            if let Ok(reset_credits) = reset_credits {
+                snapshot
+                    .windows
+                    .extend(codex_reset_credit_windows(reset_credits));
+            }
             snapshot
         }
         Err(ProviderQuotaPollError::AuthRequired) => ProviderQuotaSnapshot {
@@ -263,8 +363,47 @@ pub(crate) async fn fetch_usage(
     account_id: Option<&str>,
     request_logger: &OutboundRequestLogger,
 ) -> Result<CodexUsageResponse, ProviderQuotaPollError> {
+    let body = codex_get(
+        USAGE_URL,
+        access_token,
+        account_id,
+        request_logger,
+        provider_quota_log_context("codex_usage", PROVIDER_ID, "GET", USAGE_URL),
+        "Codex usage endpoint",
+    )
+    .await?;
+    serde_json::from_str::<CodexUsageResponse>(&body)
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
+}
+
+pub(crate) async fn fetch_reset_credits(
+    access_token: &str,
+    account_id: Option<&str>,
+    request_logger: &OutboundRequestLogger,
+) -> Result<CodexResetCreditsResponse, ProviderQuotaPollError> {
+    let body = codex_get(
+        RESET_CREDITS_URL,
+        access_token,
+        account_id,
+        request_logger,
+        provider_quota_log_context("codex_reset_credits", PROVIDER_ID, "GET", RESET_CREDITS_URL),
+        "Codex reset-credits endpoint",
+    )
+    .await?;
+    serde_json::from_str::<CodexResetCreditsResponse>(&body)
+        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
+}
+
+async fn codex_get(
+    url: &str,
+    access_token: &str,
+    account_id: Option<&str>,
+    request_logger: &OutboundRequestLogger,
+    log_context: crate::services::outbound_request_log::OutboundRequestContext,
+    endpoint_label: &str,
+) -> Result<String, ProviderQuotaPollError> {
     let mut request = http_client()
-        .get(USAGE_URL)
+        .get(url)
         .bearer_auth(access_token)
         .header("User-Agent", "codex-cli")
         .header("Accept", "application/json");
@@ -273,10 +412,7 @@ pub(crate) async fn fetch_usage(
     }
 
     let response = request_logger
-        .send(
-            request,
-            provider_quota_log_context("codex_usage", PROVIDER_ID, "GET", USAGE_URL),
-        )
+        .send(request, log_context)
         .await
         .map_err(provider_quota_request_error)?;
 
@@ -286,15 +422,13 @@ pub(crate) async fn fetch_usage(
     }
     if !status.is_success() {
         return Err(ProviderQuotaPollError::Request(format!(
-            "Codex usage endpoint returned {status}"
+            "{endpoint_label} returned {status}"
         )));
     }
 
-    let body = response
+    response
         .text()
         .await
-        .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))?;
-    serde_json::from_str::<CodexUsageResponse>(&body)
         .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
 }
 
