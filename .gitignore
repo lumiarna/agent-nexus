@@ -1,5 +1,4 @@
 .sessions/
-__sessions/
 .agents/
 .claude/
 .codex/

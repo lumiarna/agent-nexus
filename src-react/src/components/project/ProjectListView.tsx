@@ -331,11 +331,7 @@ export function ProjectListView({
                       <AssetCell n={p.prompts} lines={p.extraPromptFiles ?? []} />
                       <AssetCell
                         n={p.sessions}
-                        lines={
-                          p.sessionsDir && p.sessionsDir !== DEFAULT_SESSIONS_DIR
-                            ? [p.sessionsDir]
-                            : []
-                        }
+                        lines={p.sessionsDir ? [p.sessionsDir] : []}
                       />
                     </>
                   )}
