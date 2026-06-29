@@ -150,8 +150,8 @@ fn gateway_quota_window(
         used: percent_to_u8(used_tokens as f64 / limit as f64 * 100.0),
         value_label: Some(format!(
             "{} / {}",
-            format_token_count_millions(used_tokens),
-            format_token_count_millions(limit)
+            format_token_count(used_tokens),
+            format_token_count(limit)
         )),
         value_only: false,
         reset_at,
@@ -172,17 +172,38 @@ fn next_natural_month_reset_at(now_epoch_seconds: i64) -> Option<String> {
     next_month.format(&Rfc3339).ok()
 }
 
-fn format_token_count_millions(value: u64) -> String {
-    let millions = value as f64 / 1_000_000.0;
-    let rounded = (millions * 100.0).round() / 100.0;
-    let mut formatted = format!("{rounded:.2}");
+/// Format a token count with automatic unit scaling.
+///
+/// - Values that are non-zero at 3-decimal "millions" precision are shown as ` Xm`.
+/// - Smaller non-zero values are shown as ` Xk`.
+/// - Zero is shown without a unit.
+/// - Trailing zeros and the decimal point are trimmed, keeping at most 3 decimals.
+fn format_token_count(value: u64) -> String {
+    const MILLION: f64 = 1_000_000.0;
+    const THOUSAND: f64 = 1_000.0;
+
+    // Threshold: 0.0005m = 500 tokens.  Values below this round to 0.000m,
+    // so use a more readable unit.
+    if value >= 500 {
+        return format!("{}m", trim_trailing_zeros(value as f64 / MILLION));
+    }
+
+    if value > 0 {
+        return format!("{}k", trim_trailing_zeros(value as f64 / THOUSAND));
+    }
+
+    value.to_string()
+}
+
+fn trim_trailing_zeros(value: f64) -> String {
+    let mut formatted = format!("{:.3}", value);
     while formatted.ends_with('0') {
         formatted.pop();
     }
     if formatted.ends_with('.') {
         formatted.pop();
     }
-    format!("{formatted}m")
+    formatted
 }
 
 pub(crate) fn percent_to_u8(value: f64) -> u8 {

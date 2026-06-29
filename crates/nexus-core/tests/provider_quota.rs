@@ -100,7 +100,7 @@ fn llm_gateway_headers_map_effective_limits_to_quota_windows() {
     assert_eq!(snapshot.windows[1].used, 1);
     assert_eq!(
         snapshot.windows[1].value_label.as_deref(),
-        Some("0.56m / 60m")
+        Some("0.562m / 60m")
     );
     assert_eq!(snapshot.windows[3].label, "Monthly limit");
     assert_eq!(snapshot.windows[3].kind, ProviderQuotaWindowKind::Monthly);
@@ -109,6 +109,31 @@ fn llm_gateway_headers_map_effective_limits_to_quota_windows() {
         snapshot.windows[3].reset_at.as_deref(),
         Some("2026-07-01T00:00:00Z"),
     );
+}
+
+#[test]
+fn llm_gateway_value_label_scales_units_and_downgrades_below_million_precision() {
+    let snapshot = llm_gateway_quota_from_headers_at(
+        "llm-gateway-downgrade",
+        "OpenCode custom",
+        &[
+            ("x-token-count-limit-per-minute", "480000000"),
+            ("x-token-count-used-per-minute", "0"),
+            ("x-token-count-limit-per-hour-and-user", "60000000"),
+            ("x-token-count-used-per-hour", "500"),
+            ("x-token-count-limit-per-day-and-user", "60000000"),
+            ("x-token-count-used-per-day", "499"),
+            ("x-token-count-limit-per-month-and-user", "60000000"),
+            ("x-token-count-used-per-month", "33608618"),
+        ],
+        1_782_309_600,
+    )
+    .expect("derive gateway quota");
+
+    assert_eq!(snapshot.windows[0].value_label.as_deref(), Some("0 / 480m"));
+    assert_eq!(snapshot.windows[1].value_label.as_deref(), Some("0.001m / 60m"));
+    assert_eq!(snapshot.windows[2].value_label.as_deref(), Some("0.499k / 60m"));
+    assert_eq!(snapshot.windows[3].value_label.as_deref(), Some("33.609m / 60m"));
 }
 
 #[tokio::test]
