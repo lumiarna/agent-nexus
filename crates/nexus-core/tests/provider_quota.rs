@@ -100,7 +100,7 @@ fn llm_gateway_headers_map_effective_limits_to_quota_windows() {
     assert_eq!(snapshot.windows[1].used, 1);
     assert_eq!(
         snapshot.windows[1].value_label.as_deref(),
-        Some("561,685 / 60,000,000 tokens")
+        Some("0.56m / 60m")
     );
     assert_eq!(snapshot.windows[3].label, "Monthly limit");
     assert_eq!(snapshot.windows[3].kind, ProviderQuotaWindowKind::Monthly);
@@ -213,7 +213,9 @@ async fn provider_quota_service_ignores_opencode_config_env_overrides() {
 
     assert_eq!(providers.len(), 1);
     assert_eq!(providers[0].id, "custom-gateway");
-    assert!(!providers.iter().any(|provider| provider.id == "env-gateway"));
+    assert!(!providers
+        .iter()
+        .any(|provider| provider.id == "env-gateway"));
 }
 
 fn copilot_detail(percent_remaining: Option<f64>) -> CopilotQuotaDetail {
