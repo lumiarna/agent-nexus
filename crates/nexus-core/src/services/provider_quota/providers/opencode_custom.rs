@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, env, fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use serde::Deserialize;
 
@@ -16,8 +16,6 @@ use super::super::{
     ProviderUsageTransport,
 };
 
-const OPENCODE_CONFIG_FILE_ENV: &str = "OPENCODE_CONFIG_FILE";
-const OPENCODE_CONFIG_DIR_ENV: &str = "OPENCODE_CONFIG_DIR";
 const OPENAI_COMPATIBLE_NPM: &str = "@ai-sdk/openai-compatible";
 const OPENAI_NPM: &str = "@ai-sdk/openai";
 const PLAN: &str = "OpenCode custom";
@@ -181,12 +179,6 @@ pub(crate) fn read_credentials() -> AppResult<Vec<OpenCodeCustomProviderCredenti
 }
 
 fn opencode_config_file_path() -> Option<PathBuf> {
-    if let Some(path) = env::var_os(OPENCODE_CONFIG_FILE_ENV).filter(|value| !value.is_empty()) {
-        return Some(PathBuf::from(path));
-    }
-    if let Some(dir) = env::var_os(OPENCODE_CONFIG_DIR_ENV).filter(|value| !value.is_empty()) {
-        return Some(PathBuf::from(dir).join("opencode.json"));
-    }
     Some(
         crate::services::paths::home_dir()?
             .join(".config")
@@ -214,14 +206,11 @@ pub(crate) fn read_opencode_auth_token(provider_key: &str) -> Option<String> {
 }
 
 fn read_opencode_auth_content() -> Option<String> {
-    let path = match env::var_os("OPENCODE_AUTH_FILE") {
-        Some(value) if !value.is_empty() => PathBuf::from(value),
-        _ => crate::services::paths::home_dir()?
-            .join(".local")
-            .join("share")
-            .join("opencode")
-            .join("auth.json"),
-    };
+    let path = crate::services::paths::home_dir()?
+        .join(".local")
+        .join("share")
+        .join("opencode")
+        .join("auth.json");
     fs::read_to_string(path).ok()
 }
 

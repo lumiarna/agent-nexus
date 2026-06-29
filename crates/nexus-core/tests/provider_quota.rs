@@ -1,4 +1,4 @@
-use std::{fs, sync::Arc};
+use std::{env, fs, sync::Arc};
 
 use nexus_core::{
     database::Database,
@@ -25,6 +25,13 @@ use serial_test::serial;
 
 fn request_logger() -> OutboundRequestLogger {
     OutboundRequestLogger::for_test().expect("create request logger")
+}
+
+fn restore_env_var(key: &str, previous: Option<std::ffi::OsString>) {
+    match previous {
+        Some(value) => env::set_var(key, value),
+        None => env::remove_var(key),
+    }
 }
 
 #[test]
@@ -107,10 +114,11 @@ fn llm_gateway_headers_map_effective_limits_to_quota_windows() {
 #[tokio::test]
 #[serial]
 async fn provider_quota_service_lists_and_dispatches_custom_provider_without_api_key() {
-    let temp_dir = tempfile::tempdir().expect("create temp dir");
-    let config_file = temp_dir.path().join("opencode.json");
+    let temp_home = tempfile::tempdir().expect("create temp home");
+    let config_dir = temp_home.path().join(".config").join("opencode");
+    fs::create_dir_all(&config_dir).expect("create OpenCode config dir");
     fs::write(
-        &config_file,
+        config_dir.join("opencode.json"),
         r#"{
           "provider": {
             "custom-gateway": {
@@ -123,8 +131,8 @@ async fn provider_quota_service_lists_and_dispatches_custom_provider_without_api
         }"#,
     )
     .expect("write OpenCode config");
-    let previous_config_file = std::env::var_os("OPENCODE_CONFIG_FILE");
-    std::env::set_var("OPENCODE_CONFIG_FILE", &config_file);
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", temp_home.path());
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
@@ -136,10 +144,7 @@ async fn provider_quota_service_lists_and_dispatches_custom_provider_without_api
         .await
         .expect("dispatch custom provider");
 
-    match previous_config_file {
-        Some(value) => std::env::set_var("OPENCODE_CONFIG_FILE", value),
-        None => std::env::remove_var("OPENCODE_CONFIG_FILE"),
-    }
+    restore_env_var("HOME", previous_home);
 
     assert_eq!(providers.len(), 1);
     assert_eq!(providers[0].id, "custom-gateway");
@@ -149,6 +154,66 @@ async fn provider_quota_service_lists_and_dispatches_custom_provider_without_api
         snapshot.credential.as_deref(),
         Some("opencode.json · custom-gateway")
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn provider_quota_service_ignores_opencode_config_env_overrides() {
+    let temp_home = tempfile::tempdir().expect("create temp home");
+    let config_dir = temp_home.path().join(".config").join("opencode");
+    fs::create_dir_all(&config_dir).expect("create OpenCode config dir");
+    fs::write(
+        config_dir.join("opencode.json"),
+        r#"{
+          "provider": {
+            "custom-gateway": {
+              "name": "Custom Gateway",
+              "npm": "@ai-sdk/openai-compatible",
+              "options": { "baseURL": "https://gateway.example/v1" },
+              "models": { "test-model": {} }
+            }
+          }
+        }"#,
+    )
+    .expect("write default OpenCode config");
+    let override_dir = temp_home.path().join("override");
+    fs::create_dir_all(&override_dir).expect("create override dir");
+    let override_file = override_dir.join("opencode.json");
+    fs::write(
+        &override_file,
+        r#"{
+          "provider": {
+            "env-gateway": {
+              "name": "Env Gateway",
+              "npm": "@ai-sdk/openai-compatible",
+              "options": { "baseURL": "https://env.example/v1" },
+              "models": { "env-model": {} }
+            }
+          }
+        }"#,
+    )
+    .expect("write env override OpenCode config");
+
+    let previous_config_file = env::var_os("OPENCODE_CONFIG_FILE");
+    let previous_config_dir = env::var_os("OPENCODE_CONFIG_DIR");
+    let previous_home = env::var_os("HOME");
+    env::set_var("OPENCODE_CONFIG_FILE", &override_file);
+    env::set_var("OPENCODE_CONFIG_DIR", &override_dir);
+    env::set_var("HOME", temp_home.path());
+
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
+    let providers = service
+        .list_opencode_custom_providers()
+        .expect("list custom providers");
+
+    restore_env_var("OPENCODE_CONFIG_FILE", previous_config_file);
+    restore_env_var("OPENCODE_CONFIG_DIR", previous_config_dir);
+    restore_env_var("HOME", previous_home);
+
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0].id, "custom-gateway");
+    assert!(!providers.iter().any(|provider| provider.id == "env-gateway"));
 }
 
 fn copilot_detail(percent_remaining: Option<f64>) -> CopilotQuotaDetail {
@@ -211,10 +276,9 @@ async fn provider_quota_service_dispatches_opencode_go_adapter_without_connectio
 #[serial]
 async fn provider_quota_service_dispatches_minimax_token_plan_cn_adapter_without_credentials() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
-    let temp_dir = tempfile::tempdir().expect("create temp dir");
-    let missing_auth_file = temp_dir.path().join("missing-opencode-auth.json");
-    let previous_auth_file = std::env::var_os("OPENCODE_AUTH_FILE");
-    std::env::set_var("OPENCODE_AUTH_FILE", &missing_auth_file);
+    let temp_home = tempfile::tempdir().expect("create temp home");
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", temp_home.path());
 
     let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
@@ -222,10 +286,7 @@ async fn provider_quota_service_dispatches_minimax_token_plan_cn_adapter_without
         .await
         .expect("dispatch MiniMax Token Plan CN adapter");
 
-    match previous_auth_file {
-        Some(value) => std::env::set_var("OPENCODE_AUTH_FILE", value),
-        None => std::env::remove_var("OPENCODE_AUTH_FILE"),
-    }
+    restore_env_var("HOME", previous_home);
 
     assert_eq!(snapshot.provider_id, "minimax-token");
     assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
@@ -238,10 +299,9 @@ async fn provider_quota_service_dispatches_minimax_token_plan_cn_adapter_without
 #[serial]
 async fn provider_quota_service_dispatches_deepseek_adapter_without_credentials() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
-    let temp_dir = tempfile::tempdir().expect("create temp dir");
-    let missing_auth_file = temp_dir.path().join("missing-opencode-auth.json");
-    let previous_auth_file = std::env::var_os("OPENCODE_AUTH_FILE");
-    std::env::set_var("OPENCODE_AUTH_FILE", &missing_auth_file);
+    let temp_home = tempfile::tempdir().expect("create temp home");
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", temp_home.path());
 
     let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
@@ -249,10 +309,7 @@ async fn provider_quota_service_dispatches_deepseek_adapter_without_credentials(
         .await
         .expect("dispatch DeepSeek adapter");
 
-    match previous_auth_file {
-        Some(value) => std::env::set_var("OPENCODE_AUTH_FILE", value),
-        None => std::env::remove_var("OPENCODE_AUTH_FILE"),
-    }
+    restore_env_var("HOME", previous_home);
 
     assert_eq!(snapshot.provider_id, "deepseek");
     assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
@@ -265,10 +322,9 @@ async fn provider_quota_service_dispatches_deepseek_adapter_without_credentials(
 #[serial]
 async fn provider_quota_service_dispatches_openrouter_adapter_without_credentials() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
-    let temp_dir = tempfile::tempdir().expect("create temp dir");
-    let missing_auth_file = temp_dir.path().join("missing-opencode-auth.json");
-    let previous_auth_file = std::env::var_os("OPENCODE_AUTH_FILE");
-    std::env::set_var("OPENCODE_AUTH_FILE", &missing_auth_file);
+    let temp_home = tempfile::tempdir().expect("create temp home");
+    let previous_home = env::var_os("HOME");
+    env::set_var("HOME", temp_home.path());
 
     let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
@@ -276,16 +332,45 @@ async fn provider_quota_service_dispatches_openrouter_adapter_without_credential
         .await
         .expect("dispatch OpenRouter adapter");
 
-    match previous_auth_file {
-        Some(value) => std::env::set_var("OPENCODE_AUTH_FILE", value),
-        None => std::env::remove_var("OPENCODE_AUTH_FILE"),
-    }
+    restore_env_var("HOME", previous_home);
 
     assert_eq!(snapshot.provider_id, "openrouter");
     assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
     assert_eq!(snapshot.credential.as_deref(), Some("not found"));
     assert!(snapshot.windows.is_empty());
     assert_eq!(snapshot.error, None);
+}
+
+#[tokio::test]
+#[serial]
+async fn configured_provider_credentials_ignore_opencode_auth_file_env() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let temp_home = tempfile::tempdir().expect("create temp home");
+    let override_dir = tempfile::tempdir().expect("create env override dir");
+    let override_file = override_dir.path().join("auth.json");
+    fs::write(
+        &override_file,
+        r#"{ "deepseek": { "type": "api", "key": "sk-env-should-be-ignored" } }"#,
+    )
+    .expect("write env override auth file");
+
+    let previous_home = env::var_os("HOME");
+    let previous_auth_file = env::var_os("OPENCODE_AUTH_FILE");
+    env::set_var("HOME", temp_home.path());
+    env::set_var("OPENCODE_AUTH_FILE", &override_file);
+
+    let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
+    let snapshot = service
+        .get_provider_quota("deepseek")
+        .await
+        .expect("dispatch DeepSeek adapter");
+
+    restore_env_var("HOME", previous_home);
+    restore_env_var("OPENCODE_AUTH_FILE", previous_auth_file);
+
+    assert_eq!(snapshot.provider_id, "deepseek");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
+    assert_eq!(snapshot.credential.as_deref(), Some("not found"));
 }
 
 #[test]
