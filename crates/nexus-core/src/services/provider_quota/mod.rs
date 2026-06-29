@@ -136,7 +136,10 @@ type CodexUsageFuture<'a> = Pin<
 type CodexResetCreditsFuture<'a> = Pin<
     Box<
         dyn Future<
-                Output = Result<providers::codex::CodexResetCreditsResponse, ProviderQuotaPollError>,
+                Output = Result<
+                    providers::codex::CodexResetCreditsResponse,
+                    ProviderQuotaPollError,
+                >,
             > + Send
             + 'a,
     >,
