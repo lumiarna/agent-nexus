@@ -45,6 +45,10 @@ pub struct ProviderScheduleSettings {
     pub quota_refresh_minutes: i64,
     pub window_align_cron: String,
     pub window_align_model_id: Option<String>,
+    /// Read-only: the next scheduled attempt time; recomputed by the backend on
+    /// every save/run, so any value sent in on a write is ignored.
+    #[serde(default)]
+    pub window_align_next_attempt_at: Option<i64>,
     #[serde(default)]
     pub window_align_last_attempt_at: Option<i64>,
     #[serde(default = "default_window_align_last_status")]
@@ -695,6 +699,7 @@ fn provider_schedule_row_from_sql(
             quota_refresh_minutes: row.get(1)?,
             window_align_cron: row.get(2)?,
             window_align_model_id: row.get(3)?,
+            window_align_next_attempt_at: row.get(5)?,
             window_align_last_attempt_at: last_attempt_at,
             window_align_last_status: last_status.clone(),
             window_align_last_error: last_error.clone(),
@@ -772,6 +777,7 @@ fn default_schedule_settings() -> ProviderScheduleSettings {
         quota_refresh_minutes: DEFAULT_QUOTA_REFRESH_MINUTES,
         window_align_cron: String::new(),
         window_align_model_id: None,
+        window_align_next_attempt_at: None,
         window_align_last_attempt_at: None,
         window_align_last_status: default_window_align_last_status(),
         window_align_last_error: None,
@@ -803,6 +809,7 @@ fn normalize_schedule_settings(
             let model_id = model_id.trim().to_string();
             (!model_id.is_empty()).then_some(model_id)
         }),
+        window_align_next_attempt_at: settings.window_align_next_attempt_at,
         window_align_last_attempt_at: settings.window_align_last_attempt_at,
         window_align_last_status: settings.window_align_last_status,
         window_align_last_error: settings.window_align_last_error,
@@ -1263,6 +1270,7 @@ mod tests {
                 quota_refresh_minutes: DEFAULT_QUOTA_REFRESH_MINUTES,
                 window_align_cron: String::new(),
                 window_align_model_id: None,
+                window_align_next_attempt_at: None,
                 window_align_last_attempt_at: None,
                 window_align_last_status: "never".to_string(),
                 window_align_last_error: None,
@@ -1318,6 +1326,7 @@ mod tests {
                 quota_refresh_minutes: 5,
                 window_align_cron: "0 5,,10 * * *".to_string(),
                 window_align_model_id: Some("model-1".to_string()),
+                window_align_next_attempt_at: None,
                 window_align_last_attempt_at: None,
                 window_align_last_status: "never".to_string(),
                 window_align_last_error: None,
@@ -1341,6 +1350,7 @@ mod tests {
                     quota_refresh_minutes: 5,
                     window_align_cron: schedule,
                     window_align_model_id: Some("model-1".to_string()),
+                    window_align_next_attempt_at: None,
                     window_align_last_attempt_at: None,
                     window_align_last_status: "never".to_string(),
                     window_align_last_error: None,
@@ -1380,6 +1390,7 @@ mod tests {
                     quota_refresh_minutes: 5,
                     window_align_cron: schedule,
                     window_align_model_id: Some("model-1".to_string()),
+                    window_align_next_attempt_at: None,
                     window_align_last_attempt_at: None,
                     window_align_last_status: "never".to_string(),
                     window_align_last_error: None,
@@ -1419,6 +1430,7 @@ mod tests {
                     quota_refresh_minutes: 5,
                     window_align_cron: schedule.clone(),
                     window_align_model_id: Some("model-1".to_string()),
+                    window_align_next_attempt_at: None,
                     window_align_last_attempt_at: None,
                     window_align_last_status: "never".to_string(),
                     window_align_last_error: None,

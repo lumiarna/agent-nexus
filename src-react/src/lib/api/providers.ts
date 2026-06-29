@@ -48,6 +48,8 @@ export interface ProviderScheduleSettings {
   windowAlignCron: string;
   /** Model the alignment request uses; null/"" means off. */
   windowAlignModelId: string | null;
+  /** Read-only: next scheduled attempt time (epoch seconds); null when off. */
+  windowAlignNextAttemptAt?: number | null;
   windowAlignLastAttemptAt?: number | null;
   windowAlignLastStatus?: "never" | "success" | "retryable_failed" | "terminal_failed";
   windowAlignLastError?: string | null;

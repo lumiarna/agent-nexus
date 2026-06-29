@@ -5,6 +5,7 @@ import {
   WINDOW_ALIGN_START_TIME_PRESETS,
   isWindowAlignActive,
   windowAlignLastAttemptLabel,
+  windowAlignNextAttemptLabel,
   windowAlignStartTimeHuman,
   windowAlignStatusLabel,
 } from "@/components/provider/providerSchedule";
@@ -102,10 +103,9 @@ export function WindowAlignmentSection({
             </div>
           </div>
           <div className="rounded-[12px] border border-nexus-border bg-nexus-bg px-[14px] py-[13px]">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <div className="text-[12px] font-semibold text-[#6a6055]">Manual trigger</div>
-                <div className="mt-[5px] text-[11px] text-[#b3a999]">
+                <div className="text-[11px] text-[#b3a999]">
                   Last:{" "}
                   <span className="font-medium text-[#7a6f60]">
                     {windowAlignLastAttemptLabel(schedule?.windowAlignLastAttemptAt)}
@@ -115,22 +115,31 @@ export function WindowAlignmentSection({
                     {windowAlignStatusLabel(schedule?.windowAlignLastStatus)}
                   </span>
                 </div>
-                {schedule?.windowAlignLastError ? (
-                  <div className="mt-[5px] overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-[#b75548]">
-                    {schedule.windowAlignLastError}
-                  </div>
-                ) : null}
+                <div className="mt-[5px] text-[11px] text-[#b3a999]">
+                  Next:{" "}
+                  <span className="font-medium text-[#7a6f60]">
+                    {windowAlignNextAttemptLabel(schedule?.windowAlignNextAttemptAt)}
+                  </span>
+                </div>
               </div>
-              <Button
-                variant="subtle"
-                size="sm"
-                className="flex-none px-3"
-                disabled={triggering || quotaFetching || modelsLoading || !modelId?.trim()}
-                onClick={onTriggerNow}
-              >
-                {triggering ? "Triggering..." : "Trigger now"}
-              </Button>
             </div>
+            {schedule?.windowAlignLastError ? (
+              <div className="mt-[5px] overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-[#b75548]">
+                {schedule.windowAlignLastError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[12px] font-semibold text-[#6a6055]">Manual trigger</div>
+            <Button
+              variant="subtle"
+              size="sm"
+              className="flex-none px-3"
+              disabled={triggering || quotaFetching || modelsLoading || !modelId?.trim()}
+              onClick={onTriggerNow}
+            >
+              {triggering ? "Triggering..." : "Trigger now"}
+            </Button>
           </div>
         </div>
       )}

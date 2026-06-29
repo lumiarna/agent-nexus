@@ -83,6 +83,18 @@ export function windowAlignLastAttemptLabel(epochSeconds: number | null | undefi
   }).format(new Date(epochSeconds * 1000));
 }
 
+export function windowAlignNextAttemptLabel(epochSeconds: number | null | undefined): string {
+  if (typeof epochSeconds !== "number" || !Number.isFinite(epochSeconds) || epochSeconds <= 0) {
+    return "Not scheduled";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(epochSeconds * 1000));
+}
+
 export function windowAlignStatusLabel(status: string | null | undefined): string {
   switch (status) {
     case "success":
