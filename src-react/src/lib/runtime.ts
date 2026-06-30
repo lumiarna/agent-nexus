@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+
 type DesktopHealthPayload = {
   ok: boolean;
   appName: string;
@@ -30,7 +32,6 @@ export async function detectDesktopHealth(): Promise<DesktopHealthState> {
   }
 
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
     const health = await invoke<DesktopHealthPayload>("get_desktop_health");
 
     if (!health.ok) {
@@ -56,7 +57,6 @@ export type HostPlatform = "windows" | "macos" | "linux" | "unknown";
 export async function detectPlatform(): Promise<HostPlatform> {
   if (isTauriRuntime()) {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       const os = await invoke<string>("get_platform");
       if (os === "windows" || os === "macos" || os === "linux") {
         return os;
