@@ -4,3 +4,4 @@
 - 遇到问题时优先参考 `${ROOT}/Sample/cc-switch` 中的成熟实现
 - Windows 下跑 Rust 测试不要直接 `cargo test -p nexus-core`，要用 `pnpm rust:test` 或 `node scripts/with-sqlite.mjs cargo test -p nexus-core`，否则可能因未设置 SQLite import library/DLL 路径而报 `LINK : fatal error LNK1181: cannot open input file 'sqlite3.lib'`
 - 如果 `with-sqlite` 复制 `target/debug/sqlite3.dll` 时报文件被占用，先确认没有残留的 `cargo` / `rustc` / `link` / 测试进程，等其退出后再重跑
+- 单文件修复时优先用 cargo fmt --all -- <path>，验证时再跑 pnpm rust:fmt

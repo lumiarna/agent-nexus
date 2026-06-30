@@ -598,8 +598,9 @@ export function ProviderPage() {
           ]}
           value={display.trayMetric}
           onChange={(m) => {
-            display.setTrayMetric(m);
-            toast(`Quota metric set to ${m} (global)`);
+            void display.setTrayMetric(m).then(() => {
+              toast(`Quota metric set to ${m} (global)`);
+            });
           }}
         />
       </div>

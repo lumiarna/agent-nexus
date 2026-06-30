@@ -1,4 +1,5 @@
 import { invokeCommand } from "@/lib/api/tauri";
+import type { TrayMetric } from "@/types";
 
 export interface ProviderQuotaWindowSnapshot {
   label: string;
@@ -39,6 +40,7 @@ export interface ProviderConnectionParams {
 
 export interface ProviderDisplayPreferences {
   cardVisibility: string[];
+  trayMetric: TrayMetric;
 }
 
 export interface ProviderScheduleSettings {

@@ -26,6 +26,18 @@ const OPENROUTER_API_KEY_KEY: &str = "PROVIDER_API_KEY_OPENROUTER";
 const PROVIDER_CARD_VISIBILITY_KEY: &str = "PROVIDER_CARD_VISIBILITY";
 const DISABLED_AGENTS_KEY: &str = "DISABLED_AGENTS";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TrayMetric {
+    Used,
+    Remaining,
+}
+
+impl Default for TrayMetric {
+    fn default() -> Self {
+        Self::Remaining
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenCodeGoConnectionParams {
@@ -43,6 +55,8 @@ pub struct ProviderConnectionParams {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderDisplayPreferences {
     pub card_visibility: Vec<String>,
+    #[serde(default)]
+    pub tray_metric: TrayMetric,
 }
 
 /// User preference for which Agents are disabled. A disabled Agent is dropped
@@ -198,6 +212,7 @@ impl AppConfigService {
             })?;
         Ok(ProviderDisplayPreferences {
             card_visibility: normalize_provider_order(preferences.card_visibility)?,
+            tray_metric: normalize_tray_metric(preferences.tray_metric)?,
         })
     }
 
@@ -207,6 +222,7 @@ impl AppConfigService {
     ) -> AppResult<ProviderDisplayPreferences> {
         let normalized = ProviderDisplayPreferences {
             card_visibility: normalize_provider_order(preferences.card_visibility.clone())?,
+            tray_metric: normalize_tray_metric(preferences.tray_metric)?,
         };
         self.write_json_setting(PROVIDER_CARD_VISIBILITY_KEY, &normalized)?;
         Ok(normalized)
@@ -261,6 +277,12 @@ impl AppConfigService {
         )
         .optional()
         .map_err(Into::into)
+    }
+}
+
+fn normalize_tray_metric(metric: TrayMetric) -> AppResult<TrayMetric> {
+    match metric {
+        TrayMetric::Used | TrayMetric::Remaining => Ok(metric),
     }
 }
 

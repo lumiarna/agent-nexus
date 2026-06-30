@@ -131,9 +131,18 @@ fn llm_gateway_value_label_scales_units_and_downgrades_below_million_precision()
     .expect("derive gateway quota");
 
     assert_eq!(snapshot.windows[0].value_label.as_deref(), Some("0 / 480m"));
-    assert_eq!(snapshot.windows[1].value_label.as_deref(), Some("0.001m / 60m"));
-    assert_eq!(snapshot.windows[2].value_label.as_deref(), Some("0.499k / 60m"));
-    assert_eq!(snapshot.windows[3].value_label.as_deref(), Some("33.609m / 60m"));
+    assert_eq!(
+        snapshot.windows[1].value_label.as_deref(),
+        Some("0.001m / 60m")
+    );
+    assert_eq!(
+        snapshot.windows[2].value_label.as_deref(),
+        Some("0.499k / 60m")
+    );
+    assert_eq!(
+        snapshot.windows[3].value_label.as_deref(),
+        Some("33.609m / 60m")
+    );
 }
 
 #[tokio::test]

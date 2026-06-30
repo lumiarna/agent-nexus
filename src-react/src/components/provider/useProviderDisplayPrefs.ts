@@ -92,6 +92,7 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
         ]),
       ),
     );
+    setTrayMetric(displayPreferencesQuery.data?.trayMetric ?? "Remaining");
     setTrayVisible((current) => ({
       ...Object.fromEntries(
         providerCatalog.map((provider) => [provider.id, provider.status === "available"]),
@@ -143,8 +144,12 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
     }
 
     try {
-      const saved = await setDisplayPreferences.mutateAsync({ cardVisibility });
+      const saved = await setDisplayPreferences.mutateAsync({
+        cardVisibility,
+        trayMetric,
+      });
       const savedVisible = new Set(saved.cardVisibility);
+      setTrayMetric(saved.trayMetric);
       setCardVisible((current) => ({
         ...current,
         ...Object.fromEntries(order.map((id) => [id, savedVisible.has(id)])),
@@ -153,6 +158,27 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
     } catch (error) {
       setCardVisible(previous);
       toast(getErrorMessage(error));
+    }
+  }
+
+  async function updateTrayMetric(metric: TrayMetric) {
+    const previous = trayMetric;
+    setTrayMetric(metric);
+
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    try {
+      const saved = await setDisplayPreferences.mutateAsync({
+        cardVisibility: order.filter((id) => cardVisible[id] !== false),
+        trayMetric: metric,
+      });
+      setTrayMetric(saved.trayMetric);
+    } catch (error) {
+      setTrayMetric(previous);
+      toast(getErrorMessage(error));
+      throw error;
     }
   }
 
@@ -170,6 +196,6 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
     handleDragEnd,
     setCardVisibility,
     setTrayVisibility,
-    setTrayMetric,
+    setTrayMetric: updateTrayMetric,
   };
 }

@@ -4,7 +4,7 @@ use nexus_core::{
     database::Database,
     services::app_config::{
         AgentDisplayPreferences, AppConfigService, OpenCodeGoConnectionParams,
-        ProviderConnectionParams, ProviderDisplayPreferences, CLAUDE_CONFIG_DIR_KEY,
+        ProviderConnectionParams, ProviderDisplayPreferences, TrayMetric, CLAUDE_CONFIG_DIR_KEY,
         CODEX_CONFIG_DIR_KEY,
     },
 };
@@ -142,17 +142,22 @@ fn provider_display_preferences_round_trip_through_settings() {
         service
             .get_provider_display_preferences()
             .expect("read default provider display preferences"),
-        ProviderDisplayPreferences::default(),
+        ProviderDisplayPreferences {
+            card_visibility: Vec::new(),
+            tray_metric: TrayMetric::Remaining,
+        },
     );
 
     assert_eq!(
         service
             .set_provider_display_preferences(&ProviderDisplayPreferences {
                 card_visibility: vec!["copilot".to_string(), "claude".to_string()],
+                tray_metric: TrayMetric::Used,
             })
             .expect("save provider display preferences"),
         ProviderDisplayPreferences {
             card_visibility: vec!["copilot".to_string(), "claude".to_string()],
+            tray_metric: TrayMetric::Used,
         },
     );
 
@@ -162,6 +167,36 @@ fn provider_display_preferences_round_trip_through_settings() {
             .expect("read saved provider display preferences"),
         ProviderDisplayPreferences {
             card_visibility: vec!["copilot".to_string(), "claude".to_string()],
+            tray_metric: TrayMetric::Used,
+        },
+    );
+}
+
+#[test]
+fn provider_display_preferences_defaults_tray_metric_for_legacy_rows() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    {
+        let conn = db.connection().expect("open db connection");
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [
+                "PROVIDER_CARD_VISIBILITY",
+                r#"{"cardVisibility":["copilot","claude"]}"#,
+            ],
+        )
+        .expect("write legacy provider display preferences");
+    }
+
+    let service = AppConfigService::new(db);
+
+    assert_eq!(
+        service
+            .get_provider_display_preferences()
+            .expect("read legacy provider display preferences"),
+        ProviderDisplayPreferences {
+            card_visibility: vec!["copilot".to_string(), "claude".to_string()],
+            tray_metric: TrayMetric::Remaining,
         },
     );
 }
