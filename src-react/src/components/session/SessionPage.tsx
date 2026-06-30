@@ -6,7 +6,6 @@ import { Dot, Input } from "@/components/ui/primitives";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { Markdown } from "@/components/ui/markdown";
 import { sessionsApi } from "@/lib/api/sessions";
-import { useNav } from "@/lib/nav";
 import { useProjectsQuery } from "@/lib/query/projects";
 import {
   useCloudSessionQuery,
@@ -46,7 +45,6 @@ function projectColor(key: string): string {
 }
 
 export function SessionPage() {
-  const { go } = useNav();
   const desktop = isTauriRuntime();
   const projectsQuery = useProjectsQuery();
   const localSessionsQuery = useLocalSessionsQuery();
@@ -310,33 +308,19 @@ export function SessionPage() {
                   </span>
                 </span>
               </div>
-              <div className="mt-1.5 font-mono text-[11px] text-[#c3b9a8]">{sel.file}</div>
-
-              {source === "local" ? (
-                <>
-                  <div className="mt-4 flex flex-wrap items-center gap-2">
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      className="px-3.5"
-                      onClick={() => void openFile(sel)}
-                    >
-                      Open file
-                    </Button>
-                    <Button
-                      variant="subtle"
-                      size="sm"
-                      className="px-3.5"
-                      onClick={() => go("project", { projectId: sel.project })}
-                    >
-                      Open Project ↗
-                    </Button>
-                  </div>
-                  <div className="mt-2 text-[11px] text-[#c3b9a8]">
-                    Open Project jumps to this session's Project detail.
-                  </div>
-                </>
-              ) : null}
+              <div className="mt-1.5 flex items-center gap-2.5">
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#c3b9a8]">
+                  {sel.file}
+                </span>
+                {source === "local" ? (
+                  <span
+                    onClick={() => void openFile(sel)}
+                    className="cursor-pointer whitespace-nowrap text-[11.5px] font-semibold text-nexus-accent hover:underline"
+                  >
+                    Open file
+                  </span>
+                ) : null}
+              </div>
 
               <div className="mt-[18px] rounded-[14px] border border-nexus-panel bg-nexus-card px-[22px] py-5">
                 {previewError ? (
