@@ -100,6 +100,19 @@ function mergeProviderQuota(provider: Provider, quota: ProviderQuotaSnapshot): P
   };
 }
 
+function quotaMetricValue(used: number, metric: TrayMetric): number {
+  return metric === "Remaining" ? 100 - used : used;
+}
+
+function quotaMetricLabel(usedLabel: string, used: number, metric: TrayMetric): string {
+  if (usedLabel !== `${used}%`) return usedLabel;
+  return `${quotaMetricValue(used, metric)}%`;
+}
+
+function quotaMetricPace(pace: number, metric: TrayMetric): number {
+  return metric === "Remaining" ? 100 - pace : pace;
+}
+
 interface SortableProviderCardProps {
   id: string;
   children: (activator: {
@@ -440,23 +453,27 @@ export function ProviderPage() {
                                 className="text-[30px] font-extrabold leading-none tracking-[-.03em]"
                                 style={{ color: quotaColor(p.primary ?? 0) }}
                               >
-                                {quota.primaryLabel}
+                                {quotaMetricValue(p.primary ?? 0, display.trayMetric)}%
                               </span>
                               <span className="text-[12px] text-[#b3a999]">
-                                {quota.primaryCaption}
+                                {display.trayMetric === "Remaining"
+                                  ? quota.primaryCaption.replace("used", "remaining")
+                                  : quota.primaryCaption}
                               </span>
                             </div>
                           ) : null}
                           <div className={cn("flex flex-col gap-[13px]", quota.primaryLabel ? "mt-[15px]" : "mt-[18px]")}>
                             {quota.windows.map((w) => {
                               const barColor = w.unlimited ? quotaColor(0) : quotaColor(w.used);
-                              const barWidth = w.unlimited ? 100 : w.used;
+                              const barWidth = w.unlimited
+                                ? 100
+                                : quotaMetricValue(w.used, display.trayMetric);
                               return (
                                 <div key={w.label}>
                                   <div className="mb-1.5 flex justify-between text-[12px]">
                                     <span className="text-[#6a6055]">{w.label}</span>
                                     <span className="font-bold" style={{ color: barColor }}>
-                                      {w.usedLabel}
+                                      {quotaMetricLabel(w.usedLabel, w.used, display.trayMetric)}
                                     </span>
                                   </div>
                                   {w.valueOnly ? null : (
@@ -471,7 +488,7 @@ export function ProviderPage() {
                                         <div
                                           className="absolute -top-0.5 h-3 w-0.5 rounded-full"
                                           style={{
-                                            left: `calc(${w.pace}% - 1px)`,
+                                            left: `calc(${quotaMetricPace(w.pace, display.trayMetric)}% - 1px)`,
                                             background: isQuotaPaceAlert(w)
                                               ? palette.crit
                                               : "#6a6055",
@@ -568,10 +585,10 @@ export function ProviderPage() {
       <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-[14px] border border-nexus-border bg-nexus-sand2 px-[18px] py-[14px]">
         <div className="max-w-[520px]">
           <div className="text-[13px] font-bold text-nexus-body">
-            Quota metric shown in the tray icon
+            Quota metric shown on quota cards and the tray icon
           </div>
           <div className="mt-[3px] text-[11.5px] leading-[1.5] text-[#a99a89]">
-            Applied globally across all providers so side-by-side icons read consistently.
+            Applied globally across all providers so quota cards and side-by-side icons read consistently.
           </div>
         </div>
         <Segmented<TrayMetric>
@@ -582,7 +599,7 @@ export function ProviderPage() {
           value={display.trayMetric}
           onChange={(m) => {
             display.setTrayMetric(m);
-            toast(`Tray metric set to ${m} (global)`);
+            toast(`Quota metric set to ${m} (global)`);
           }}
         />
       </div>
@@ -648,8 +665,9 @@ export function ProviderPage() {
                   </div>
                 </div>
                 <div className="mt-2.5 rounded-[11px] border border-nexus-border bg-nexus-bg px-[13px] py-[11px] text-[11.5px] leading-[1.5] text-[#8a7a68]">
-                    Taskbar metric (<b className="text-[#6a6055]">used / remaining</b>) is a
-                    global setting — configured above the cards on this page. Currently <b className="text-[#6a6055]">{display.trayMetric}</b>.
+                  Quota metric (<b className="text-[#6a6055]">used / remaining</b>) is a global
+                  setting for Provider cards and the Windows taskbar. Currently{" "}
+                  <b className="text-[#6a6055]">{display.trayMetric}</b>.
                 </div>
               </div>
 
