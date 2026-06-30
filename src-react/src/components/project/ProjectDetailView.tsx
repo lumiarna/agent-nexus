@@ -25,7 +25,7 @@ import {
   useSetSkillTargetMutation,
   useSkillsQuery,
 } from "@/lib/query/skills";
-import { palette, srcAgentOf, targetAgentsOf } from "@/lib/tokens";
+import { srcAgentOf, targetAgentsOf } from "@/lib/tokens";
 import type { AgentName, Project, Prompt, Skill } from "@/types";
 import {
   matchesPromptGlob,
