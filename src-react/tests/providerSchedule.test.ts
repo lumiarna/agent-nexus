@@ -33,7 +33,7 @@ test("quota refresh minutes convert to react-query milliseconds", () => {
 test("window alignment presets expose a single local first trigger time", () => {
   assert.deepEqual(
     WINDOW_ALIGN_START_TIME_PRESETS.map((preset) => preset.value),
-    ["01:00", "02:00", "03:00", "04:00", "05:00"],
+    ["04:00", "05:00", "06:00", "07:00", "08:00"],
   );
 });
 

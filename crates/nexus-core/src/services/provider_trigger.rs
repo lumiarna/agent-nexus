@@ -345,9 +345,17 @@ impl ProviderTriggerService {
             return read_provider_schedule_settings(&conn, provider_id);
         };
         let now = current_epoch_seconds();
+        let window_align_cron = {
+            let conn = self.db.connection()?;
+            read_provider_schedule_row(&conn, provider_id)?
+                .map(|row| row.settings.window_align_cron)
+                .unwrap_or_default()
+        };
         let result = self.runner.trigger(provider_id, model_id).await;
         match result {
-            Ok(outcome) => self.record_manual_success(provider_id, now, outcome)?,
+            Ok(outcome) => {
+                self.record_manual_success(provider_id, now, &window_align_cron, outcome)?
+            }
             Err(error) => self.record_manual_failure(
                 provider_id,
                 now,
@@ -478,20 +486,43 @@ impl ProviderTriggerService {
         &self,
         provider_id: &str,
         now_epoch_seconds: i64,
+        window_align_cron: &str,
         outcome: ProviderTriggerOutcome,
     ) -> AppResult<()> {
         let conn = self.db.connection()?;
-        conn.execute(
-            "UPDATE provider_schedule_settings
-             SET window_align_last_attempt_at = ?2,
-                 window_align_last_success_at = ?2,
-                 window_align_last_status = 'success',
-                 window_align_last_error = NULL,
-                 window_align_failure_count = 0,
-                 updated_at = ?2
-             WHERE provider_id = ?1",
-            params![provider_id, now_epoch_seconds],
-        )?;
+        if window_align_cron.trim().is_empty() {
+            conn.execute(
+                "UPDATE provider_schedule_settings
+                 SET window_align_last_attempt_at = ?2,
+                     window_align_last_success_at = ?2,
+                     window_align_last_status = 'success',
+                     window_align_last_error = NULL,
+                     window_align_failure_count = 0,
+                     updated_at = ?2
+                 WHERE provider_id = ?1",
+                params![provider_id, now_epoch_seconds],
+            )?;
+        } else {
+            let next_anchor =
+                next_cron_occurrence_after_local(window_align_cron, now_epoch_seconds)?;
+            let next_attempt_at = next_window_alignment_attempt_after_success(
+                window_align_cron,
+                now_epoch_seconds,
+            )?;
+            conn.execute(
+                "UPDATE provider_schedule_settings
+                 SET window_align_anchor_at = ?2,
+                     window_align_next_attempt_at = ?3,
+                     window_align_last_attempt_at = ?4,
+                     window_align_last_success_at = ?4,
+                     window_align_last_status = 'success',
+                     window_align_last_error = NULL,
+                     window_align_failure_count = 0,
+                     updated_at = ?4
+                 WHERE provider_id = ?1",
+                params![provider_id, next_anchor, next_attempt_at, now_epoch_seconds],
+            )?;
+        }
         let _tokens = outcome.prompt_tokens + outcome.completion_tokens;
         Ok(())
     }
@@ -1505,6 +1536,53 @@ mod tests {
         assert_eq!(settings.window_align_last_error, None);
         assert_eq!(settings.window_align_cron, "");
         assert_eq!(settings.window_align_model_id, None);
+    }
+
+    #[tokio::test]
+    async fn manual_trigger_with_active_schedule_advances_next_attempt_like_automatic() {
+        let now = next_minute_start();
+        let schedule = daily_cron_for(now);
+        let service = test_service(FakeRunner::supported_with(vec![Ok(
+            ProviderTriggerOutcome {
+                prompt_tokens: 1,
+                completion_tokens: 1,
+            },
+        )]));
+        service
+            .set_provider_schedule_settings(
+                "claude",
+                ProviderScheduleSettings {
+                    quota_refresh_minutes: 5,
+                    window_align_cron: schedule.clone(),
+                    window_align_model_id: Some("model-1".to_string()),
+                    window_align_next_attempt_at: None,
+                    window_align_last_attempt_at: None,
+                    window_align_last_status: "never".to_string(),
+                    window_align_last_error: None,
+                },
+            )
+            .expect("save schedule");
+
+        service
+            .run_window_alignment_now("claude", "model-1")
+            .await
+            .expect("run manual trigger");
+
+        let row = {
+            let conn = service.db.connection().expect("db connection");
+            read_provider_schedule_row(&conn, "claude")
+                .expect("read row")
+                .expect("row exists")
+        };
+        assert_eq!(row.runtime.last_status, "success");
+        let last_attempt = row.runtime.last_attempt_at.expect("last attempt recorded");
+        assert_eq!(
+            row.runtime.next_attempt_at,
+            Some(
+                next_window_alignment_attempt_after_success(&schedule, last_attempt)
+                    .expect("next attempt")
+            )
+        );
     }
 
     #[tokio::test]

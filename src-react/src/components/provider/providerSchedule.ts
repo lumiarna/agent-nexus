@@ -19,11 +19,11 @@ export const QUOTA_REFRESH_PRESETS: { label: string; minutes: number }[] = [
 ];
 
 export const WINDOW_ALIGN_START_TIME_PRESETS: { label: string; value: string }[] = [
-  { label: "01:00", value: "01:00" },
-  { label: "02:00", value: "02:00" },
-  { label: "03:00", value: "03:00" },
   { label: "04:00", value: "04:00" },
   { label: "05:00", value: "05:00" },
+  { label: "06:00", value: "06:00" },
+  { label: "07:00", value: "07:00" },
+  { label: "08:00", value: "08:00" },
 ];
 
 /** Quota polling is interval-natured; convert the configured minutes to react-query ms. */
