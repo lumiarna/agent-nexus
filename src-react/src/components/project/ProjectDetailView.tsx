@@ -6,7 +6,7 @@ import {
   SourceBadge,
 } from "@/components/ui/agent-icon";
 import { Button } from "@/components/ui/button";
-import { Card, Dot } from "@/components/ui/primitives";
+import { Card } from "@/components/ui/primitives";
 import { Segmented } from "@/components/ui/segmented";
 import { SkillRow } from "@/components/skill/SkillRow";
 import { ScreenScroll } from "@/components/shell/screen";
@@ -25,9 +25,8 @@ import {
   useSetSkillTargetMutation,
   useSkillsQuery,
 } from "@/lib/query/skills";
-import { useSessionBackupsQuery } from "@/lib/query/sync";
 import { palette, srcAgentOf, targetAgentsOf } from "@/lib/tokens";
-import type { AgentName, Project, Prompt, Skill, TaskStatus } from "@/types";
+import type { AgentName, Project, Prompt, Skill } from "@/types";
 import {
   matchesPromptGlob,
   renderPromptFileBadge,
@@ -45,14 +44,6 @@ type DetailSource = "local" | "cloud";
 const PROJECT_PROMPT_AGENTS: AgentName[] = AGENTS.filter(
   (agent) => agent.projectPromptFile,
 ).map((agent) => agent.name);
-
-function taskStatusSummary(status: TaskStatus): { label: string; fg: string; dot: string } {
-  if (status === "ok") return { label: "OK", fg: "#5f7a3e", dot: palette.good };
-  if (status === "pending") return { label: "Pending", fg: "#9a6f0a", dot: palette.warn };
-  if (status === "failed") return { label: "Failed", fg: palette.crit, dot: palette.crit };
-  if (status === "skipped") return { label: "Skipped", fg: "#8a7a68", dot: "#c6b6a1" };
-  return { label: "Never", fg: "#a99a89", dot: "#d9c9b3" };
-}
 
 interface ProjectDetailViewProps {
   project: Project;
@@ -72,7 +63,6 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
   const promptsQuery = usePromptsQuery();
   const localSessionsQuery = useLocalSessionsQuery();
   const cloudSessionsQuery = useCloudSessionsQuery();
-  const sessionBackupsQuery = useSessionBackupsQuery();
   const setSkillTarget = useSetSkillTargetMutation();
   const setSkillDisabled = useSetSkillDisabledMutation();
   const setPromptTarget = useSetPromptTargetMutation();
@@ -96,21 +86,11 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
       session.project === dp.id &&
       (session.source === detailSource || session.source === "both"),
   );
-  const sessionBackup = (sessionBackupsQuery.data ?? []).find(
-    (backup) => backup.projectKey === dp.key,
-  );
   const skillError = skillsQuery.error ? getErrorMessage(skillsQuery.error) : null;
   const promptError = promptsQuery.error ? getErrorMessage(promptsQuery.error) : null;
   const detailSessionError = detailSessionsQuery.error
     ? getErrorMessage(detailSessionsQuery.error)
     : null;
-  const sessionBackupSummary = sessionBackup
-    ? taskStatusSummary(sessionBackup.task.status)
-    : sessionBackupsQuery.error
-      ? { label: "Error", fg: palette.crit, dot: palette.crit }
-      : sessionBackupsQuery.isLoading
-        ? { label: "Loading", fg: "#9a6f0a", dot: palette.warn }
-        : { label: "None", fg: "#a99a89", dot: "#d9c9b3" };
 
   async function toggleCell(skill: Skill, agent: AgentName) {
     if (skill.cells[agent] === "source") return;
@@ -507,55 +487,6 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
         <button onClick={() => go("session")} className="mt-3 inline-flex text-[12px] font-semibold text-nexus-accent hover:underline">
           Open in Session →
         </button>
-      </Card>
-
-      {/* Sync summary */}
-      <Card className="mt-4 p-5">
-        <span className="text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
-          Sync summary
-        </span>
-        <div className="mt-3.5 flex flex-col gap-0.5">
-          {[
-            {
-              label: "Skill Distribution",
-              detail: `${dpSkills.length} project ${dpSkills.length === 1 ? "skill" : "skills"} recorded`,
-              status: dpSkills.length > 0 ? "Recorded" : "None",
-              fg: dpSkills.length > 0 ? "#5f7a3e" : "#a99a89",
-              dot: dpSkills.length > 0 ? palette.good : "#d9c9b3",
-            },
-            {
-              label: "Session Backup",
-              detail: sessionBackup?.task.target ?? "No Session Backup task recorded",
-              status: sessionBackupSummary.label,
-              fg: sessionBackupSummary.fg,
-              dot: sessionBackupSummary.dot,
-            },
-            {
-              label: "Custom Task Groups",
-              detail: `${dp.sync} project-bound sync ${dp.sync === 1 ? "record" : "records"}`,
-              status: dp.sync > 0 ? "Recorded" : "None",
-              fg: dp.sync > 0 ? "#5f7a3e" : "#a99a89",
-              dot: dp.sync > 0 ? palette.good : "#d9c9b3",
-            },
-          ].map((sy) => (
-            <div
-              key={sy.label}
-              className="grid items-center gap-3.5 rounded-[10px] p-[11px] hover:bg-nexus-sand"
-              style={{ gridTemplateColumns: "180px 1fr 120px" }}
-            >
-              <div className="text-[12.5px] font-bold text-nexus-body">{sy.label}</div>
-              <div className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#a99a89]">
-                {sy.detail}
-              </div>
-              <div
-                className="inline-flex items-center gap-1.5 justify-self-end text-[11.5px] font-bold"
-                style={{ color: sy.fg }}
-              >
-                <Dot color={sy.dot} /> {sy.status}
-              </div>
-            </div>
-          ))}
-        </div>
       </Card>
 
       {/* Custom skills dirs modal */}
