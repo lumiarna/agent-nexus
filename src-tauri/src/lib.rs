@@ -59,6 +59,7 @@ pub fn run() {
             commands::sessions::get_local_session,
             commands::sessions::list_cloud_sessions,
             commands::sessions::list_local_sessions,
+            commands::sessions::open_local_session_source,
             commands::sessions::scan_cloud_sessions,
             commands::sessions::scan_local_sessions,
             commands::skills::list_skills,

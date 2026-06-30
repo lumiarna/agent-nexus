@@ -20,6 +20,11 @@ pub fn get_local_session(state: State<'_, AppState>, id: String) -> AppResult<Se
 }
 
 #[tauri::command]
+pub fn open_local_session_source(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    state.sessions.open_local_session_source(id)
+}
+
+#[tauri::command]
 pub async fn get_cloud_session(state: State<'_, AppState>, id: String) -> AppResult<Session> {
     let sessions = state.sessions.clone();
     sessions.get_cloud_session(id).await

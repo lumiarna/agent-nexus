@@ -258,12 +258,6 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" size="sm" className="px-3.5" onClick={() => toast(`Archive now → ${dp.name} (one-way Backup)`)}>
-              Archive now
-            </Button>
-            <Button variant="secondary" size="sm" className="px-3.5" onClick={() => toast(`Pull now → ${dp.name} (one-way Restore/Pull)`)}>
-              Pull now
-            </Button>
             <Button variant="secondary" size="sm" className="px-3.5" onClick={() => go("sync")}>
               Open in Sync
             </Button>
@@ -329,9 +323,12 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
             No project skills recorded for this repository.
           </div>
         )}
-        <button onClick={() => go("skill")} className="mx-5 mb-[18px] inline-flex text-[12px] font-semibold text-nexus-accent hover:underline">
-          Open in Skill →
-        </button>
+        <div className="mx-5 mb-[18px] flex items-center justify-between gap-3">
+          <button onClick={() => go("skill")} className="inline-flex text-[12px] font-semibold text-nexus-accent hover:underline">
+            Open in Skill →
+          </button>
+          <MatrixLegend />
+        </div>
       </Card>
 
       {/* Prompt table */}
@@ -424,10 +421,10 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
       {/* Session panel */}
       <Card className="mt-4 p-5">
         <div className="mb-3.5 flex items-center justify-between gap-3">
+          <span className="text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
+            Session
+          </span>
           <div className="flex items-center gap-3">
-            <span className="text-[11px] font-bold uppercase tracking-[.06em] text-nexus-accent">
-              Session
-            </span>
             <button
               onClick={() => setSessionDirOpen(true)}
               className="text-[11px] font-semibold text-nexus-accent hover:underline"
@@ -437,16 +434,16 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
                 ? ` · ${dp.sessionsDir}`
                 : ""}
             </button>
+            <Segmented<DetailSource>
+              options={[
+                { value: "local", label: "Local" },
+                { value: "cloud", label: "Cloud" },
+              ]}
+              value={detailSource}
+              onChange={setDetailSource}
+              size="md"
+            />
           </div>
-          <Segmented<DetailSource>
-            options={[
-              { value: "local", label: "Local" },
-              { value: "cloud", label: "Cloud" },
-            ]}
-            value={detailSource}
-            onChange={setDetailSource}
-            size="md"
-          />
         </div>
         {detailSessionsQuery.isLoading && dpSessions.length === 0 ? (
           <div className="rounded-[12px] border border-dashed border-nexus-border2 bg-nexus-sand p-[18px] text-center text-[12px] text-[#b3a999]">

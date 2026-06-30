@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dot, Input } from "@/components/ui/primitives";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { Markdown } from "@/components/ui/markdown";
+import { sessionsApi } from "@/lib/api/sessions";
 import { useNav } from "@/lib/nav";
 import { useProjectsQuery } from "@/lib/query/projects";
 import {
@@ -77,6 +78,19 @@ export function SessionPage() {
       if (rows.data) {
         toast(`Refreshed ${rows.data.length} ${rows.data.length === 1 ? "session" : "sessions"}`);
       }
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function openFile(session: Session) {
+    if (!desktop) {
+      toast(`Open file · ${session.file}`);
+      return;
+    }
+
+    try {
+      await sessionsApi.openLocalSource(session.id);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -298,49 +312,31 @@ export function SessionPage() {
               </div>
               <div className="mt-1.5 font-mono text-[11px] text-[#c3b9a8]">{sel.file}</div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="px-3.5"
-                  onClick={() => toast(`Open file · ${sel.file}`)}
-                >
-                  Open file
-                </Button>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  className="px-3.5"
-                  onClick={() => go("project", { projectId: sel.project })}
-                >
-                  Open Project ↗
-                </Button>
-                <div className="mx-1 h-[22px] w-px bg-nexus-border" />
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  className="px-3.5"
-                  onClick={() =>
-                    toast(`Archive now → ${sessionProjectLabel(sel)} (Project-level, one-way)`)
-                  }
-                >
-                  Archive now
-                </Button>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  className="px-3.5"
-                  onClick={() =>
-                    toast(`Pull now → ${sessionProjectLabel(sel)} (Project-level, one-way)`)
-                  }
-                >
-                  Pull now
-                </Button>
-              </div>
-              <div className="mt-2 text-[11px] text-[#c3b9a8]">
-                Open Project jumps to this session's Project detail. Quick actions run at Project
-                granularity; Archive and Pull are separate one-way tasks.
-              </div>
+              {source === "local" ? (
+                <>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="px-3.5"
+                      onClick={() => void openFile(sel)}
+                    >
+                      Open file
+                    </Button>
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      className="px-3.5"
+                      onClick={() => go("project", { projectId: sel.project })}
+                    >
+                      Open Project ↗
+                    </Button>
+                  </div>
+                  <div className="mt-2 text-[11px] text-[#c3b9a8]">
+                    Open Project jumps to this session's Project detail.
+                  </div>
+                </>
+              ) : null}
 
               <div className="mt-[18px] rounded-[14px] border border-nexus-panel bg-nexus-card px-[22px] py-5">
                 {previewError ? (

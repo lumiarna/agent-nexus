@@ -13,7 +13,9 @@ use serde::Serialize;
 use crate::{
     database::Database,
     error::{AppError, AppResult},
-    services::{outbound_request_log::OutboundRequestLogger, paths, sync, webdav},
+    services::{
+        outbound_request_log::OutboundRequestLogger, paths, sync, system_open::open_path, webdav,
+    },
 };
 
 const MAX_SESSION_INDEX_BYTES: u64 = 64 * 1024;
@@ -154,6 +156,13 @@ impl SessionService {
     pub fn get_local_session(&self, id: String) -> AppResult<Session> {
         let indexed = self.get_indexed_session(id, LOCAL_SOURCE_BIT)?;
         session_with_local_body_from_indexed(indexed)
+    }
+
+    pub fn open_local_session_source(&self, id: String) -> AppResult<()> {
+        let indexed = self.get_indexed_session(id, LOCAL_SOURCE_BIT)?;
+        let full_path = resolve_session_root(&indexed.project_path, &indexed.sessions_dir)
+            .join(&indexed.file_path);
+        open_path(&full_path)
     }
 
     pub async fn get_cloud_session(&self, id: String) -> AppResult<Session> {
