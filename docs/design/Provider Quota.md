@@ -115,22 +115,24 @@ Provider Quota 子系统采用 **adapter + ports** 分层：
   "user_id": "…",
   "quota_key": "big_model_credits",
   "status": "active" | "restricted",
-  "plan_quota":           { "quota_summary": { "used_value", "limit_value", "usage_percentage" } },
-  "resource_package_quota":{ "quota_summary": { "used_value", "limit_value", "usage_percentage" } },
+  "plan_quota":           { "quota_summary": { "used_value", "limit_value", "usage_percentage", "unit" } },
+  "resource_package_quota":{ "quota_summary": { "used_value", "limit_value", "usage_percentage", "unit" } },
   "total_quota":          { "quota_summary": { … } },
   "lastResetAt":   <unix-ms>,
   "nextResetAt":   <unix-ms>
 }
 ```
 
-只取 `plan_quota.quota_summary` 与 `resource_package_quota.quota_summary`（+ `nextResetAt` → ISO8601）。**故意不取** `quota_detail[]` —— schema 演进风险（`source` 枚举日后可能扩），CLAUDE.md #8 拒绝启发式兜底。
+DTO 用 `serde(rename_all = "snake_case")` 解析，并通过 `serde(alias = "nextResetAt")` / `serde(alias = "lastResetAt")` 兼容 camelCase 字段名。只取 `plan_quota.quota_summary` 与 `resource_package_quota.quota_summary`（+ `nextResetAt` → ISO8601）。**故意不取** `quota_detail[]` —— schema 演进风险（`source` 枚举日后可能扩），CLAUDE.md #8 拒绝启发式兜底。
 
 **窗口**：
-- 主窗 `Monthly limit`：`used = percent_to_u8(plan_quota.usage_percentage)`，`value_label = "<used_value> / <limit_value> <unit>"`，`reset_at = unix_millis_to_iso(nextResetAt)`，`kind = Monthly`。
-- 资源包窗 `Resource pack`：仅当 `limit_value > 0` 时追加（避免显示「0 / 0」噪音），同上 schema。
-- `primary = None`，避免 Qoder 顶部主指标显示百分比；卡片直接显示窗口中的明确用量数字。
+- 主窗 `Monthly limit`：`kind = Monthly`，`reset_at = unix_millis_to_iso(nextResetAt)`；`used` 优先取 `usage_percentage`，若缺失则回退到 `used_value / limit_value * 100`（`limit_value <= 0` 时整窗被丢弃，避免出现空百分比）。
+- 资源包窗 `Resource pack`：仅当 `limit_value > 0` 时追加（避免显示「0 / 0」噪音），其余 schema 同上。
+- 两个 window 都填 `value_label = "<used> / <limit> <unit>"`：`unit` 缺省时回落 `"credits"`；整数按千分位分隔（如 `17 / 3,000 credits`），小数保留两位自动去尾零。
+- `primary` 始终为 `None` —— Qoder 卡片不展示顶部百分比主指标，只显示窗口中的明确用量数字。
+- `kind = Monthly` + `reset_at` 让前端 `quotaDisplay` 推导出月度 pace marker（黑色竖线）。
 - `status == "restricted"` **不**映射为 `Failed`，仍保持 `Available` —— Qoder 网页配额耗尽时仍正常渲染数字，行为一致。
-- Plan 字段固定为 `"Qoder"`（API 不返回）。
+- `plan` 字段固定为 `"Qoder"`（API 不返回）。
 
 ### MiniMax Token Plan CN
 
