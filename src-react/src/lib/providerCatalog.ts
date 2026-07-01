@@ -10,6 +10,14 @@ const BUILT_IN_PROVIDERS = [
     needsParams: true,
   },
   {
+    id: "qoder",
+    name: "Qoder",
+    plan: "Personal plan",
+    status: "nocreds",
+    credential: "manual · session cookie from qoder.com DevTools",
+    needsParams: true,
+  },
+  {
     id: "minimax-token",
     name: "MiniMax Token Plan CN",
     plan: "Token plan",

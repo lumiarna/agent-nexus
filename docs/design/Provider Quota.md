@@ -30,6 +30,7 @@ Provider Quota 子系统采用 **adapter + ports** 分层：
 | CodeX | `<codex_config_dir>/auth.json` | — | OAuth |
 | Copilot | `settings.COPILOT_GITHUB_TOKEN`（用户手动） | `${OPENCODE_AUTH_FILE}` 下 `github-copilot.{access,key}` | **不读** `${GITHUB_TOKEN}` / `${GH_TOKEN}` |
 | OpenCode Go | `settings.OPENCODE_GO_WORKSPACE_ID` + `settings.OPENCODE_GO_AUTH_COOKIE` | — | 完全手动；workspace id 缺 `wrk_` 前缀时自动补齐 |
+| Qoder | `settings.QODER_SESSION_COOKIE` | — | 个人账号手动粘贴 session cookie；不读 `QODER_PERSONAL_ACCESS_TOKEN`（CLI 用） |
 | MiniMax Token Plan CN | `settings.PROVIDER_API_KEY_MINIMAX_TOKEN` | `${OPENCODE_AUTH_FILE}` 下 `minimax-cn-coding-plan.key/.access` | — |
 | DeepSeek | `settings.PROVIDER_API_KEY_DEEPSEEK` | `${OPENCODE_AUTH_FILE}` 下 `deepseek.key/.access` | — |
 | OpenRouter | `settings.PROVIDER_API_KEY_OPENROUTER` | `${OPENCODE_AUTH_FILE>` 下 `openrouter.key/.access` | — |
@@ -90,6 +91,46 @@ Provider Quota 子系统采用 **adapter + ports** 分层：
 **Auth 失效判定**：401/403 视为 `expired`；此外若最终 URL 重定向到 `auth.opencode.ai` / `/authorize` / `/login`，也判定为 auth 失效。
 
 **解析**：HTML 中抓 `rollingUsage` / `weeklyUsage` / `monthlyUsage` 三组对象，每组取 `usagePercent` + `resetInSec`。Plan 来自 HTML 中 `subscriptionPlan`，缺省 `"Go"`。
+
+### Qoder
+
+**auth 来源**：用户在 Settings 手动填 `QODER_SESSION_COOKIE`（DevTools 从 `qoder.com` 的 cookie 面板复制 `qoder_session_cookie` 的值）。空即 `nocreds`。**不**读 CLI 的 `QODER_PERSONAL_ACCESS_TOKEN`（那是 qodercli 二进制专用，与本端点无关）。
+
+**Quota 端点**：`GET https://qoder.com/api/v2/me/usages/big_model_credits`。硬编码必要头：
+
+- `Cookie: qoder_session_cookie=<user value>`
+- `bx-v: 2.5.35`（阿里 baxia 风控 SDK 版本号；硬编码有版本漂移风险，详见踩坑记录）
+- `x-csrf-token: _echo_csrf_using_sec_fetch_site_`（Next.js 风格的 CSRF echo 约定）
+- `x-requested-with: XMLHttpRequest`
+- `Referer: https://qoder.com/account/usage`
+- `Sec-Fetch-Site: same-origin` / `Sec-Fetch-Mode: cors` / `Sec-Fetch-Dest: empty`
+- Chrome 149 UA
+
+**Auth 失效判定**：401/403 → `expired`，错误信息引导用户「从 qoder.com DevTools 重新粘贴 session cookie」。不在 browser 里跑、无法预知是否能稳定通过 Next.js CSRF 检查；写明 `bx-v` 是脆弱项。
+
+**解析**：JSON 响应字段为：
+
+```jsonc
+{
+  "user_id": "…",
+  "quota_key": "big_model_credits",
+  "status": "active" | "restricted",
+  "plan_quota":           { "quota_summary": { "used_value", "limit_value", "usage_percentage" } },
+  "resource_package_quota":{ "quota_summary": { "used_value", "limit_value", "usage_percentage" } },
+  "total_quota":          { "quota_summary": { … } },
+  "lastResetAt":   <unix-ms>,
+  "nextResetAt":   <unix-ms>
+}
+```
+
+只取 `plan_quota.quota_summary` 与 `resource_package_quota.quota_summary`（+ `nextResetAt` → ISO8601）。**故意不取** `quota_detail[]` —— schema 演进风险（`source` 枚举日后可能扩），CLAUDE.md #8 拒绝启发式兜底。
+
+**窗口**：
+- 主窗 `Monthly limit`：`used = percent_to_u8(plan_quota.usage_percentage)`，`value_label = "<used_value> / <limit_value> <unit>"`，`reset_at = unix_millis_to_iso(nextResetAt)`，`kind = Monthly`。
+- 资源包窗 `Resource pack`：仅当 `limit_value > 0` 时追加（避免显示「0 / 0」噪音），同上 schema。
+- `primary = None`，避免 Qoder 顶部主指标显示百分比；卡片直接显示窗口中的明确用量数字。
+- `status == "restricted"` **不**映射为 `Failed`，仍保持 `Available` —— Qoder 网页配额耗尽时仍正常渲染数字，行为一致。
+- Plan 字段固定为 `"Qoder"`（API 不返回）。
 
 ### MiniMax Token Plan CN
 
@@ -158,6 +199,7 @@ Provider Quota 子系统采用 **adapter + ports** 分层：
 - `CLAUDE_CONFIG_DIR` / `CODEX_CONFIG_DIR` — 改写默认配置目录
 - `COPILOT_GITHUB_TOKEN` — Copilot 手动 token
 - `OPENCODE_GO_WORKSPACE_ID` / `OPENCODE_GO_AUTH_COOKIE` — OpenCode Go 凭据
+- `QODER_SESSION_COOKIE` — Qoder 个人账号手动 session cookie
 - `PROVIDER_API_KEY_MINIMAX_TOKEN` / `PROVIDER_API_KEY_DEEPSEEK` / `PROVIDER_API_KEY_OPENROUTER` — 三个 configured provider 的手动 API key
 
 ## 与 BR 文档的差异
@@ -169,6 +211,7 @@ Provider Quota 子系统采用 **adapter + ports** 分层：
 | MiniMax / DeepSeek / OpenRouter | BR 未列入 provider 清单 | 已实现 | 在 BR Provider 章节补列三条；细节留在本文 |
 | OpenCode 自定义 Provider | BR 第 58 行提到"自动扫描出的其他 Provider" | 已实现，但只支持 npm = `@ai-sdk/openai-compatible` / `@ai-sdk/openai` | 在 BR 中明示支持范围 |
 | OpenCode Go plan 标签 | 未指定 | 固定 `"Go"`，HTML `subscriptionPlan` 优先生效 | 在 BR 中标"默认 Go，以官方页面为准" |
+| Qoder 个人账号 | BR 未列入 | 已实现（adapter + 个人 cookie + JSON endpoint） | 在 BR Provider 章节补列；风控脆弱性在本文踩坑记录中提示 |
 
 ## 不做的事
 

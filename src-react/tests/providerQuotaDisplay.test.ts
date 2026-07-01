@@ -130,6 +130,39 @@ test("balance-only windows render the backend value label without a primary perc
   });
 });
 
+test("Qoder monthly windows keep numeric value labels and pace markers", () => {
+  const provider = {
+    primary: null,
+    windows: [
+      {
+        label: "Monthly limit",
+        used: 1,
+        kind: "monthly",
+        valueLabel: "17 / 3,000 credits",
+        resetAt: "2026-08-01T00:00:00Z",
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    formatProviderQuotaDisplay(provider, { now: new Date("2026-07-16T12:00:00Z") }),
+    {
+      primaryLabel: "",
+      primaryCaption: "",
+      windows: [
+        {
+          label: "Monthly limit",
+          usedLabel: "17 / 3,000 credits",
+          used: 1,
+          reset: "Resets Aug 1",
+          unlimited: false,
+          pace: 50,
+        },
+      ],
+    },
+  );
+});
+
 test("pace is derived only for weekly/monthly windows that carry a resetAt", () => {
   const provider = {
     primary: null,

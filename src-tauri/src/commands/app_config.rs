@@ -4,7 +4,7 @@ use nexus_core::{
     error::AppResult,
     services::app_config::{
         AgentDisplayPreferences, OpenCodeGoConnectionParams, ProviderConnectionParams,
-        ProviderDisplayPreferences,
+        ProviderDisplayPreferences, QoderConnectionParams,
     },
 };
 
@@ -33,6 +33,19 @@ pub fn set_opencode_go_connection_params(
     params: OpenCodeGoConnectionParams,
 ) -> AppResult<()> {
     state.app_config.set_opencode_go_connection_params(&params)
+}
+
+#[tauri::command]
+pub fn get_qoder_connection_params(state: State<'_, AppState>) -> AppResult<QoderConnectionParams> {
+    state.app_config.get_qoder_connection_params()
+}
+
+#[tauri::command]
+pub fn set_qoder_connection_params(
+    state: State<'_, AppState>,
+    params: QoderConnectionParams,
+) -> AppResult<()> {
+    state.app_config.set_qoder_connection_params(&params)
 }
 
 #[tauri::command]

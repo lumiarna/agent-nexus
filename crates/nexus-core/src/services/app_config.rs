@@ -19,6 +19,7 @@ const DEFAULT_CODEX_CONFIG_DIR: &str = "~/.codex";
 pub const COPILOT_GITHUB_TOKEN_KEY: &str = "COPILOT_GITHUB_TOKEN";
 pub const OPENCODE_GO_WORKSPACE_ID_KEY: &str = "OPENCODE_GO_WORKSPACE_ID";
 pub const OPENCODE_GO_AUTH_COOKIE_KEY: &str = "OPENCODE_GO_AUTH_COOKIE";
+pub const QODER_SESSION_COOKIE_KEY: &str = "QODER_SESSION_COOKIE";
 const PROVIDER_ORDER_KEY: &str = "PROVIDER_ORDER";
 const MINIMAX_TOKEN_PLAN_CN_API_KEY_KEY: &str = "PROVIDER_API_KEY_MINIMAX_TOKEN";
 const DEEPSEEK_API_KEY_KEY: &str = "PROVIDER_API_KEY_DEEPSEEK";
@@ -43,6 +44,12 @@ impl Default for TrayMetric {
 pub struct OpenCodeGoConnectionParams {
     pub workspace_id: String,
     pub auth_cookie: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QoderConnectionParams {
+    pub session_cookie: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +152,26 @@ impl AppConfigService {
             "INSERT INTO settings (key, value) VALUES (?1, ?2) \
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![OPENCODE_GO_AUTH_COOKIE_KEY, params.auth_cookie.trim()],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_qoder_connection_params(&self) -> AppResult<QoderConnectionParams> {
+        Ok(QoderConnectionParams {
+            session_cookie: self
+                .read_setting(QODER_SESSION_COOKIE_KEY)?
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+        })
+    }
+
+    pub fn set_qoder_connection_params(&self, params: &QoderConnectionParams) -> AppResult<()> {
+        let conn = self.db.connection()?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![QODER_SESSION_COOKIE_KEY, params.session_cookie.trim()],
         )?;
         Ok(())
     }

@@ -1,8 +1,13 @@
 import type { ReactNode } from "react";
-import { providersApi, type OpenCodeGoConnectionParams } from "@/lib/api/providers";
+import {
+  providersApi,
+  type OpenCodeGoConnectionParams,
+  type QoderConnectionParams,
+} from "@/lib/api/providers";
 import { ApiKeyForm } from "./ApiKeyForm";
 import { CopilotTokenForm } from "./CopilotTokenForm";
 import { OpenCodeGoConnectionForm } from "./OpenCodeGoConnectionForm";
+import { QoderConnectionForm } from "./QoderConnectionForm";
 
 export interface ApiKeyProviderHint {
   placeholder: string;
@@ -73,6 +78,19 @@ const FIXED_EDITORS: Record<string, ConnectionEditor> = {
     },
     render: (value, onChange) => (
       <OpenCodeGoConnectionForm value={value as OpenCodeGoConnectionParams} onChange={onChange} />
+    ),
+  },
+  qoder: {
+    empty: { sessionCookie: "" } satisfies QoderConnectionParams,
+    load: () => providersApi.getQoderConnectionParams(),
+    save: (value) => {
+      const params = value as QoderConnectionParams;
+      return providersApi.setQoderConnectionParams({
+        sessionCookie: params.sessionCookie.trim(),
+      });
+    },
+    render: (value, onChange) => (
+      <QoderConnectionForm value={value as QoderConnectionParams} onChange={onChange} />
     ),
   },
 };

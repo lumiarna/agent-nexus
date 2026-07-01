@@ -309,6 +309,25 @@ async fn provider_quota_service_dispatches_opencode_go_adapter_without_connectio
 }
 
 #[tokio::test]
+async fn provider_quota_service_dispatches_qoder_adapter_without_session_cookie() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
+    let snapshot = service
+        .get_provider_quota("qoder")
+        .await
+        .expect("dispatch qoder adapter");
+
+    assert_eq!(snapshot.provider_id, "qoder");
+    assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
+    assert_eq!(
+        snapshot.credential.as_deref(),
+        Some("manual qoder session cookie"),
+    );
+    assert!(snapshot.windows.is_empty());
+    assert_eq!(snapshot.error, None);
+}
+
+#[tokio::test]
 #[serial]
 async fn provider_quota_service_dispatches_minimax_token_plan_cn_adapter_without_credentials() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));

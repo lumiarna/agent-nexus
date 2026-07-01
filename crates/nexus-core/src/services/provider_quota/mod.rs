@@ -16,6 +16,7 @@ mod providers {
     pub(crate) mod copilot;
     pub(crate) mod opencode_custom;
     pub(crate) mod opencode_go;
+    pub(crate) mod qoder;
 }
 
 pub(crate) use claude_auth::{ClaudeAccessToken, ClaudeAuthError};
@@ -46,6 +47,7 @@ pub use providers::{
         parse_opencode_provider_token,
     },
     opencode_go::opencode_go_quota_from_html,
+    qoder::qoder_quota_from_response,
 };
 pub(crate) use shared::http_client;
 pub use shared::{llm_gateway_quota_from_headers, llm_gateway_quota_from_headers_at};
@@ -60,6 +62,7 @@ use providers::{
     copilot::CopilotQuotaAdapter,
     opencode_custom::OpenCodeCustomProviderCredentials,
     opencode_go::{OpenCodeGoCredentials, OpenCodeGoQuotaAdapter},
+    qoder::{QoderCredentials, QoderQuotaAdapter, QoderUsageResponse},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -164,6 +167,8 @@ type ConfiguredProviderUsageFuture<'a> = Pin<
 type OpenCodeCustomProviderUsageFuture<'a> = Pin<
     Box<dyn Future<Output = Result<Vec<(String, String)>, ProviderQuotaPollError>> + Send + 'a>,
 >;
+type QoderUsageFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<QoderUsageResponse, ProviderQuotaPollError>> + Send + 'a>>;
 
 pub(crate) trait ProviderCredentialSource: Send + Sync {
     fn claude_code_credentials(
@@ -179,6 +184,10 @@ pub(crate) trait ProviderCredentialSource: Send + Sync {
         &self,
         app_config: &AppConfigService,
     ) -> AppResult<Option<OpenCodeGoCredentials>>;
+    fn qoder_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<QoderCredentials>>;
     fn configured_provider_credentials(
         &self,
         app_config: &AppConfigService,
@@ -215,6 +224,7 @@ pub(crate) trait ProviderUsageTransport: Send + Sync {
         workspace_id: &'a str,
         auth_cookie: &'a str,
     ) -> OpenCodeGoPageFuture<'a>;
+    fn qoder_usage<'a>(&'a self, session_cookie: &'a str) -> QoderUsageFuture<'a>;
     fn configured_provider_usage<'a>(
         &'a self,
         config: &'static ConfiguredProviderQuotaConfig,
@@ -266,6 +276,7 @@ static CLAUDE_CODE_QUOTA_ADAPTER: ClaudeCodeQuotaAdapter = ClaudeCodeQuotaAdapte
 static CODEX_QUOTA_ADAPTER: CodexQuotaAdapter = CodexQuotaAdapter;
 static COPILOT_QUOTA_ADAPTER: CopilotQuotaAdapter = CopilotQuotaAdapter;
 static OPENCODE_GO_QUOTA_ADAPTER: OpenCodeGoQuotaAdapter = OpenCodeGoQuotaAdapter;
+static QODER_QUOTA_ADAPTER: QoderQuotaAdapter = QoderQuotaAdapter;
 static CONFIGURED_PROVIDER_QUOTA_ADAPTER: ConfiguredProviderQuotaAdapter =
     ConfiguredProviderQuotaAdapter;
 
@@ -324,12 +335,13 @@ impl ProviderQuotaService {
     }
 }
 
-fn provider_quota_adapters() -> [&'static dyn ProviderQuotaAdapter; 5] {
+fn provider_quota_adapters() -> [&'static dyn ProviderQuotaAdapter; 6] {
     [
         &CLAUDE_CODE_QUOTA_ADAPTER,
         &CODEX_QUOTA_ADAPTER,
         &COPILOT_QUOTA_ADAPTER,
         &OPENCODE_GO_QUOTA_ADAPTER,
+        &QODER_QUOTA_ADAPTER,
         &CONFIGURED_PROVIDER_QUOTA_ADAPTER,
     ]
 }
@@ -358,6 +370,13 @@ impl ProviderCredentialSource for LocalCredentialSource {
         app_config: &AppConfigService,
     ) -> AppResult<Option<OpenCodeGoCredentials>> {
         providers::opencode_go::read_credentials(app_config)
+    }
+
+    fn qoder_credentials(
+        &self,
+        app_config: &AppConfigService,
+    ) -> AppResult<Option<QoderCredentials>> {
+        providers::qoder::read_credentials(app_config)
     }
 
     fn configured_provider_credentials(
@@ -437,6 +456,13 @@ impl ProviderUsageTransport for HttpUsageTransport {
         ))
     }
 
+    fn qoder_usage<'a>(&'a self, session_cookie: &'a str) -> QoderUsageFuture<'a> {
+        Box::pin(providers::qoder::fetch_usage(
+            session_cookie,
+            &self.request_logger,
+        ))
+    }
+
     fn configured_provider_usage<'a>(
         &'a self,
         config: &'static ConfiguredProviderQuotaConfig,
@@ -479,7 +505,7 @@ mod tests {
     };
 
     use super::*;
-
+    use crate::services::provider_quota::QoderUsageFuture;
     struct StaticCredentialSource {
         claude_credentials: Option<ClaudeCodeCredentials>,
     }
@@ -507,6 +533,13 @@ mod tests {
             &self,
             _app_config: &AppConfigService,
         ) -> AppResult<Option<OpenCodeGoCredentials>> {
+            Ok(None)
+        }
+
+        fn qoder_credentials(
+            &self,
+            _app_config: &AppConfigService,
+        ) -> AppResult<Option<QoderCredentials>> {
             Ok(None)
         }
 
@@ -614,6 +647,10 @@ mod tests {
         ) -> OpenCodeCustomProviderUsageFuture<'a> {
             Box::pin(async { unreachable!("custom provider usage is not part of this test") })
         }
+
+        fn qoder_usage<'a>(&'a self, _session_cookie: &'a str) -> QoderUsageFuture<'a> {
+            Box::pin(async { unreachable!("qoder usage is not part of this test") })
+        }
     }
 
     impl ProviderUsageTransport for RecordingClaudeTransport {
@@ -692,6 +729,10 @@ mod tests {
             _credentials: &'a OpenCodeCustomProviderCredentials,
         ) -> OpenCodeCustomProviderUsageFuture<'a> {
             Box::pin(async { unreachable!("custom provider usage is not part of this test") })
+        }
+
+        fn qoder_usage<'a>(&'a self, _session_cookie: &'a str) -> QoderUsageFuture<'a> {
+            Box::pin(async { unreachable!("qoder usage is not part of this test") })
         }
     }
 

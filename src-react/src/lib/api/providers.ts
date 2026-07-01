@@ -34,6 +34,10 @@ export interface OpenCodeGoConnectionParams {
   authCookie: string;
 }
 
+export interface QoderConnectionParams {
+  sessionCookie: string;
+}
+
 export interface ProviderConnectionParams {
   apiKey: string;
 }
@@ -103,6 +107,12 @@ export const providersApi = {
   },
   setOpenCodeGoConnectionParams(params: OpenCodeGoConnectionParams): Promise<void> {
     return invokeCommand<void>("set_opencode_go_connection_params", { params });
+  },
+  getQoderConnectionParams(): Promise<QoderConnectionParams> {
+    return invokeCommand<QoderConnectionParams>("get_qoder_connection_params");
+  },
+  setQoderConnectionParams(params: QoderConnectionParams): Promise<void> {
+    return invokeCommand<void>("set_qoder_connection_params", { params });
   },
   getProviderConnectionParams(providerId: string): Promise<ProviderConnectionParams> {
     return invokeCommand<ProviderConnectionParams>("get_provider_connection_params", {
