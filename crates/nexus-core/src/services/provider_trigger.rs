@@ -505,10 +505,8 @@ impl ProviderTriggerService {
         } else {
             let next_anchor =
                 next_cron_occurrence_after_local(window_align_cron, now_epoch_seconds)?;
-            let next_attempt_at = next_window_alignment_attempt_after_success(
-                window_align_cron,
-                now_epoch_seconds,
-            )?;
+            let next_attempt_at =
+                next_window_alignment_attempt_after_success(window_align_cron, now_epoch_seconds)?;
             conn.execute(
                 "UPDATE provider_schedule_settings
                  SET window_align_anchor_at = ?2,

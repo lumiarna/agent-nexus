@@ -539,41 +539,41 @@ fn migrate_to_v7(conn: &Connection) -> AppResult<()> {
     let result = (|| -> AppResult<()> {
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING",
-            params![
+            (
                 PROJECT_SYMLINK_IGNORED_DIRS_KEY,
-                DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS
-            ],
+                DEFAULT_PROJECT_SYMLINK_IGNORED_DIRS,
+            ),
         )?;
         conn.execute(
             "INSERT INTO settings (key, value) \
              SELECT ?1, value FROM settings WHERE key = ?2 \
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![
+            (
                 PROJECT_SYMLINK_IGNORED_DIRS_KEY,
-                LEGACY_PROJECT_SYMLINK_IGNORED_DIRS_KEY
-            ],
+                LEGACY_PROJECT_SYMLINK_IGNORED_DIRS_KEY,
+            ),
         )?;
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO NOTHING",
-            params![
+            (
                 PROJECT_SYMLINK_MAX_DEPTH_KEY,
-                DEFAULT_PROJECT_SYMLINK_MAX_DEPTH
-            ],
+                DEFAULT_PROJECT_SYMLINK_MAX_DEPTH,
+            ),
         )?;
         conn.execute(
             "INSERT INTO settings (key, value) \
              SELECT ?1, value FROM settings WHERE key = ?2 \
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![
+            (
                 PROJECT_SYMLINK_MAX_DEPTH_KEY,
-                LEGACY_PROJECT_SYMLINK_MAX_DEPTH_KEY
-            ],
+                LEGACY_PROJECT_SYMLINK_MAX_DEPTH_KEY,
+            ),
         )?;
         conn.execute(
             "DELETE FROM settings WHERE key IN (?1, ?2)",
-            params![
+            [
                 LEGACY_PROJECT_SYMLINK_IGNORED_DIRS_KEY,
-                LEGACY_PROJECT_SYMLINK_MAX_DEPTH_KEY
+                LEGACY_PROJECT_SYMLINK_MAX_DEPTH_KEY,
             ],
         )?;
         conn.execute("UPDATE schema_version SET version = 7", [])?;
