@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm --dir src-react dev",
     "beforeBuildCommand": "pnpm --dir src-react build",
-    "devUrl": "http://localhost:3000",
+    "devUrl": "http://localhost:3001",
     "frontendDist": "../src-react/dist"
   },
   "app": {

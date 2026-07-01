@@ -118,6 +118,24 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
         }),
         provider: None,
     },
+    AgentCapabilitySurface {
+        name: "Qoder",
+        abbr: "QO",
+        color: "#0ea5e9",
+        config_dir: "~/.qoder",
+        skill: Some(SkillSurface {
+            global_dir: "~/.qoder/skills",
+            project_dir: ".qoder/skills",
+        }),
+        prompt: Some(PromptSurface {
+            global_file: "~/.qoder/AGENTS.md",
+            project_file: None,
+        }),
+        provider: Some(ProviderSurface {
+            provider_id: "qoder",
+            credential_hint: Some("manual qoder session cookie"),
+        }),
+    },
 ];
 
 pub fn agent_capability_surfaces() -> &'static [AgentCapabilitySurface] {

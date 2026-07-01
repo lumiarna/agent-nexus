@@ -14,7 +14,8 @@ fn defines_agent_capability_surfaces_in_canonical_order() {
             "Claude Code",
             "CodeX",
             "Copilot",
-            "OpenCode"
+            "OpenCode",
+            "Qoder"
         ]
     );
 
@@ -91,7 +92,8 @@ fn exposes_agent_backed_provider_surfaces_without_generic_agent() {
         [
             ("Claude Code", "claude"),
             ("CodeX", "codex"),
-            ("Copilot", "copilot")
+            ("Copilot", "copilot"),
+            ("Qoder", "qoder")
         ]
     );
     assert!(!providers.iter().any(|(name, _)| *name == "Generic Agent"));

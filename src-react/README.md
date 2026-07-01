@@ -13,7 +13,7 @@ Phase 1 mock UI: all 7 pages with full interactions, data from in-memory mock.
 # Install dependencies
 pnpm install
 
-# Development server (http://localhost:3000)
+# Development server (http://localhost:3001)
 pnpm dev
 
 # Type check
@@ -29,3 +29,4 @@ pnpm build
 pnpm -C src-react install
 pnpm -C src-react dev
 ```
+

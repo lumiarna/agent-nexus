@@ -60,12 +60,19 @@ function OpenCodeLogo({ className }: LogoProps) {
   );
 }
 
+function QoderLogo({ className }: LogoProps) {
+  // docs/prototype/icons/qoder.svg 的原始文件是 640x180 的完整品牌 logo（图标 + 文字）。
+  // 为了适配 Agent Matrix 中 15x15 的小尺寸，只取了左侧 180x180 的图标部分放在 public 目录。
+  return <img src="/qoder-logo.svg" alt="Qoder" className={className} />;
+}
+
 const LOGOS: Record<AgentName, (props: LogoProps) => JSX.Element> = {
   "Generic Agent": GenericAgentLogo,
   "Claude Code": ClaudeLogo,
   CodeX: OpenAILogo,
   Copilot: GithubLogo,
   OpenCode: OpenCodeLogo,
+  Qoder: QoderLogo,
 };
 
 /** The brand mark for an agent, tinted with its canonical color. Wrap in a

@@ -100,6 +100,20 @@ export const AGENTS = [
       { key: "OPENCODE_PROMPT_FILE", value: "~/.config/opencode/AGENTS.md", derivedFrom: "OPENCODE_CONFIG_DIR" },
     ],
   }),
+  agent({
+    name: "Qoder",
+    abbr: "QO",
+    color: "#0ea5e9",
+    projectSkillDir: ".qoder/skills",
+    surfaces: ["skill", "prompt", "provider"],
+    providerId: "qoder",
+    authFile: "manual qoder session cookie",
+    dirs: [
+      { key: "QODER_CONFIG_DIR", value: "~/.qoder" },
+      { key: "QODER_SKILLS_DIR", value: "~/.qoder/skills", derivedFrom: "QODER_CONFIG_DIR" },
+      { key: "QODER_PROMPT_FILE", value: "~/.qoder/AGENTS.md", derivedFrom: "QODER_CONFIG_DIR" },
+    ],
+  }),
 ] as const;
 
 export type AgentName = (typeof AGENTS)[number]["name"];

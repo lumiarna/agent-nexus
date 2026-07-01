@@ -8,7 +8,7 @@ import { fileURLToPath, URL } from "node:url";
 //   devUrl -> http://localhost:3000, frontendDist -> this dist/.
 export default defineConfig({
   plugins: [react()],
-  server: { port: 3000, strictPort: true },
+  server: { port: 3001, strictPort: true },
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
