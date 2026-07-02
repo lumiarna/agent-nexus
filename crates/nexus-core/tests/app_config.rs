@@ -145,6 +145,7 @@ fn provider_display_preferences_round_trip_through_settings() {
         ProviderDisplayPreferences {
             card_visibility: Vec::new(),
             tray_metric: TrayMetric::Remaining,
+            tray_visibility: Vec::new(),
         },
     );
 
@@ -153,11 +154,13 @@ fn provider_display_preferences_round_trip_through_settings() {
             .set_provider_display_preferences(&ProviderDisplayPreferences {
                 card_visibility: vec!["copilot".to_string(), "claude".to_string()],
                 tray_metric: TrayMetric::Used,
+                tray_visibility: vec!["claude".to_string()],
             })
             .expect("save provider display preferences"),
         ProviderDisplayPreferences {
             card_visibility: vec!["copilot".to_string(), "claude".to_string()],
             tray_metric: TrayMetric::Used,
+            tray_visibility: vec!["claude".to_string()],
         },
     );
 
@@ -168,6 +171,7 @@ fn provider_display_preferences_round_trip_through_settings() {
         ProviderDisplayPreferences {
             card_visibility: vec!["copilot".to_string(), "claude".to_string()],
             tray_metric: TrayMetric::Used,
+            tray_visibility: vec!["claude".to_string()],
         },
     );
 }
@@ -197,6 +201,7 @@ fn provider_display_preferences_defaults_tray_metric_for_legacy_rows() {
         ProviderDisplayPreferences {
             card_visibility: vec!["copilot".to_string(), "claude".to_string()],
             tray_metric: TrayMetric::Remaining,
+            tray_visibility: Vec::new(),
         },
     );
 }

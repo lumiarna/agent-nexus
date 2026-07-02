@@ -29,6 +29,16 @@ export function quotaColor(used: number): string {
   return used >= 90 ? palette.crit : used >= 70 ? palette.warn : palette.good;
 }
 
+/** Brand identity (display name + colour) for a Provider id, used to paint its
+ *  Windows-taskbar tray icon. Agent-backed providers reuse their Agent colour;
+ *  others fall back to the neutral accent so an enabled tray icon always renders. */
+export function providerBrand(providerId: string): { name: string; color: string } {
+  const agent = AGENTS.find((a) => a.providerId === providerId);
+  return agent
+    ? { name: agent.name, color: agent.color }
+    : { name: providerId, color: palette.accent };
+}
+
 /** Provider status (incl. the transient "loading" UI state) → label + color. */
 export type ProviderUiStatus = ProviderStatus | "loading";
 

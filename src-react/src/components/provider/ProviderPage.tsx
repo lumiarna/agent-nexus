@@ -650,20 +650,23 @@ export function ProviderPage() {
                     </div>
                     <Toggle checked={cardVisibleNow} onChange={() => {}} />
                   </div>
-                  <div
-                    onClick={() => setPendingTrayVisible(!trayVisibleNow)}
-                    className="flex cursor-pointer items-center justify-between gap-3 rounded-[11px] px-[13px] py-[11px] hover:bg-nexus-sand"
-                  >
-                    <div>
-                      <div className="text-[13px] font-semibold text-nexus-body">
-                        Show in Windows taskbar
+                  {cfg.primary != null ? (
+                    <div
+                      onClick={() => setPendingTrayVisible(!trayVisibleNow)}
+                      className="flex cursor-pointer items-center justify-between gap-3 rounded-[11px] px-[13px] py-[11px] hover:bg-nexus-sand"
+                    >
+                      <div>
+                        <div className="text-[13px] font-semibold text-nexus-body">
+                          Show in Windows taskbar
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-[#a99a89]">
+                          Icon shows the shortest-window {display.trayMetric.toLowerCase()} number —
+                          separate surface, independent of the card above
+                        </div>
                       </div>
-                      <div className="mt-0.5 text-[11px] text-[#a99a89]">
-                        Separate surface — independent of the card above
-                      </div>
+                      <Toggle checked={trayVisibleNow} onChange={() => {}} />
                     </div>
-                    <Toggle checked={trayVisibleNow} onChange={() => {}} />
-                  </div>
+                  ) : null}
                 </div>
                 <div className="mt-2.5 rounded-[11px] border border-nexus-border bg-nexus-bg px-[13px] py-[11px] text-[11.5px] leading-[1.5] text-[#8a7a68]">
                   Quota metric (<b className="text-[#6a6055]">used / remaining</b>) is a global
@@ -737,13 +740,13 @@ export function ProviderPage() {
                       if (pendingCardVisible !== null) {
                         await display.setCardVisibility(cfg.id, pendingCardVisible);
                       }
+                      if (pendingTrayVisible !== null) {
+                        await display.setTrayVisibility(cfg.id, pendingTrayVisible);
+                      }
                     } catch {
                       toast.error("Failed to save settings");
                       setScheduleSaving(false);
                       return;
-                    }
-                    if (pendingTrayVisible !== null) {
-                      display.setTrayVisibility(cfg.id, pendingTrayVisible);
                     }
                     setScheduleSaving(false);
                     // Re-poll quota so new connection params take effect immediately.

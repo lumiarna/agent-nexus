@@ -53,8 +53,10 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
   const [cardVisible, setCardVisible] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(providerCatalog.map((p) => [p.id, !p.hiddenCard])),
   );
+  // Tray visibility is a persisted, opt-in Surface Preference (empty by default),
+  // not derived from live status.
   const [trayVisible, setTrayVisible] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(providerCatalog.map((p) => [p.id, p.status === "available"])),
+    Object.fromEntries(providerCatalog.map((p) => [p.id, false])),
   );
   const [trayMetric, setTrayMetric] = useState<TrayMetric>("Remaining");
   const [colCount, setColCount] = useState(1);
@@ -93,12 +95,12 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
       ),
     );
     setTrayMetric(displayPreferencesQuery.data?.trayMetric ?? "Remaining");
-    setTrayVisible((current) => ({
-      ...Object.fromEntries(
-        providerCatalog.map((provider) => [provider.id, provider.status === "available"]),
+    const savedTray = new Set(displayPreferencesQuery.data?.trayVisibility ?? []);
+    setTrayVisible(
+      Object.fromEntries(
+        providerCatalog.map((provider) => [provider.id, savedTray.has(provider.id)]),
       ),
-      ...current,
-    }));
+    );
   }, [providerCatalog, providerOrderQuery.data, displayPreferencesQuery.data]);
 
   const nameById = Object.fromEntries(providerCatalog.map((p) => [p.id, p.name]));
@@ -147,6 +149,7 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
       const saved = await setDisplayPreferences.mutateAsync({
         cardVisibility,
         trayMetric,
+        trayVisibility: order.filter((id) => trayVisible[id]),
       });
       const savedVisible = new Set(saved.cardVisibility);
       setTrayMetric(saved.trayMetric);
@@ -173,6 +176,7 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
       const saved = await setDisplayPreferences.mutateAsync({
         cardVisibility: order.filter((id) => cardVisible[id] !== false),
         trayMetric: metric,
+        trayVisibility: order.filter((id) => trayVisible[id]),
       });
       setTrayMetric(saved.trayMetric);
     } catch (error) {
@@ -182,8 +186,29 @@ export function useProviderDisplayPrefs(providerCatalog: Provider[]) {
     }
   }
 
-  function setTrayVisibility(providerId: string, visible: boolean) {
-    setTrayVisible((current) => ({ ...current, [providerId]: visible }));
+  async function setTrayVisibility(providerId: string, visible: boolean) {
+    const next = { ...trayVisible, [providerId]: visible };
+    const previous = trayVisible;
+    setTrayVisible(next);
+
+    if (!isTauriRuntime()) return;
+
+    try {
+      const saved = await setDisplayPreferences.mutateAsync({
+        cardVisibility: order.filter((id) => cardVisible[id] !== false),
+        trayMetric,
+        trayVisibility: order.filter((id) => next[id]),
+      });
+      const savedTray = new Set(saved.trayVisibility);
+      setTrayVisible((current) => ({
+        ...current,
+        ...Object.fromEntries(order.map((id) => [id, savedTray.has(id)])),
+      }));
+    } catch (error) {
+      setTrayVisible(previous);
+      toast(getErrorMessage(error));
+      throw error;
+    }
   }
 
   return {

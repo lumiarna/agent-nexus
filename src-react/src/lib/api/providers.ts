@@ -45,6 +45,17 @@ export interface ProviderConnectionParams {
 export interface ProviderDisplayPreferences {
   cardVisibility: string[];
   trayMetric: TrayMetric;
+  /** Provider ids shown as a Windows-taskbar tray icon (a Surface Preference,
+   *  independent of card visibility). */
+  trayVisibility: string[];
+}
+
+/** One desired tray icon: brand-coloured square + the metric number (0–100). */
+export interface TrayEntry {
+  providerId: string;
+  label: string;
+  colorHex: string;
+  value: number;
 }
 
 export interface ProviderScheduleSettings {
@@ -95,6 +106,9 @@ export const providersApi = {
   },
   getQuota(providerId: string): Promise<ProviderQuotaSnapshot> {
     return invokeCommand<ProviderQuotaSnapshot>("get_provider_quota", { providerId });
+  },
+  syncTray(entries: TrayEntry[]): Promise<void> {
+    return invokeCommand<void>("sync_tray", { entries });
   },
   getCopilotGithubToken(): Promise<string | null> {
     return invokeCommand<string | null>("get_copilot_github_token");

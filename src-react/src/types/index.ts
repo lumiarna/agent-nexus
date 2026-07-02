@@ -242,4 +242,6 @@ export interface WebdavSettings {
 export interface Settings {
   webdav: WebdavSettings;
   trayMetric: TrayMetric;
+  /** Provider ids shown as a Windows-taskbar tray icon. */
+  trayVisibility: string[];
 }

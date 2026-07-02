@@ -8,3 +8,4 @@ pub mod providers;
 pub mod sessions;
 pub mod skills;
 pub mod sync;
+pub mod tray;

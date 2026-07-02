@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { ProviderPage } from "@/components/provider/ProviderPage";
+import { useTraySync } from "@/components/provider/useTraySync";
 import { ProjectPage } from "@/components/project/ProjectPage";
 import { SkillPage } from "@/components/skill/SkillPage";
 import { PromptPage } from "@/components/prompt/PromptPage";
@@ -21,6 +22,9 @@ export default function App() {
   const desktopProbeStarted = useRef(false);
   // Deep-link target for Project detail (set when navigating from Session).
   const [projectId, setProjectId] = useState<string | undefined>(undefined);
+
+  // Keep the Windows-taskbar tray in sync app-wide, regardless of current page.
+  useTraySync();
 
   const go = useCallback<Nav["go"]>((v, opts) => {
     setView(v);

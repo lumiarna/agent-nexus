@@ -64,6 +64,12 @@ pub struct ProviderDisplayPreferences {
     pub card_visibility: Vec<String>,
     #[serde(default)]
     pub tray_metric: TrayMetric,
+    /// Provider ids whose quota is shown as a Windows-taskbar tray icon.
+    /// A `Surface Preference` independent of `card_visibility`; only providers
+    /// that expose a "shortest window used" (`primary`) can be enabled here,
+    /// but that gating lives in the front end since it depends on live quota.
+    #[serde(default)]
+    pub tray_visibility: Vec<String>,
 }
 
 /// User preference for which Agents are disabled. A disabled Agent is dropped
@@ -240,6 +246,7 @@ impl AppConfigService {
         Ok(ProviderDisplayPreferences {
             card_visibility: normalize_provider_order(preferences.card_visibility)?,
             tray_metric: normalize_tray_metric(preferences.tray_metric)?,
+            tray_visibility: normalize_provider_order(preferences.tray_visibility)?,
         })
     }
 
@@ -250,6 +257,7 @@ impl AppConfigService {
         let normalized = ProviderDisplayPreferences {
             card_visibility: normalize_provider_order(preferences.card_visibility.clone())?,
             tray_metric: normalize_tray_metric(preferences.tray_metric)?,
+            tray_visibility: normalize_provider_order(preferences.tray_visibility.clone())?,
         };
         self.write_json_setting(PROVIDER_CARD_VISIBILITY_KEY, &normalized)?;
         Ok(normalized)

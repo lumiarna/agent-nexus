@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod store;
+pub mod tray;
 
 use std::{
     thread,
@@ -27,6 +28,7 @@ pub fn run() {
             let scheduler_sync = state.sync.clone();
             let scheduler_provider_trigger = state.provider_trigger.clone();
             app.manage(state);
+            app.manage(tray::TrayManager::default());
             start_background_scheduler(scheduler_sync, scheduler_provider_trigger);
             Ok(())
         })
@@ -104,12 +106,23 @@ pub fn run() {
             commands::sync::test_webdav_connection,
             commands::sync::update_task_schedule,
             commands::sync::update_group_schedule,
+            commands::tray::sync_tray,
         ])
         .on_window_event(|window, event| {
-            if window.label() == "main"
-                && matches!(event, tauri::WindowEvent::CloseRequested { .. })
-            {
-                window.app_handle().exit(0);
+            // With at least one tray icon live, Close hides the window instead of
+            // exiting so the app keeps running in the background and its
+            // Provider-quota tray icons stay visible (quit from the tray menu).
+            // With no tray icon there would be no way back, so Close exits.
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    let app = window.app_handle();
+                    if app.state::<tray::TrayManager>().has_icons() {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    } else {
+                        app.exit(0);
+                    }
+                }
             }
         })
         .run(tauri::generate_context!())
