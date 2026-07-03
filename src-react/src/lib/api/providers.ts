@@ -50,12 +50,13 @@ export interface ProviderDisplayPreferences {
   trayVisibility: string[];
 }
 
-/** One desired tray icon: brand-coloured square + the metric number (0–100). */
+/** One desired tray icon: brand-coloured square + the metric number (0–100),
+ *  or null for quota fetch failure. */
 export interface TrayEntry {
   providerId: string;
   label: string;
   colorHex: string;
-  value: number;
+  value: number | null;
 }
 
 export interface ProviderScheduleSettings {

@@ -40,7 +40,8 @@ pub struct TrayEntry {
     /// Brand colour as `#rrggbb`.
     pub color_hex: String,
     /// The number to render, already resolved to the Used/Remaining口径 (0–100).
-    pub value: i64,
+    /// `None` means the quota fetch failed and should render a failure marker.
+    pub value: Option<i64>,
 }
 
 /// Live tray icons keyed by provider id. Managed as Tauri state.
@@ -89,9 +90,16 @@ fn reconcile(app: &AppHandle, entries: Vec<TrayEntry>) -> TrayResult<()> {
     }
 
     for entry in entries {
-        let value = entry.value.clamp(0, 100);
-        let image = render_icon(&entry.color_hex, value)?;
-        let tooltip = format!("{}: {value}%", entry.label);
+        let label_value = entry
+            .value
+            .map(|value| value.clamp(0, 100).to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let image = render_icon(&entry.color_hex, &label_value)?;
+        let tooltip = if entry.value.is_some() {
+            format!("{}: {label_value}%", entry.label)
+        } else {
+            format!("{}: -", entry.label)
+        };
 
         if let Some(icon) = icons.get(&entry.provider_id) {
             icon.set_icon(Some(image))?;
@@ -147,15 +155,15 @@ pub fn show_main_window(app: &AppHandle) {
 
 /// Render a `ICON_SIZE`×`ICON_SIZE` RGBA tray icon: a rounded square in the
 /// brand colour with `value` drawn in white, auto-sized to fit.
-fn render_icon(color_hex: &str, value: i64) -> TrayResult<Image<'static>> {
-    let rgba = render_rgba(color_hex, value)?;
+fn render_icon(color_hex: &str, text: &str) -> TrayResult<Image<'static>> {
+    let rgba = render_rgba(color_hex, text)?;
     Ok(Image::new_owned(rgba, ICON_SIZE, ICON_SIZE))
 }
 
 /// The un-premultiplied RGBA bytes behind [`render_icon`], split out so the
 /// rasterisation can be unit-tested without a running app.
-fn render_rgba(color_hex: &str, value: i64) -> TrayResult<Vec<u8>> {
-    let pixmap = render_pixmap(color_hex, value)?;
+fn render_rgba(color_hex: &str, text: &str) -> TrayResult<Vec<u8>> {
+    let pixmap = render_pixmap(color_hex, text)?;
     Ok(pixmap
         .pixels()
         .iter()
@@ -166,7 +174,7 @@ fn render_rgba(color_hex: &str, value: i64) -> TrayResult<Vec<u8>> {
         .collect())
 }
 
-fn render_pixmap(color_hex: &str, value: i64) -> TrayResult<Pixmap> {
+fn render_pixmap(color_hex: &str, text: &str) -> TrayResult<Pixmap> {
     let (r, g, b) =
         parse_hex(color_hex).ok_or_else(|| format!("invalid tray brand colour: {color_hex:?}"))?;
     let s = ICON_SIZE as f32;
@@ -185,7 +193,7 @@ fn render_pixmap(color_hex: &str, value: i64) -> TrayResult<Pixmap> {
         None,
     );
 
-    draw_centered_text(&mut pixmap, &value.to_string());
+    draw_centered_text(&mut pixmap, text);
     Ok(pixmap)
 }
 
@@ -337,14 +345,14 @@ mod tests {
 
     #[test]
     fn render_rgba_errors_on_bad_colour() {
-        assert!(render_rgba("not-a-colour", 42).is_err());
+        assert!(render_rgba("not-a-colour", "42").is_err());
     }
 
     #[test]
     fn render_rgba_paints_brand_square_transparent_corners_and_white_text() {
         // Claude Code brand orange.
         let (br, bg, bb) = (0xc2u8, 0x41u8, 0x0cu8);
-        let rgba = render_rgba("#c2410c", 42).expect("render icon");
+        let rgba = render_rgba("#c2410c", "42").expect("render icon");
         assert_eq!(rgba.len(), (ICON_SIZE * ICON_SIZE * 4) as usize);
 
         let px = |x: u32, y: u32| {
@@ -374,5 +382,14 @@ mod tests {
         }
         assert!(brand, "brand-colour pixels must be present");
         assert!(white, "white text pixels must be present");
+    }
+
+    #[test]
+    fn render_rgba_paints_failure_marker() {
+        let rgba = render_rgba("#c2410c", "-").expect("render failure marker");
+        assert!(rgba.chunks_exact(4).any(|chunk| {
+            let (r, g, b, a) = (chunk[0], chunk[1], chunk[2], chunk[3]);
+            a == 255 && r > 220 && g > 220 && b > 220
+        }));
     }
 }
