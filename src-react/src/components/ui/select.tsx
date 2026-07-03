@@ -20,7 +20,7 @@ interface SelectProps {
 /**
  * Lightweight styled dropdown matching the paper design system. The menu is
  * portalled to <body> so it is never clipped by a scrolling modal panel, and
- * positioned under the trigger; it closes on outside click, scroll, or ESC.
+ * positioned under the trigger; it closes on outside click, outside scroll, or ESC.
  */
 export function Select({
   value,
@@ -32,6 +32,7 @@ export function Select({
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null);
   const selected = options.find((option) => option.value === value);
 
@@ -44,15 +45,25 @@ export function Select({
   useEffect(() => {
     if (!open) return;
     const close = () => setOpen(false);
+    const closeOnOutsideScroll = (event: Event) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        (menuRef.current?.contains(target) || triggerRef.current?.contains(target))
+      ) {
+        return;
+      }
+      setOpen(false);
+    };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
     // Reposition would drift on scroll/resize, so collapse instead.
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("scroll", closeOnOutsideScroll, true);
     window.addEventListener("resize", close);
     document.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", closeOnOutsideScroll, true);
       window.removeEventListener("resize", close);
       document.removeEventListener("keydown", onKey);
     };
@@ -87,6 +98,7 @@ export function Select({
             <>
               <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} />
               <div
+                ref={menuRef}
                 className="fixed z-[71] max-h-[240px] overflow-auto rounded-[12px] border border-nexus-border2 bg-nexus-card p-1 shadow-[0_12px_32px_rgba(50,40,25,.18)]"
                 style={{ left: rect.left, top: rect.top, width: rect.width }}
               >

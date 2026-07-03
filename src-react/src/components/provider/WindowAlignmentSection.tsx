@@ -71,7 +71,7 @@ export function WindowAlignmentSection({
                   key={preset.value}
                   mono
                   active={startTime === preset.value}
-                  onClick={() => onStartTimeChange(preset.value)}
+                  onClick={() => onStartTimeChange(startTime === preset.value ? "" : preset.value)}
                 >
                   {preset.label}
                 </Chip>
