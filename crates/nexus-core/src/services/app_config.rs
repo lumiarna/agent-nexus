@@ -79,6 +79,12 @@ pub struct ProviderDisplayPreferences {
 #[serde(rename_all = "camelCase")]
 pub struct AgentDisplayPreferences {
     pub disabled: Vec<String>,
+    /// Default Global entry Agent used when a Project custom `Skill` (which has
+    /// no `Source Agent`) is propagated to Global. `None` falls back to the
+    /// canonical-leftmost Agent (`Generic Agent`) in the front end. Must be a
+    /// Skill-capable, non-disabled Agent; disabling it clears this back to `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_global_entry_agent: Option<String>,
 }
 
 #[derive(Clone)]
@@ -275,8 +281,13 @@ impl AppConfigService {
                     "invalid agent display preferences setting: {error}"
                 ))
             })?;
+        let disabled = normalize_agent_names(preferences.disabled)?;
         Ok(AgentDisplayPreferences {
-            disabled: normalize_agent_names(preferences.disabled)?,
+            default_global_entry_agent: normalize_default_global_entry_agent(
+                preferences.default_global_entry_agent,
+                &disabled,
+            )?,
+            disabled,
         })
     }
 
@@ -284,8 +295,13 @@ impl AppConfigService {
         &self,
         preferences: &AgentDisplayPreferences,
     ) -> AppResult<AgentDisplayPreferences> {
+        let disabled = normalize_agent_names(preferences.disabled.clone())?;
         let normalized = AgentDisplayPreferences {
-            disabled: normalize_agent_names(preferences.disabled.clone())?,
+            default_global_entry_agent: normalize_default_global_entry_agent(
+                preferences.default_global_entry_agent.clone(),
+                &disabled,
+            )?,
+            disabled,
         };
         self.write_json_setting(DISABLED_AGENTS_KEY, &normalized)?;
         Ok(normalized)
@@ -364,6 +380,34 @@ fn normalize_agent_names(names: Vec<String>) -> AppResult<Vec<String>> {
     }
 
     Ok(normalized)
+}
+
+/// Validate the Default Global entry Agent against the same invariants the UI
+/// enforces: it must be a known, Skill-capable Agent. If it is currently
+/// disabled the preference is cleared to `None` rather than pointing at a
+/// hidden Agent.
+fn normalize_default_global_entry_agent(
+    agent: Option<String>,
+    disabled: &[String],
+) -> AppResult<Option<String>> {
+    let Some(name) = agent else {
+        return Ok(None);
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let surface = agent_by_name(name)
+        .ok_or_else(|| AppError::Validation(format!("unknown agent: {name}")))?;
+    if surface.skill.is_none() {
+        return Err(AppError::Validation(format!(
+            "default global entry agent must be Skill-capable: {name}"
+        )));
+    }
+    if disabled.iter().any(|d| d == name) {
+        return Ok(None);
+    }
+    Ok(Some(name.to_string()))
 }
 
 fn provider_api_key_setting_key(provider_id: &str) -> AppResult<&'static str> {

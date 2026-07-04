@@ -5,6 +5,10 @@ import { invokeCommand } from "./tauri.js";
  *  its Agent Capability Surface still exists. Values are canonical Agent names. */
 export interface AgentDisplayPreferences {
   disabled: string[];
+  /** Default Global entry Agent used when a Project custom Skill (no Source
+   *  Agent) is propagated to Global. Omitted/undefined falls back to the
+   *  canonical-leftmost Agent (Generic Agent). Canonical Agent name. */
+  defaultGlobalEntryAgent?: string;
 }
 
 export const agentPreferencesApi = {

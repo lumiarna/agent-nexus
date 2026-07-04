@@ -14,7 +14,11 @@ import {
   useSetSkillTargetMutation,
   useSkillsQuery,
 } from "@/lib/query/skills";
-import { useDisabledAgents, useEnabledAgents } from "@/lib/query/agentPreferences";
+import {
+  useDefaultGlobalEntryAgent,
+  useDisabledAgents,
+  useEnabledAgents,
+} from "@/lib/query/agentPreferences";
 import { isTauriRuntime } from "@/lib/runtime";
 import { hasGlobalPlacement, isProjectCustomSkill, srcAgentOf, targetAgentsOf } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
@@ -44,6 +48,7 @@ export function SkillPage() {
   const setSkillDisabled = useSetSkillDisabledMutation();
   const enabledAgents = useEnabledAgents();
   const disabledAgents = useDisabledAgents();
+  const defaultGlobalEntry = useDefaultGlobalEntryAgent();
   const [scope, setScope] = useState<Scope>("global");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -291,6 +296,7 @@ export function SkillPage() {
               onToggleDmi={() => void toggleDmi(k)}
               onPropagateGlobal={(entry) => void propagateGlobal(k, entry)}
               onUnpropagateGlobal={() => void unpropagateGlobal(k)}
+              defaultGlobalEntry={defaultGlobalEntry}
               onOpen={() => void openSource(k)}
               onReveal={() => void revealPath(k)}
             />

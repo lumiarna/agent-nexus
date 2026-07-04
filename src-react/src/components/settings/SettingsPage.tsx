@@ -12,8 +12,10 @@ import {
 import { fallbackAgentCapabilities } from "@/lib/agentCapabilities";
 import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
 import {
+  useAgentPreferences,
+  useDefaultGlobalEntryAgent,
   useDisabledAgents,
-  useSetDisabledAgentsMutation,
+  useSetAgentPreferencesMutation,
 } from "@/lib/query/agentPreferences";
 import { AgentLogo } from "@/components/ui/agent-logo";
 import { Toggle } from "@/components/ui/toggle";
@@ -48,8 +50,10 @@ export function SettingsPage() {
   const agentCapabilitiesQuery = useAgentCapabilitiesQuery();
   const saveWebdavSettingsMutation = useSaveWebdavSettingsMutation();
   const testWebdavConnectionMutation = useTestWebdavConnectionMutation();
+  const agentPreferences = useAgentPreferences();
   const disabledAgents = useDisabledAgents();
-  const setDisabledAgents = useSetDisabledAgentsMutation();
+  const defaultGlobalEntry = useDefaultGlobalEntryAgent();
+  const setAgentPreferences = useSetAgentPreferencesMutation();
   const [url, setUrl] = useState("");
   const [user, setUser] = useState("");
   const [pass, setPass] = useState("");
@@ -92,8 +96,24 @@ export function SettingsPage() {
     else next.delete(name);
 
     try {
-      await setDisabledAgents.mutateAsync({ disabled: [...next] });
+      // Backend clears the Default Global entry Agent if it lands in `disabled`.
+      await setAgentPreferences.mutateAsync({
+        disabled: [...next],
+        defaultGlobalEntryAgent: agentPreferences.defaultGlobalEntryAgent,
+      });
       toast(willDisable ? `${name} disabled` : `${name} enabled`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function selectDefaultGlobalEntry(name: AgentName) {
+    try {
+      await setAgentPreferences.mutateAsync({
+        disabled: [...disabledAgents],
+        defaultGlobalEntryAgent: name,
+      });
+      toast(`Default Global entry · ${name}`);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -236,6 +256,43 @@ export function SettingsPage() {
             an Agent from the Agent Matrix
           </span>
         </div>
+
+        {/* Default Global entry Agent */}
+        <div className="mt-4 rounded-[14px] border border-nexus-panel bg-nexus-sand2 px-4 py-3.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="text-[12.5px] font-bold text-nexus-ink">
+              Default Global entry Agent
+            </span>
+            <span className="text-[11px] text-[#b3a999]">
+              Landing Agent when a Project custom Skill is propagated to Global · pick an
+              enabled, Skill-capable Agent
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {agents
+              .filter((a) => a.skill && !disabledAgents.has(a.name as AgentName))
+              .map((a) => {
+                const active = defaultGlobalEntry === (a.name as AgentName);
+                return (
+                  <button
+                    key={a.name}
+                    onClick={() => void selectDefaultGlobalEntry(a.name as AgentName)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-[9px] border px-2.5 py-1.5 text-[12px] font-semibold transition-colors",
+                      active
+                        ? "border-nexus-accent bg-nexus-accent/10 text-nexus-ink"
+                        : "border-nexus-panel bg-nexus-sand text-[#6a6055] hover:border-nexus-accent/50",
+                    )}
+                    style={active ? { borderColor: a.color, background: a.color + "1c" } : undefined}
+                  >
+                    <AgentLogo agent={a.name as AgentName} className="h-3.5 w-3.5" />
+                    {a.name}
+                  </button>
+                );
+              })}
+          </div>
+        </div>
+
         <div className="mt-4 flex flex-col gap-3">
           {agents.map((a) => {
             const disabled = disabledAgents.has(a.name as AgentName);

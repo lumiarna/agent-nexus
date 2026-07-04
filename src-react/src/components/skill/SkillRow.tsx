@@ -26,13 +26,12 @@ interface SkillRowProps {
   onPropagateGlobal?: (entryAgent: AgentName) => void;
   /** Remove every Global placement for a Project custom Skill. */
   onUnpropagateGlobal?: () => void;
+  /** Default Global entry Agent used when first propagating a Project custom
+   *  Skill; configured in Settings, falls back to Generic Agent. */
+  defaultGlobalEntry?: AgentName;
   onOpen: () => void;
   onReveal: () => void;
 }
-
-/** Entry Agent default when first propagating a Project custom Skill to Global.
- *  Generic Agent is the most source-neutral landing spot (matrix leftmost). */
-const DEFAULT_GLOBAL_ENTRY: AgentName = "Generic Agent";
 
 /** Distribution control for a Project custom Skill inside the Project view:
  *  a single Propagate-to-Global toggle. Further fan-out to other Agents happens
@@ -40,12 +39,15 @@ const DEFAULT_GLOBAL_ENTRY: AgentName = "Generic Agent";
 function PropagateToGlobal({
   skill,
   agents,
+  defaultGlobalEntry,
   onPropagate,
   onUnpropagate,
 }: {
   skill: Skill;
   /** Enabled Agents — disabled Agents are dropped from the target chips. */
   agents?: AgentName[];
+  /** Default Global entry Agent, falls back to Generic Agent. */
+  defaultGlobalEntry?: AgentName;
   onPropagate?: (entryAgent: AgentName) => void;
   onUnpropagate?: () => void;
 }) {
@@ -61,7 +63,7 @@ function PropagateToGlobal({
           title={propagated ? "Remove Global placements" : "Propagate to Global"}
           onChange={() => {
             if (propagated) onUnpropagate?.();
-            else onPropagate?.(DEFAULT_GLOBAL_ENTRY);
+            else onPropagate?.(defaultGlobalEntry ?? "Generic Agent");
           }}
         />
         <span className="text-[10px] text-[#b3a999]">
@@ -97,6 +99,7 @@ export function SkillRow({
   onToggleDmi,
   onPropagateGlobal,
   onUnpropagateGlobal,
+  defaultGlobalEntry,
   onOpen,
   onReveal,
 }: SkillRowProps) {
@@ -127,6 +130,7 @@ export function SkillRow({
         <PropagateToGlobal
           skill={skill}
           agents={agents}
+          defaultGlobalEntry={defaultGlobalEntry}
           onPropagate={onPropagateGlobal}
           onUnpropagate={onUnpropagateGlobal}
         />

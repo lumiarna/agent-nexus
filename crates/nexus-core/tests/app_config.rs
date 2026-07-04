@@ -222,10 +222,12 @@ fn agent_display_preferences_round_trip_through_settings() {
         service
             .set_agent_display_preferences(&AgentDisplayPreferences {
                 disabled: vec!["Copilot".to_string(), "OpenCode".to_string()],
+                default_global_entry_agent: Some("Claude Code".to_string()),
             })
             .expect("save agent display preferences"),
         AgentDisplayPreferences {
             disabled: vec!["Copilot".to_string(), "OpenCode".to_string()],
+            default_global_entry_agent: Some("Claude Code".to_string()),
         },
     );
 
@@ -235,6 +237,7 @@ fn agent_display_preferences_round_trip_through_settings() {
             .expect("read saved agent display preferences"),
         AgentDisplayPreferences {
             disabled: vec!["Copilot".to_string(), "OpenCode".to_string()],
+            default_global_entry_agent: Some("Claude Code".to_string()),
         },
     );
 }
@@ -247,8 +250,39 @@ fn set_agent_display_preferences_rejects_unknown_agent() {
     let error = service
         .set_agent_display_preferences(&AgentDisplayPreferences {
             disabled: vec!["claude".to_string()],
+            default_global_entry_agent: None,
         })
         .expect_err("unknown agent name must be rejected");
+    assert!(error.to_string().contains("unknown agent"));
+}
+
+#[test]
+fn default_global_entry_agent_cleared_when_disabled() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = AppConfigService::new(db);
+
+    // A default that is also in the disabled list is cleared back to None,
+    // never pointing at a hidden Agent.
+    let saved = service
+        .set_agent_display_preferences(&AgentDisplayPreferences {
+            disabled: vec!["Copilot".to_string()],
+            default_global_entry_agent: Some("Copilot".to_string()),
+        })
+        .expect("save agent display preferences");
+    assert_eq!(saved.default_global_entry_agent, None);
+}
+
+#[test]
+fn set_agent_display_preferences_rejects_unknown_default_entry() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = AppConfigService::new(db);
+
+    let error = service
+        .set_agent_display_preferences(&AgentDisplayPreferences {
+            disabled: vec![],
+            default_global_entry_agent: Some("claude".to_string()),
+        })
+        .expect_err("unknown default entry agent must be rejected");
     assert!(error.to_string().contains("unknown agent"));
 }
 

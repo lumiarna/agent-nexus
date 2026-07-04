@@ -14,6 +14,7 @@ import { AGENTS } from "@/config/agents";
 import { promptsApi } from "@/lib/api/prompts";
 import { skillsApi } from "@/lib/api/skills";
 import { useNav } from "@/lib/nav";
+import { useDefaultGlobalEntryAgent } from "@/lib/query/agentPreferences";
 import { useSetProjectCustomSkillsDirsMutation, useSetProjectExtraPromptFilesMutation, useSetProjectSessionsDirMutation } from "@/lib/query/projects";
 import { usePromptsQuery, useSetPromptTargetMutation } from "@/lib/query/prompts";
 import {
@@ -69,6 +70,7 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
   const setCustomSkillsDirs = useSetProjectCustomSkillsDirsMutation();
   const setExtraPromptFiles = useSetProjectExtraPromptFilesMutation();
   const setSessionsDir = useSetProjectSessionsDirMutation();
+  const defaultGlobalEntry = useDefaultGlobalEntryAgent();
 
   const [detailSource, setDetailSource] = useState<DetailSource>("local");
   const [customDirsOpen, setCustomDirsOpen] = useState(false);
@@ -314,6 +316,7 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
               onToggleDmi={() => void toggleDmi(k)}
               onPropagateGlobal={(entry) => void propagateGlobal(k, entry)}
               onUnpropagateGlobal={() => void unpropagateGlobal(k)}
+              defaultGlobalEntry={defaultGlobalEntry}
               onOpen={() => void openSkillSource(k)}
               onReveal={() => void revealSkillPath(k)}
             />
