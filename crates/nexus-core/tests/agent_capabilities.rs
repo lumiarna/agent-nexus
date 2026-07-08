@@ -15,6 +15,7 @@ fn defines_agent_capability_surfaces_in_canonical_order() {
             "CodeX",
             "Copilot",
             "OpenCode",
+            "Pi",
             "Qoder"
         ]
     );
@@ -75,6 +76,14 @@ fn defines_agent_capability_surfaces_in_canonical_order() {
             .credential_hint,
         Some("~/.codex/auth.json")
     );
+
+    let pi = agent_by_name("Pi").expect("pi capability");
+    assert_eq!(pi.config_dir, "~/.pi/agent");
+    assert_eq!(pi.skill.expect("pi skill surface").global_dir, "~/.pi/agent/skills");
+    assert_eq!(pi.skill.expect("pi skill surface").project_dir, ".pi/skills");
+    assert_eq!(pi.prompt.expect("pi prompt surface").global_file, "~/.pi/agent/AGENTS.md");
+    assert_eq!(pi.prompt.expect("pi prompt surface").project_file, None);
+    assert!(pi.provider.is_none());
 }
 
 #[test]

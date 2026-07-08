@@ -119,6 +119,21 @@ const AGENT_CAPABILITY_SURFACES: &[AgentCapabilitySurface] = &[
         provider: None,
     },
     AgentCapabilitySurface {
+        name: "Pi",
+        abbr: "PI",
+        color: "#2563eb",
+        config_dir: "~/.pi/agent",
+        skill: Some(SkillSurface {
+            global_dir: "~/.pi/agent/skills",
+            project_dir: ".pi/skills",
+        }),
+        prompt: Some(PromptSurface {
+            global_file: "~/.pi/agent/AGENTS.md",
+            project_file: None,
+        }),
+        provider: None,
+    },
+    AgentCapabilitySurface {
         name: "Qoder",
         abbr: "QO",
         color: "#0ea5e9",

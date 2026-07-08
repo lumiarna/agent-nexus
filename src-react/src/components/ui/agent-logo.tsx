@@ -60,6 +60,10 @@ function OpenCodeLogo({ className }: LogoProps) {
   );
 }
 
+function PiLogo({ className }: LogoProps) {
+  return <img src="/pi-logo.svg" alt="Pi" className={className} />;
+}
+
 function QoderLogo({ className }: LogoProps) {
   // docs/prototype/icons/qoder.svg 的原始文件是 640x180 的完整品牌 logo（图标 + 文字）。
   // 为了适配 Agent Matrix 中 15x15 的小尺寸，只取了左侧 180x180 的图标部分放在 public 目录。
@@ -72,6 +76,7 @@ const LOGOS: Record<AgentName, (props: LogoProps) => JSX.Element> = {
   CodeX: OpenAILogo,
   Copilot: GithubLogo,
   OpenCode: OpenCodeLogo,
+  Pi: PiLogo,
   Qoder: QoderLogo,
 };
 

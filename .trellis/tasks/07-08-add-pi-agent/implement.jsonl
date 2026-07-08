@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/07-08-add-pi-agent/prd.md","reason":"Task scope, confirmed filesystem surfaces, matrix expectations, and product decisions for Pi plus Generic Agent disable constraint."}
+{"file":".trellis/spec/guides/index.md","reason":"Shared project development guides to keep implementation aligned with Trellis expectations."}
+{"file":".trellis/spec/nexus-core/backend/index.md","reason":"Backend service/module rules for updating agent capability surfaces in crates/nexus-core."}
+{"file":".trellis/spec/agent-nexus/frontend/index.md","reason":"Frontend conventions for updating canonical agent config, matrix UI, settings behavior, and copy."}
+{"file":"CONTEXT.md","reason":"Canonical domain terminology and product-model constraints for Agent/Provider distinctions."}
+{"file":"GOTCHAS.md","reason":"Project-specific implementation gotchas and validation reminders."}

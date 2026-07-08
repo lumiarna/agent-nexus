@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/07-08-add-pi-agent/prd.md","reason":"Acceptance criteria and explicit non-goals to verify before finishing."}
+{"file":".trellis/spec/nexus-core/backend/index.md","reason":"Backend verification expectations for service-layer and config-surface changes."}
+{"file":".trellis/spec/agent-nexus/frontend/index.md","reason":"Frontend verification expectations for typed config, UI behavior, and copy updates."}
+{"file":"GOTCHAS.md","reason":"Regression checks should account for project-specific pitfalls called out here."}

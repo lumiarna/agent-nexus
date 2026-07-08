@@ -368,6 +368,11 @@ fn normalize_agent_names(names: Vec<String>) -> AppResult<Vec<String>> {
                 "disabled agents cannot contain empty names".to_string(),
             ));
         }
+        if name == "Generic Agent" {
+            return Err(AppError::Validation(
+                "Generic Agent cannot be disabled".to_string(),
+            ));
+        }
         if agent_by_name(name).is_none() {
             return Err(AppError::Validation(format!("unknown agent: {name}")));
         }

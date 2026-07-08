@@ -90,6 +90,11 @@ export function SettingsPage() {
   }
 
   async function toggleAgentEnabled(name: AgentName) {
+    if (name === "Generic Agent") {
+      toast("Generic Agent always stays enabled");
+      return;
+    }
+
     const next = new Set(disabledAgents);
     const willDisable = !next.has(name);
     if (willDisable) next.add(name);
@@ -295,13 +300,15 @@ export function SettingsPage() {
 
         <div className="mt-4 flex flex-col gap-3">
           {agents.map((a) => {
-            const disabled = disabledAgents.has(a.name as AgentName);
+            const name = a.name as AgentName;
+            const locked = name === "Generic Agent";
+            const disabled = disabledAgents.has(name);
             return (
             <div
               key={a.name}
               className={cn(
                 "rounded-[14px] border border-nexus-panel bg-nexus-sand2 px-4 py-3.5",
-                disabled && "opacity-55",
+                disabled && !locked && "opacity-55",
               )}
             >
               <div className="flex items-center gap-[9px]">
@@ -309,22 +316,27 @@ export function SettingsPage() {
                   className="inline-flex h-6 w-6 items-center justify-center rounded-[7px]"
                   style={{ background: a.color + "1c" }}
                 >
-                  <AgentLogo agent={a.name as AgentName} className="h-3.5 w-3.5" />
+                  <AgentLogo agent={name} className="h-3.5 w-3.5" />
                 </span>
                 <span className="text-[13.5px] font-bold text-nexus-ink">{a.name}</span>
-                {disabled ? (
+                {locked ? (
+                  <span className="text-[10px] font-semibold uppercase tracking-[.04em] text-[#b3a999]">
+                    Always on
+                  </span>
+                ) : disabled ? (
                   <span className="text-[10px] font-semibold uppercase tracking-[.04em] text-[#b3a999]">
                     Disabled
                   </span>
                 ) : null}
                 <span className="ml-auto inline-flex items-center gap-2">
                   <span className="text-[10px] text-[#b3a999]">
-                    {disabled ? "Off" : "On"}
+                    {locked ? "Locked" : disabled ? "Off" : "On"}
                   </span>
                   <Toggle
                     checked={!disabled}
-                    title={disabled ? "Enable agent" : "Disable agent"}
-                    onChange={() => void toggleAgentEnabled(a.name as AgentName)}
+                    disabled={locked}
+                    title={locked ? "Generic Agent always stays enabled" : disabled ? "Enable agent" : "Disable agent"}
+                    onChange={() => void toggleAgentEnabled(name)}
                   />
                 </span>
               </div>

@@ -310,9 +310,9 @@ export function SkillPage() {
       </Card>
 
       <p className="mt-3.5 text-[11.5px] text-[#b3a999]">
-        Distribution targets show as Agent icons — <b className="text-[#9a8f80]">Agents</b> (the
+        Distribution targets show as Agent icons — <b className="text-[#9a8f80]">Generic Agent</b> (the
         shared <span className="font-mono">~/.agents</span> dir) sits leftmost, then Claude Code /
-        CodeX / Copilot / OpenCode. Agent-sourced rows have exactly one source;{" "}
+        CodeX / Copilot / OpenCode / Pi / Qoder. Agent-sourced rows have exactly one source;{" "}
         <b className="text-[#9a8f80]">Project source</b> rows have no Agent source — their cells are
         Global placements linked from a Project custom skills dir.
       </p>

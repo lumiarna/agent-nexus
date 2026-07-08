@@ -243,6 +243,20 @@ fn agent_display_preferences_round_trip_through_settings() {
 }
 
 #[test]
+fn set_agent_display_preferences_rejects_disabling_generic_agent() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let service = AppConfigService::new(db);
+
+    let error = service
+        .set_agent_display_preferences(&AgentDisplayPreferences {
+            disabled: vec!["Generic Agent".to_string()],
+            default_global_entry_agent: None,
+        })
+        .expect_err("Generic Agent must stay enabled");
+    assert!(error.to_string().contains("Generic Agent cannot be disabled"));
+}
+
+#[test]
 fn set_agent_display_preferences_rejects_unknown_agent() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let service = AppConfigService::new(db);

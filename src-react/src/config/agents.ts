@@ -101,6 +101,18 @@ export const AGENTS = [
     ],
   }),
   agent({
+    name: "Pi",
+    abbr: "PI",
+    color: "#2563eb",
+    projectSkillDir: ".pi/skills",
+    surfaces: ["skill", "prompt"],
+    dirs: [
+      { key: "PI_CONFIG_DIR", value: "~/.pi/agent" },
+      { key: "PI_SKILLS_DIR", value: "~/.pi/agent/skills", derivedFrom: "PI_CONFIG_DIR" },
+      { key: "PI_PROMPT_FILE", value: "~/.pi/agent/AGENTS.md", derivedFrom: "PI_CONFIG_DIR" },
+    ],
+  }),
+  agent({
     name: "Qoder",
     abbr: "QO",
     color: "#0ea5e9",

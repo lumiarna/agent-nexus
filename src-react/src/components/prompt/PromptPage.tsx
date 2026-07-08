@@ -300,8 +300,8 @@ export function PromptPage() {
             Global prompts span every prompt-capable agent —{" "}
             <b className="text-[#9a8f80]">Generic Agent</b> (
             <span className="font-mono">~/.agents</span>) sits leftmost, then Claude Code
-            / CodeX / Copilot / OpenCode. Each row has exactly one source; distribution
-            defaults to <b className="text-[#9a8f80]">symlink</b>.
+            / CodeX / Copilot / OpenCode / Pi / Qoder. Each row has exactly one source;
+            distribution defaults to <b className="text-[#9a8f80]">symlink</b>.
           </>
         )}
       </p>
