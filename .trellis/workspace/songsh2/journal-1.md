@@ -73,3 +73,37 @@ Added Pi as a canonical Agent across backend and frontend, updated Agent Matrix/
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Project Skill 跨 Project 传播：质量检查 + spec 沉淀 + 归档
+
+**Date**: 2026-07-09
+**Task**: Project Skill 跨 Project 传播：质量检查 + spec 沉淀 + 归档
+**Package**: agent-nexus
+**Branch**: `main`
+
+### Summary
+
+实现已在上一会话提交 df9306a 完成。本会话进入 Trellis Phase 2.2/3.3/3.4 收尾：整理 implement.jsonl/check.jsonl 上下文清单；运行 typecheck/Rust 测试/cargo fmt（全绿，clippy 报的 TrayMetric 与 provider_trigger 两处为 main 预存技术债，非本任务引入）；审阅 service/UI mutation 全部传 canonicalSkillId；沉淀两份跨层 7-section spec Scenario（前端 type-safety.md 的 projection 行 display-id vs canonical-skill-id 双轨制契约、后端 database-guidelines.md 的 skill_project_distributions 跨 Project 传播契约与 anti-pattern）；提交 2334505 并归档任务。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2334505` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
