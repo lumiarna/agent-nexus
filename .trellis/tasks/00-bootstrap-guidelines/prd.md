@@ -1,129 +1,61 @@
-# Bootstrap Task: Fill Project Development Guidelines
+# 中文化 Trellis Spec Bootstrap
 
-**You (the AI) are running this task. The developer does not read this file.**
+## Goal
 
-The developer just ran `trellis init` on this project for the first time.
-`.trellis/` now exists with empty spec scaffolding, and this bootstrap task
-exists under `.trellis/tasks/`. When they want to work on it, they should start
-this task from a session that provides Trellis session identity.
+基于当前代码库与既有产品/架构文档，刷新 `.trellis/spec/`，让未来 AI 编码与检查任务能加载到真实、可执行、项目专属的开发规范。生成的 spec 文档优先使用中文表达，保留必要英文技术术语、代码符号、文件名、命令和领域 canonical 名称。
 
-**Your job**: help them populate `.trellis/spec/` with the team's real
-coding conventions. Every future AI session — this project's
-`trellis-implement` and `trellis-check` sub-agents — auto-loads spec files
-listed in per-task jsonl manifests. Empty spec = sub-agents write generic
-code. Real spec = sub-agents match the team's actual patterns.
+## Background / Confirmed Facts
 
-Don't dump instructions. Open with a short greeting, figure out if the repo
-has any existing convention docs (CLAUDE.md, .cursorrules, etc.), and drive
-the rest conversationally.
+- 项目根文档要求先阅读 `CONTEXT.md` 和 `GOTCHAS.md`。
+- 项目结构由 `src-react/` 前端、`src-tauri/` 后端与 `docs/` 设计文档组成。
+- 现有 `.trellis/spec/` 已有脚手架目录：
+  - `.trellis/spec/agent-nexus/frontend/`
+  - `.trellis/spec/agent-nexus/backend/`
+  - `.trellis/spec/nexus-core/backend/`
+  - `.trellis/spec/guides/`
+- 多数现有 spec 仍包含英文模板内容、`To fill` 状态或通用占位说明，不满足真实项目规范要求。
+- `CONTEXT.md` 已定义 Agent Nexus 的核心领域术语；这些术语的 canonical English 名称（如 `Agent`、`Provider`、`Project`、`Skill`、`Prompt`、`Session`、`Distribution`、`Cloud`）应在中文 spec 中保留或中英并列，避免误译。
 
----
+## Scope
 
-## Status (update the checkboxes as you complete each item)
+- Spec directory:
+  - `.trellis/spec/agent-nexus/frontend/`
+  - `.trellis/spec/agent-nexus/backend/`
+  - `.trellis/spec/nexus-core/backend/`
+  - `.trellis/spec/guides/`（仅在与项目实际不符或需补充本地经验时更新）
+- Source directories / docs to inspect:
+  - `src-react/`
+  - `src-tauri/`
+  - `docs/design/`
+  - `docs/adr/`
+  - `CONTEXT.md`
+  - `GOTCHAS.md`
+  - `CLAUDE.md`
+- Out of scope:
+  - 不修改产品源代码，除非发现 spec 无法准确描述现状且用户另行授权。
+  - 不引入新的架构约束或重构建议作为“规范”；bootstrap 只记录当前真实做法与已确认约束。
+  - 不把英文技术术语、Rust/TypeScript 标识符、命令、路径强行翻译。
 
-- [ ] Fill guidelines for agent-nexus
-- [ ] Fill guidelines for agent-nexus
-- [ ] Fill guidelines for nexus-core
-- [ ] Add code examples
+## Requirements
 
----
+- R1: 重写或合并现有模板 spec，使其成为项目真实规范，而不是通用框架建议。
+- R2: 每条重要规则必须由真实来源支撑：代码文件、测试文件、设计文档、ADR、`CONTEXT.md` 或 `GOTCHAS.md`。
+- R3: spec 文档主体优先使用中文；术语、canonical domain names、代码符号、路径、命令保持英文或原文。
+- R4: 更新所有相关 `index.md`，确保索引、文件清单与最终 spec 文件集一致。
+- R5: 删除或改写模板占位内容，包括 `To fill`、`TBD`、`placeholder`、“How to fill”等脚手架说明。
+- R6: 明确记录项目特有 anti-pattern，例如 `CONTEXT.md` 中的 `_Avoid_` 语义、`GOTCHAS.md` 中 Windows / SQLite 测试陷阱。
+- R7: Spec 应帮助未来子代理完成编码和检查：包含适用场景、本地模式、参考文件、常见错误、可靠验证命令。
 
-## Spec files to populate
+## Acceptance Criteria
 
-### Package: agent-nexus (`spec/agent-nexus/`)
+- [ ] `.trellis/spec/` 中目标目录不再保留模板占位说明、`To fill` 状态或空泛通用建议。
+- [ ] 每个目标 spec 文件至少包含可追溯到真实文件或设计文档的项目规则。
+- [ ] Spec 主体语言为中文，英文仅用于术语、代码、路径、命令、canonical 名称或必要引用。
+- [ ] `index.md` 文件与实际 spec 文件完全匹配，并使用中文说明各文件用途。
+- [ ] 与领域术语相关的规则符合 `CONTEXT.md`，避免把实现层短 ID 当作领域展示名。
+- [ ] 与测试/验证相关的规则覆盖 `GOTCHAS.md` 中的 Windows SQLite 注意事项。
+- [ ] 运行最终检查时，`grep -R "To fill\|TODO: fill\|placeholder\|TBD" .trellis/spec` 不应发现未处理占位内容（历史引用除外需注明原因）。
 
-- Frontend guidelines: `.trellis/spec/agent-nexus/frontend/`
+## Open Questions
 
-### Package: agent-nexus (`spec/agent-nexus/`)
-
-- Backend guidelines: `.trellis/spec/agent-nexus/backend/`
-
-### Package: nexus-core (`spec/nexus-core/`)
-
-- Backend guidelines: `.trellis/spec/nexus-core/backend/`
-
-
-### Thinking guides (already populated)
-
-`.trellis/spec/guides/` contains general thinking guides pre-filled with
-best practices. Customize only if something clearly doesn't fit this project.
-
----
-
-## How to fill the spec
-
-### Step 1: Import from existing convention files first (preferred)
-
-Search the repo for existing convention docs. If any exist, read them and
-extract the relevant rules into the matching `.trellis/spec/` files —
-usually much faster than documenting from scratch.
-
-| File / Directory | Tool |
-|------|------|
-| `CLAUDE.md` / `CLAUDE.local.md` | Claude Code |
-| `AGENTS.md` | Codex / Claude Code / agent-compatible tools |
-| `.cursorrules` | Cursor |
-| `.cursor/rules/*.mdc` | Cursor (rules directory) |
-| `.windsurfrules` | Windsurf |
-| `.clinerules` | Cline |
-| `.roomodes` | Roo Code |
-| `.github/copilot-instructions.md` | GitHub Copilot |
-| `.vscode/settings.json` → `github.copilot.chat.codeGeneration.instructions` | VS Code Copilot |
-| `CONVENTIONS.md` / `.aider.conf.yml` | aider |
-| `CONTRIBUTING.md` | General project conventions |
-| `.editorconfig` | Editor formatting rules |
-
-### Step 2: Analyze the codebase for anything not covered by existing docs
-
-Scan real code to discover patterns. Before writing each spec file:
-- Find 2-3 real examples of each pattern in the codebase.
-- Reference real file paths (not hypothetical ones).
-- Document anti-patterns the team clearly avoids.
-
-### Step 3: Document reality, not ideals
-
-**Critical**: write what the code *actually does*, not what it should do.
-Sub-agents match the spec, so aspirational patterns that don't exist in the
-codebase will cause sub-agents to write code that looks out of place.
-
-If the team has known tech debt, document the current state — improvement
-is a separate conversation, not a bootstrap concern.
-
----
-
-## Quick explainer of the runtime (share when they ask "why do we need spec at all")
-
-- Every AI coding task spawns two sub-agents: `trellis-implement` (writes
-  code) and `trellis-check` (verifies quality).
-- Each task has `implement.jsonl` / `check.jsonl` manifests listing which
-  spec files to load.
-- The platform hook auto-injects those spec files + the task's `prd.md`
-  into every sub-agent prompt, so the sub-agent codes/reviews per team
-  conventions without anyone pasting them manually.
-- Source of truth: `.trellis/spec/`. That's why filling it well now pays
-  off forever.
-
----
-
-## Completion
-
-When the developer confirms the checklist items above are done with real
-examples (not placeholders), guide them to run:
-
-```bash
-python ./.trellis/scripts/task.py finish
-python ./.trellis/scripts/task.py archive 00-bootstrap-guidelines
-```
-
-After archive, every new developer who joins this project will get a
-`00-join-<slug>` onboarding task instead of this bootstrap task.
-
----
-
-## Suggested opening line
-
-"Welcome to Trellis! Your init just set me up to help you fill the project
-spec — a one-time setup so every future AI session follows the team's
-conventions instead of writing generic code. Before we start, do you have
-any existing convention docs (CLAUDE.md, .cursorrules, CONTRIBUTING.md,
-etc.) I can pull from, or should I scan the codebase from scratch?"
+当前没有阻塞性问题；若实施中发现某个目录缺少足够代码证据，应在执行笔记中记录并按现状收敛 spec 范围。

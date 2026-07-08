@@ -1,0 +1,7 @@
+{"file":"CONTEXT.md","reason":"领域模型、canonical terminology 与 avoid list；中文 spec 必须保留这些术语边界"}
+{"file":"GOTCHAS.md","reason":"本地验证与 Windows SQLite 陷阱，需要写入质量和测试规范"}
+{"file":"CLAUDE.md","reason":"项目级 AI 工作约束与必读文档入口"}
+{"file":"docs/design/Business Requirement.md","reason":"产品需求和领域边界的源依据"}
+{"file":"docs/design/Architecture Design.md","reason":"架构分层、模块职责与数据流的源依据"}
+{"file":"docs/design/Database Schema.md","reason":"数据库表、字段和持久化约定的源依据"}
+{"file":".pi/skills/trellis-spec-bootstrap/references/spec-writing.md","reason":"高信号 Trellis spec 写作标准"}

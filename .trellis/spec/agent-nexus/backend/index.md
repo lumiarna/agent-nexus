@@ -1,38 +1,19 @@
-# Backend Development Guidelines
+# Agent Nexus Tauri Backend 规范
 
-> Best practices for backend development in this project.
+本目录描述 `src-tauri/` Tauri 壳层的开发约定。业务领域逻辑属于 `crates/nexus-core/`；Tauri 层只负责应用装配、命令暴露、状态注入、托盘/窗口和后台调度入口。
 
----
+## 规范清单
 
-## Overview
+| Guide | 用途 |
+|-------|------|
+| [Directory Structure](./directory-structure.md) | `src-tauri/src` 模块职责和 command/service 边界 |
+| [Database Guidelines](./database-guidelines.md) | Tauri 层如何打开并共享 `nexus-core::Database` |
+| [Error Handling](./error-handling.md) | `AppResult` 透传、命令边界错误处理 |
+| [Quality Guidelines](./quality-guidelines.md) | Tauri 壳层验证、避免业务逻辑下沉到 command |
+| [Logging Guidelines](./logging-guidelines.md) | 当前日志方式、后台任务和敏感信息规则 |
 
-This directory contains guidelines for backend development. Fill in each file with your project's specific conventions.
+## 核心边界
 
----
-
-## Guidelines Index
-
-| Guide | Description | Status |
-|-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
-| [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
-
----
-
-## How to Fill These Guidelines
-
-For each guideline file:
-
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
-
-The goal is to help AI assistants and new team members understand how YOUR project works.
-
----
-
-**Language**: All documentation should be written in **English**.
+- `src-tauri` 是 shell，不是领域层；参考 `docs/design/Architecture Design.md`。
+- `AppState` 在 `src-tauri/src/store.rs` 装配 `nexus-core` services。
+- Tauri commands 在 `src-tauri/src/commands/`，模式是“接收参数 → 调用 service → 返回 `AppResult<T>`”。

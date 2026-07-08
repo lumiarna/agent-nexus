@@ -1,0 +1,5 @@
+{"file":"CONTEXT.md","reason":"检查领域术语、canonical names 与 avoid list 是否被正确写入中文 spec"}
+{"file":"GOTCHAS.md","reason":"检查测试与验证说明是否覆盖本地已知陷阱"}
+{"file":"CLAUDE.md","reason":"检查项目级工作约束是否被遵守"}
+{"file":".pi/skills/trellis-spec-bootstrap/references/spec-writing.md","reason":"检查 spec 是否无占位、基于真实证据、索引一致"}
+{"file":".pi/skills/trellis-spec-bootstrap/references/repository-analysis.md","reason":"检查最终 spec 是否来自真实代码库分析而非模板填空"}

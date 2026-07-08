@@ -1,19 +1,19 @@
 {
   "id": "00-bootstrap-guidelines",
   "name": "00-bootstrap-guidelines",
-  "title": "Bootstrap Guidelines",
-  "description": "Fill in project development guidelines for AI agents",
+  "title": "中文化 Trellis Spec Bootstrap",
+  "description": "Fill project-specific Trellis specs in Chinese from real Agent Nexus code and docs",
   "status": "in_progress",
   "dev_type": "docs",
-  "scope": null,
-  "package": null,
+  "scope": "trellis-spec-bootstrap",
+  "package": "agent-nexus",
   "priority": "P1",
   "creator": "songsh2",
   "assignee": "songsh2",
   "createdAt": "2026-07-08",
   "completedAt": null,
   "branch": null,
-  "base_branch": null,
+  "base_branch": "main",
   "worktree_path": null,
   "commit": null,
   "pr_url": null,
@@ -21,10 +21,11 @@
   "children": [],
   "parent": null,
   "relatedFiles": [
-    ".trellis/spec/agent-nexus/",
-    ".trellis/spec/agent-nexus/",
-    ".trellis/spec/nexus-core/"
+    ".trellis/spec/agent-nexus/frontend/",
+    ".trellis/spec/agent-nexus/backend/",
+    ".trellis/spec/nexus-core/backend/",
+    ".trellis/spec/guides/"
   ],
-  "notes": "First-time setup task created by trellis init (fullstack project)",
+  "notes": "Reused original Trellis init bootstrap task; planning artifacts migrated from 07-08-trellis-spec-bootstrap-zh after user requested cleanup.",
   "meta": {}
 }

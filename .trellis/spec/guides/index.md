@@ -1,97 +1,17 @@
 # Thinking Guides
 
-> **Purpose**: Expand your thinking to catch things you might not have considered.
+这些指南用于跨层开发前的自检。它们不是通用教程，而是 Agent Nexus 中最容易出错的思考触发器。
 
----
+## 可用指南
 
-## Why Thinking Guides?
+| Guide | 何时使用 |
+|-------|----------|
+| [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | 发现重复 helper、重复 query/mutation、重复 service 校验、重复路径处理时 |
+| [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | 功能跨越 React UI、Tauri command、`nexus-core` service、SQLite schema 或 WebDAV/Provider 外部边界时 |
 
-**Most bugs and tech debt come from "didn't think of that"**, not from lack of skill:
+## Agent Nexus 特有触发器
 
-- Didn't think about what happens at layer boundaries → cross-layer bugs
-- Didn't think about code patterns repeating → duplicated code everywhere
-- Didn't think about edge cases → runtime errors
-- Didn't think about future maintainers → unreadable code
-
-These guides help you **ask the right questions before coding**.
-
----
-
-## Available Guides
-
-| Guide | Purpose | When to Use |
-|-------|---------|-------------|
-| [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
-| [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
-
----
-
-## Quick Reference: Thinking Triggers
-
-### When to Think About Cross-Layer Issues
-
-- [ ] Feature touches 3+ layers (API, Service, Component, Database)
-- [ ] Data format changes between layers
-- [ ] Multiple consumers need the same data
-- [ ] You're not sure where to put some logic
-- [ ] You are adding an event kind, JSONL record, RPC payload, or config field
-- [ ] UI / command code starts casting raw payload fields directly
-
-→ Read [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md)
-
-### When to Think About Code Reuse
-
-- [ ] You're writing similar code to something that exists
-- [ ] You see the same pattern repeated 3+ times
-- [ ] You're adding a new field to multiple places
-- [ ] **You're modifying any constant or config**
-- [ ] **You're creating a new utility/helper function** ← Search first!
-- [ ] Two files read the same untyped payload field with local casts
-- [ ] Multiple branches update the same derived state from `kind` / `action`
-
-→ Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
-
-### When Verifying AI Cross-Review Results
-
-- [ ] Reviewer claims "user input can be malicious" → Check the actual data source (internal manifest? user config? external API?)
-- [ ] Reviewer flags "missing validation" → Is the data from a trusted internal source?
-- [ ] Reviewer says "behavior change" → Read the code comments — is it intentional design?
-- [ ] Reviewer identifies a "bug" in test → Mentally delete the feature being tested — does the test still pass? If yes → tautological test
-
-**Common AI reviewer false-positive patterns**:
-1. **Trust boundary confusion**: Treating internal data (bundled JSON manifests) as untrusted external input
-2. **Ignoring design comments**: Flagging intentional behavior documented in code comments as bugs
-3. **Variable misreading**: Not tracing a variable to its actual definition (e.g., Map keyed by path vs name)
-
-**Verification rule**: Every CRITICAL/WARNING finding must be verified against the actual code before prioritizing. Budget ~35% false-positive rate for AI reviews.
-
----
-
-## Pre-Modification Rule (CRITICAL)
-
-> **Before changing ANY value, ALWAYS search first!**
-
-```bash
-# Search for the value you're about to change
-grep -r "value_to_change" .
-```
-
-This single habit prevents most "forgot to update X" bugs.
-
----
-
-## How to Use This Directory
-
-1. **Before coding**: Skim the relevant thinking guide
-2. **During coding**: If something feels repetitive or complex, check the guides
-3. **After bugs**: Add new insights to the relevant guide (learn from mistakes)
-
----
-
-## Contributing
-
-Found a new "didn't think of that" moment? Add it to the relevant guide.
-
----
-
-**Core Principle**: 30 minutes of thinking saves 3 hours of debugging.
+- 改动 `Agent`、`Provider`、`Project`、`Skill`、`Prompt`、`Session`、`Distribution`、`Sync Task` 任一领域概念前，先对照 `CONTEXT.md`。
+- 改动 `Project` 自定义源时，先读 ADR-0003：Skill / Prompt / Session 不强行对齐成同一种数据形态。
+- 改动 Rust 测试命令或 CI 文档时，先读 `GOTCHAS.md` 和 ADR-0001，避免写入裸 `cargo test -p nexus-core`。
+- 改动跨层字段时，同时检查：`crates/nexus-core` serde 类型、`src-tauri/src/commands` 暴露、`src-react/src/types`、`src-react/src/lib/api`、`src-react/src/lib/query` 和测试。
