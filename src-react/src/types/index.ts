@@ -116,6 +116,20 @@ export interface Skill {
   sourceKind?: SkillSourceKind;
   /** Owning Agent when `sourceKind === "agent"`; `undefined` for `project_custom`. */
   sourceAgent?: AgentName;
+  /** Canonical backend `skills.id` for an incoming target-Project projection
+   *  row. Present only when `placementScope === "project"`; in that case `id`
+   *  is a composite display id and mutations must pass this canonical id. */
+  canonicalSkillId?: string;
+  /** ` "project"` on an incoming target-Project projection row; `undefined` on
+   *  canonical rows. Distinguishes a foreign Skill row (sourceless Agent Matrix
+   *  driven by `skill_project_distributions`) from the source row. */
+  placementScope?: "project";
+  /** Target Project id for an incoming projection row. The row is scoped to
+   *  this Project so the Project detail / Skill Project tab group it there. */
+  placementProjectId?: string;
+  /** Source Project id for an incoming projection row — used to render the
+   *  `Project source` tooltip. Equals the canonical Skill's `projectId`. */
+  sourceProjectId?: string;
 }
 
 export interface Prompt {

@@ -70,6 +70,8 @@ pub fn run() {
             commands::skills::scan_skills,
             commands::skills::set_skill_disabled,
             commands::skills::set_skill_target,
+            commands::skills::set_project_skill_project,
+            commands::skills::set_project_skill_target,
             commands::sync::create_task_group,
             commands::project_symlinks::delete_project_symlink,
             commands::providers::get_provider_quota,

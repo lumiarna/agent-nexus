@@ -10,6 +10,8 @@ import { ScreenScroll } from "@/components/shell/screen";
 import { skillsApi } from "@/lib/api/skills";
 import { useProjectsQuery } from "@/lib/query/projects";
 import {
+  useSetProjectSkillProjectMutation,
+  useSetProjectSkillTargetMutation,
   useSetSkillDisabledMutation,
   useSetSkillTargetMutation,
   useSkillsQuery,
@@ -21,6 +23,7 @@ import {
 } from "@/lib/query/agentPreferences";
 import { isTauriRuntime } from "@/lib/runtime";
 import { hasGlobalPlacement, isProjectCustomSkill, srcAgentOf, targetAgentsOf } from "@/lib/tokens";
+import { computePropagationTargets } from "@/components/skill/propagation";
 import { cn } from "@/lib/utils";
 import type { AgentName, Skill } from "@/types";
 
@@ -46,6 +49,8 @@ export function SkillPage() {
   const projectsQuery = useProjectsQuery();
   const setSkillTarget = useSetSkillTargetMutation();
   const setSkillDisabled = useSetSkillDisabledMutation();
+  const setProjectSkillProject = useSetProjectSkillProjectMutation();
+  const setProjectSkillTarget = useSetProjectSkillTargetMutation();
   const enabledAgents = useEnabledAgents();
   const disabledAgents = useDisabledAgents();
   const defaultGlobalEntry = useDefaultGlobalEntryAgent();
@@ -126,6 +131,69 @@ export function SkillPage() {
     }
   }
 
+  async function propagateProject(skill: Skill, projectId: string, defaultAgent: AgentName) {
+    if (!desktop) {
+      toast("Desktop runtime required for propagating skills");
+      return;
+    }
+
+    try {
+      await setProjectSkillProject.mutateAsync({
+        skillId: skill.id,
+        targetProjectId: projectId,
+        defaultAgent,
+        enabled: true,
+      });
+      toast(`Propagated to Project · ${defaultAgent}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function unpropagateProject(skill: Skill, projectId: string) {
+    if (!desktop) {
+      toast("Desktop runtime required for changing skill placements");
+      return;
+    }
+
+    try {
+      await setProjectSkillProject.mutateAsync({
+        skillId: skill.id,
+        targetProjectId: projectId,
+        defaultAgent: defaultGlobalEntry,
+        enabled: false,
+      });
+      toast("Removed from Project");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function toggleProjectCell(skill: Skill, agent: AgentName) {
+    if (!desktop) {
+      toast("Desktop runtime required for changing skill targets");
+      return;
+    }
+    const canonicalId = skill.canonicalSkillId ?? skill.id;
+    const targetProjectId = skill.placementProjectId;
+    if (!targetProjectId) {
+      toast("This skill row has no target Project");
+      return;
+    }
+
+    try {
+      await setProjectSkillTarget.mutateAsync({
+        skillId: canonicalId,
+        targetProjectId,
+        agent,
+        enabled: skill.cells[agent] !== "target",
+      });
+      toast(skill.cells[agent] === "target" ? "Target removed" : "Target linked");
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
   async function toggleDmi(skill: Skill) {
     if (!desktop) {
       toast("Desktop runtime required for changing skill settings");
@@ -133,7 +201,10 @@ export function SkillPage() {
     }
 
     try {
-      await setSkillDisabled.mutateAsync({ id: skill.id, disabled: !skill.disabled });
+      await setSkillDisabled.mutateAsync({
+        id: skill.canonicalSkillId ?? skill.id,
+        disabled: !skill.disabled,
+      });
       toast(!skill.disabled ? "Model invocation disabled" : "Model invocation enabled");
     } catch (error) {
       toast(getErrorMessage(error));
@@ -147,7 +218,7 @@ export function SkillPage() {
     }
 
     try {
-      await skillsApi.openSource(skill.id);
+      await skillsApi.openSource(skill.canonicalSkillId ?? skill.id);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -160,7 +231,7 @@ export function SkillPage() {
     }
 
     try {
-      await skillsApi.revealPath(skill.id);
+      await skillsApi.revealPath(skill.canonicalSkillId ?? skill.id);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -291,12 +362,26 @@ export function SkillPage() {
               skill={k}
               mode={isProj ? "project" : "global"}
               projectName={k.projectId ? projects.find((p) => p.id === k.projectId)?.name : undefined}
+              sourceProjectName={
+                k.sourceProjectId
+                  ? projects.find((p) => p.id === k.sourceProjectId)?.name
+                  : undefined
+              }
               agents={enabledAgents}
               onToggleCell={(a) => void toggleCell(k, a)}
+              onToggleProjectCell={(a) => void toggleProjectCell(k, a)}
               onToggleDmi={() => void toggleDmi(k)}
               onPropagateGlobal={(entry) => void propagateGlobal(k, entry)}
               onUnpropagateGlobal={() => void unpropagateGlobal(k)}
-              defaultGlobalEntry={defaultGlobalEntry}
+              onPropagateProject={(projectId, defaultAgent) =>
+                void propagateProject(k, projectId, defaultAgent)
+              }
+              onUnpropagateProject={(projectId) => void unpropagateProject(k, projectId)}
+              propagationTargets={
+                isProj && isProjectCustomSkill(k) && !k.placementScope
+                  ? computePropagationTargets(k, skills, projects, defaultGlobalEntry)
+                  : undefined
+              }
               onOpen={() => void openSource(k)}
               onReveal={() => void revealPath(k)}
             />

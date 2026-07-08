@@ -288,6 +288,7 @@ impl PromptService {
             "prompt target path",
             create_managed_file_link,
             remove_managed_file_link_if_present,
+            None,
         )?;
 
         self.get_prompt(prompt_id)

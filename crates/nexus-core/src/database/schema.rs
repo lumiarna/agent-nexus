@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 18;
+const CURRENT_SCHEMA_VERSION: i64 = 19;
 
 /// Default Project custom skills directory — every Project scans `<root>/skills`
 /// as a Project custom source unless the user edits the list.
@@ -85,6 +85,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 18 {
             migrate_to_v18(conn)?;
         }
+        if current < 19 {
+            migrate_to_v19(conn)?;
+        }
     }
 
     Ok(())
@@ -116,7 +119,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (18);
+        INSERT INTO schema_version (version) VALUES (19);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -167,6 +170,22 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             ),
             PRIMARY KEY (skill_id, agent),
             FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE skill_project_distributions (
+            skill_id TEXT NOT NULL,
+            target_project_id TEXT NOT NULL,
+            agent TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('target', 'none')),
+            target_path TEXT,
+            CHECK (
+                (role = 'target' AND target_path IS NOT NULL)
+                OR
+                (role = 'none' AND target_path IS NULL)
+            ),
+            PRIMARY KEY (skill_id, target_project_id, agent),
+            FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
         CREATE TABLE prompts (
@@ -959,6 +978,48 @@ fn migrate_to_v18(conn: &Connection) -> AppResult<()> {
         );
         INSERT INTO session_fts(session_fts) VALUES ('rebuild');
         UPDATE schema_version SET version = 18;
+        COMMIT;
+        "#,
+    )
+    .inspect_err(|_| {
+        let _ = conn.execute("ROLLBACK", params![]);
+    })?;
+
+    Ok(())
+}
+
+/// Schema v19: Project custom Skill cross-Project placements.
+///
+/// `skill_project_distributions` records managed placements of a `project_custom`
+/// Skill into a *target* Project's fixed Agent project skills dir (never the
+/// target Project `custom_skills_dirs`, so a placement can never become a new
+/// canonical source). It is distinct from `skill_distributions`, whose cells for
+/// a `project_custom` Skill express Global placements.
+///
+/// Only `skills.source_kind = 'project_custom'` rows may write here (service-level
+/// invariant); `target_project_id` must differ from the source Skill's
+/// `skills.project_id`. Rows carry no `source` role — a target Project's incoming
+/// Skill row has no Agent source cell.
+fn migrate_to_v19(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        CREATE TABLE skill_project_distributions (
+            skill_id TEXT NOT NULL,
+            target_project_id TEXT NOT NULL,
+            agent TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('target', 'none')),
+            target_path TEXT,
+            CHECK (
+                (role = 'target' AND target_path IS NOT NULL)
+                OR
+                (role = 'none' AND target_path IS NULL)
+            ),
+            PRIMARY KEY (skill_id, target_project_id, agent),
+            FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        UPDATE schema_version SET version = 19;
         COMMIT;
         "#,
     )

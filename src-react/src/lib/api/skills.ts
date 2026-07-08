@@ -7,6 +7,20 @@ export interface SetSkillTargetInput {
   enabled: boolean;
 }
 
+export interface SetProjectSkillProjectInput {
+  skillId: string;
+  targetProjectId: string;
+  defaultAgent: AgentName;
+  enabled: boolean;
+}
+
+export interface SetProjectSkillTargetInput {
+  skillId: string;
+  targetProjectId: string;
+  agent: AgentName;
+  enabled: boolean;
+}
+
 export const skillsApi = {
   list(): Promise<Skill[]> {
     return invokeCommand<Skill[]>("list_skills");
@@ -30,5 +44,17 @@ export const skillsApi = {
 
   revealPath(id: string): Promise<void> {
     return invokeCommand<void>("reveal_skill_path", { id });
+  },
+
+  /** Source-side: propagate a Project custom Skill to (or cancel it from) a
+   *  target Project. Returns the full skill list so projection rows refresh. */
+  setProjectSkillProject(input: SetProjectSkillProjectInput): Promise<Skill[]> {
+    return invokeCommand<Skill[]>("set_project_skill_project", { input });
+  },
+
+  /** Target-side: toggle one Agent placement inside an incoming target
+   *  Project Skill row. Returns the full skill list. */
+  setProjectSkillTarget(input: SetProjectSkillTargetInput): Promise<Skill[]> {
+    return invokeCommand<Skill[]>("set_project_skill_target", { input });
   },
 };

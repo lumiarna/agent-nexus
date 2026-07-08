@@ -253,7 +253,9 @@ fn set_agent_display_preferences_rejects_disabling_generic_agent() {
             default_global_entry_agent: None,
         })
         .expect_err("Generic Agent must stay enabled");
-    assert!(error.to_string().contains("Generic Agent cannot be disabled"));
+    assert!(error
+        .to_string()
+        .contains("Generic Agent cannot be disabled"));
 }
 
 #[test]

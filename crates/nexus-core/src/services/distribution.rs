@@ -79,6 +79,11 @@ pub fn matrix_rows(
 
 /// Toggle a single Agent Matrix target: place or remove the on-disk link, then upsert the
 /// distribution row, rolling the placement back if the row write fails.
+///
+/// `extra_key` optionally adds a second natural-key column (name, value) to
+/// both the INSERT column list and the ON CONFLICT target. `skill_project_distributions`
+/// uses it for `target_project_id` so the `(skill_id, target_project_id, agent)`
+/// primary key matches; the legacy single-key tables pass `None`.
 #[allow(clippy::too_many_arguments)]
 pub fn write_target(
     db: &Database,
@@ -92,6 +97,7 @@ pub fn write_target(
     target_path_label: &str,
     place: fn(&Path, &Path) -> AppResult<()>,
     remove: fn(&Path, &Path) -> AppResult<()>,
+    extra_key: Option<(&str, &str)>,
 ) -> AppResult<()> {
     let created_placement = if enabled {
         place(canonical_path, target_path)?;
@@ -108,23 +114,47 @@ pub fn write_target(
             None
         };
         let conn = db.connection()?;
-        conn.execute(
-            &format!(
-                r#"
-                INSERT INTO {distribution_table} ({id_column}, agent, role, target_path)
-                VALUES (?1, ?2, ?3, ?4)
-                ON CONFLICT({id_column}, agent) DO UPDATE SET
-                    role = excluded.role,
-                    target_path = excluded.target_path
-                "#
-            ),
-            params![
-                asset_id,
-                target_agent,
-                if enabled { "target" } else { "none" },
-                target_path_value,
-            ],
-        )?;
+        match extra_key {
+            None => {
+                conn.execute(
+                    &format!(
+                        r#"
+                        INSERT INTO {distribution_table} ({id_column}, agent, role, target_path)
+                        VALUES (?1, ?2, ?3, ?4)
+                        ON CONFLICT({id_column}, agent) DO UPDATE SET
+                            role = excluded.role,
+                            target_path = excluded.target_path
+                        "#
+                    ),
+                    params![
+                        asset_id,
+                        target_agent,
+                        if enabled { "target" } else { "none" },
+                        target_path_value,
+                    ],
+                )?;
+            }
+            Some((extra_col, extra_val)) => {
+                conn.execute(
+                    &format!(
+                        r#"
+                        INSERT INTO {distribution_table} ({id_column}, {extra_col}, agent, role, target_path)
+                        VALUES (?1, ?2, ?3, ?4, ?5)
+                        ON CONFLICT({id_column}, {extra_col}, agent) DO UPDATE SET
+                            role = excluded.role,
+                            target_path = excluded.target_path
+                        "#
+                    ),
+                    params![
+                        asset_id,
+                        extra_val,
+                        target_agent,
+                        if enabled { "target" } else { "none" },
+                        target_path_value,
+                    ],
+                )?;
+            }
+        }
         Ok(())
     })();
 
@@ -207,7 +237,7 @@ pub fn project_managed_target_identities(conn: &Connection) -> AppResult<HashSet
 }
 
 /// Whether `target_path` is a managed placement (symlink or junction) resolving to `source_path`.
-fn placement_points_to(target_path: &Path, source_path: &Path) -> AppResult<bool> {
+pub fn placement_points_to(target_path: &Path, source_path: &Path) -> AppResult<bool> {
     let metadata = match fs::symlink_metadata(target_path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
