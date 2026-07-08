@@ -99,7 +99,72 @@ agent({
 ```
 - Pi 仍是 prompt-capable Agent，会出现在 global Prompt matrix；project Prompt matrix 继续由 Generic Agent 表示 `AGENTS.md` namespace。
 
+## Scenario: 共享 canonical-asset 列表中的派生 projection 行
+
+### 1. Scope / Trigger
+- Trigger: 后端需要在同一个 list 响应中混入「派生投影行」——非 canonical asset，而是某 canonical asset 在另一上下文中的 placement 投影（本任务为 `project_custom` Skill 跨 Project 传播后在目标 Project 中出现的 incoming 行），前端用同一 DTO 渲染但写入型 command 必须指向 canonical asset。
+
+### 2. Signatures
+- Backend DTO `crates/nexus-core/src/services/skills.rs::Skill` 新增 optional 字段：
+  - `canonical_skill_id: Option<String>` —— projection 行的真实 backend `skills.id`；canonical 行为 `None`。
+  - `placement_scope: Option<String>`（`Some("project")`）、`placement_project_id`、`source_project_id`。
+  - projection 行的 `Skill::id` 是 composite display id（`{skill_id}::project::{target_project_id}`），仅作 React key。
+- Frontend type `src-react/src/types/index.ts::Skill` 同名 optional（camelCase）：`canonicalSkillId` / `placementScope` / `placementProjectId` / `sourceProjectId`。
+- Tauri commands `src-tauri/src/commands/skills.rs`：`set_project_skill_project` / `set_project_skill_target` 返回 `AppResult<Vec<Skill>>`（整条 list，因为 projection 行在服务端派生）。
+
+### 3. Contracts
+- `id` 仅作 React key 与展示；任何写后端的 command（mutation / `open_source` / `reveal_path`）必须传 `canonicalSkillId ?? id`。
+- projection 行：`placementScope === "project"`、`placementProjectId === target`、`sourceProjectId === canonical.projectId`，且无 source Agent cell（cells 只有 `target`/`none`）。
+- 跨 Project mutation 返回整条 skill list，前端用整表替换 `skillKeys.all` cache 并 `invalidateQueries({ queryKey: projectKeys.all })`（incoming 行改变 Project skill 计数）；不要对投影行做单行 `replaceSkill(current, next)`。
+- 跨 Project placement 落点是目标 Project 默认 Agent 的 fixed project skills dir（`agent.skill.project_dir`），**绝不**落到目标 Project `customSkillsDirs`，否则会被扫描误识别为新 canonical source。
+
+### 4. Validation & Error Matrix
+- 用 display `id` 调 `set_project_skill_target` -> 后端找不到 canonical skill -> `Validation("skill was not found")`。
+- 用 display `id` 调 `open_source`/`reveal_path` -> 同上，永远打不开源 Project canonical。
+- `set_project_skill_project` 传入 `target_project_id == source_project_id` -> `Validation("target project must differ from the source project")`。
+- 对 `source_kind != project_custom` 的 skill 调跨 Project 命令 -> `Validation("only Project custom Skills can be propagated across Projects")`。
+- 目标 Agent 无 skill surface -> `Validation("<agent> does not support skill placement")`。
+- 目标路径已存在真实目录/非托管文件 -> `create_managed_directory_link` 失败，不覆盖、不合并、不改名。
+
+### 5. Good/Base/Bad Cases
+- Good: 目标 Project incoming 行 toggle Agent -> `useSetProjectSkillTargetMutation` 传 `skillId: skill.canonicalSkillId ?? skill.id` + `targetProjectId: skill.placementProjectId`。
+- Base: canonical row（`canonicalSkillId` 为 `None`）继续走 `setSkillTarget`，`canonicalSkillId ?? id` 退化为 `id`，行为不变。
+- Bad: incoming 行 mutation 传 `skill.id`（display id）-> 后端 Validation 报 skill not found，placement 不产生。
+
+### 6. Tests Required
+- Backend `crates/nexus-core/tests/skill_service.rs`：
+  - `propagates_project_custom_skill_to_other_project`：assert 目标 placement 的 target_path 指向目标 Project 默认 Agent 的 fixed project skills dir，而非 `customSkillsDirs`。
+  - `target_project_incoming_row_fans_out_and_disappears`：assert incoming projection row 出现且 cells 无 `source`；移除最后一个 `target` 后 `list_skills` 不再含该行。
+  - `cross_project_propagation_rejects_agent_sourced_skill`：assert agent-sourced skill 调 `set_project_skill_project` 报 Validation。
+  - `cross_project_propagation_fails_when_target_path_exists`：assert 预占目录导致传播失败且原内容未被覆盖。
+  - `cross_project_placement_does_not_become_canonical_on_rescan`：assert 扫描后不新增 canonical Skill。
+- Frontend：`typecheck` 必过；`grep -n "canonicalSkillId ?? skill.id" src/components` 校验所有 mutation/open/reveal 路径都走 canonical id。
+
+### 7. Wrong vs Correct
+#### Wrong
+```ts
+// 用 display id 写后端 —— 后端找不到 canonical skill
+await setProjectSkillTarget.mutateAsync({
+  skillId: skill.id, // "{uuid}::project::{targetId}"
+  targetProjectId: skill.placementProjectId!,
+  agent,
+  enabled: false,
+});
+```
+
+#### Correct
+```ts
+const canonicalId = skill.canonicalSkillId ?? skill.id;
+await setProjectSkillTarget.mutateAsync({
+  skillId: canonicalId,
+  targetProjectId: skill.placementProjectId!,
+  agent,
+  enabled: false,
+});
+```
+
 ## 验证
 
 - `src-react/package.json` 提供 `typecheck`：`tsc --noEmit`。
 - 测试编译使用 `tsconfig.test.json`，纯 module 需保持 Node 可编译，避免依赖浏览器/Tauri runtime。
+- 纯业务规则单测跑在 `node:test`（`pnpm test:unit`）；凡 import 链触及 `@/` 别名（如 `lib/tokens.ts`）的纯函数无法进 node harness（运行时无法解析 `@/`），需改为相对 import 或用 vitest component harness（`tests/component/**/*.test.tsx`）覆盖——见 `tsconfig.test.json` include 白名单与 `vitest.config.ts`。

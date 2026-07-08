@@ -1,1 +1,8 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/nexus-core/backend/quality-guidelines.md", "reason": "检查 nexus-core 测试覆盖与 Windows SQLite 陷阱，避免裸 cargo test -p nexus-core；按 implement.md 验收单跑测试"}
+{"file": ".trellis/spec/nexus-core/backend/database-guidelines.md", "reason": "核查 schema v19 迁移与表约束是否符合迁移与表命名规则，回滚/兼容性正确"}
+{"file": ".trellis/spec/nexus-core/backend/error-handling.md", "reason": "核查校验失败与路径冲突错误是否用 AppError 正确传播，不静默覆盖"}
+{"file": ".trellis/spec/agent-nexus/backend/quality-guidelines.md", "reason": "核查 Tauri 壳层命令未下沉业务逻辑、返回 AppResult，命令注册完整"}
+{"file": ".trellis/spec/agent-nexus/frontend/quality-guidelines.md", "reason": "核查前端 typecheck/test，避免项目特有 anti-pattern（隐藏 UI、短 ID 替代 canonical name）"}
+{"file": ".trellis/spec/agent-nexus/frontend/type-safety.md", "reason": "核查 Skill projection 新增 optional 字段不破坏 browser preview/mock，mutation 传 canonical id 而非 display id"}
+{"file": ".trellis/spec/guides/index.md", "reason": "检查改 Skill/Distribution/Project 是否对照了 CONTEXT.md 与 ADR-0003 触发器"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层完整性自检：serde 类型 / 命令 / types / api / query / 测试是否同步改动"}

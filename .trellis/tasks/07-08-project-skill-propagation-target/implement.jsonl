@@ -1,1 +1,16 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/nexus-core/backend/index.md", "reason": "本任务新增 schema v19 与 skill_project_distributions 表及 service 函数，需遵循 core crate 领域层规范"}
+{"file": ".trellis/spec/nexus-core/backend/directory-structure.md", "reason": "新增 distribution service 方法与 target path helper 需符合 deep module / service 组织边界"}
+{"file": ".trellis/spec/nexus-core/backend/database-guidelines.md", "reason": "新增 schema v19 迁移、表与外键/约束需遵循 rusqlite migration 与表命名规则"}
+{"file": ".trellis/spec/nexus-core/backend/error-handling.md", "reason": "cross-project 校验（source_kind=project_custom、target!=source、冲突不覆盖）需用 AppError/AppResult 正确传播"}
+{"file": ".trellis/spec/agent-nexus/backend/index.md", "reason": "新增 set_project_skill_project / set_project_skill_target 等命令需遵循 Tauri 壳层规范：接收参数→调 service→返回 AppResult"}
+{"file": ".trellis/spec/agent-nexus/backend/directory-structure.md", "reason": "命令放在 src-tauri/src/commands/skills.rs 并在 lib.rs 注册，需符合 command/service 边界"}
+{"file": ".trellis/spec/agent-nexus/backend/error-handling.md", "reason": "命令边界需透传 AppResult，不在 command 写业务逻辑"}
+{"file": ".trellis/spec/agent-nexus/frontend/index.md", "reason": "扩展 Skill 类型、新增 API/Query mutation、改 SkillRow 菜单，需遵循前端分层与 React Query 单一真相源约定"}
+{"file": ".trellis/spec/agent-nexus/frontend/directory-structure.md", "reason": "types/lib/api/lib/query/components 的改动需按领域目录放置"}
+{"file": ".trellis/spec/agent-nexus/frontend/component-guidelines.md", "reason": "把 PropagateToGlobal toggle 替换为 Propagate 菜单与外来 Skill 行渲染，需符合页面组件/领域组件/UI primitive 模式"}
+{"file": ".trellis/spec/agent-nexus/frontend/hook-guidelines.md", "reason": "新增跨 Project mutation 与 invalidate skillKeys/projectKeys 需符合 React Query hook 组织方式"}
+{"file": ".trellis/spec/agent-nexus/frontend/state-management.md", "reason": "projection row 走 React Query server state，需明确本地 UI state 与 server state 边界"}
+{"file": ".trellis/spec/agent-nexus/frontend/type-safety.md", "reason": "Skill 新增 canonicalSkillId/placementScope 等 optional 字段与 IPC payload 需类型安全"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Thinking guides 入口：改 Skill/Distribution/Project 领域概念跨多层，先对照触发器"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本任务跨 Rust DTO、Tauri command、nexus-core service、SQLite schema、前端类型/查询/组件，必须做跨层自检"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用 distribution::write_target / managed link helper 与现有 Project source 行渲染，避免重复路径处理与 mutation"}
