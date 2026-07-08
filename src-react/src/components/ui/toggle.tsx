@@ -4,16 +4,17 @@ interface ToggleProps {
   /** "warn" tints the active track amber (used for "disable invoke"). */
   tone?: "accent" | "warn";
   title?: string;
+  disabled?: boolean;
 }
 
 /** Track + knob switch, sized to match the prototype (34×20, 16px knob). */
-export function Toggle({ checked, onChange, tone = "accent", title }: ToggleProps) {
+export function Toggle({ checked, onChange, tone = "accent", title, disabled }: ToggleProps) {
   const onColor = tone === "warn" ? "#c2913f" : "#9d7a64";
   return (
     <div
-      onClick={onChange}
+      onClick={disabled ? undefined : onChange}
       title={title}
-      className="relative h-5 w-[34px] flex-none cursor-pointer rounded-full transition-colors"
+      className={`relative h-5 w-[34px] flex-none rounded-full transition-colors ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
       style={{ background: checked ? onColor : "#ddccb6" }}
     >
       <div
