@@ -39,3 +39,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Add Pi agent
+
+**Date**: 2026-07-08
+**Task**: Add Pi agent
+**Package**: agent-nexus
+**Branch**: `main`
+
+### Summary
+
+Added Pi as a canonical Agent across backend and frontend, updated Agent Matrix/UI copy, kept project prompt ownership under Generic Agent, and enforced that Generic Agent cannot be disabled.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `de68419` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
