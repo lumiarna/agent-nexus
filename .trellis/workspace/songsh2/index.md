@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
+- **Total Sessions**: 5
 - **Last Active**: 2026-07-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~144 | Active |
+| `journal-1.md` | ~178 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-07-09 | Ctrl 点击 Agent 矩阵移动 source | `4e3f816` | `main` |
 | 4 | 2026-07-09 | Project Skill Propagate 支持选择当前项目 | `db018a7`, `c082ea0` | `main` |
 | 3 | 2026-07-09 | Project Skill 跨 Project 传播：质量检查 + spec 沉淀 + 归档 | `2334505` | `main` |
 | 2 | 2026-07-08 | Add Pi agent | `de68419` | `main` |

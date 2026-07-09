@@ -142,3 +142,37 @@ Added Pi as a canonical Agent across backend and frontend, updated Agent Matrix/
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Ctrl 点击 Agent 矩阵移动 source
+
+**Date**: 2026-07-09
+**Task**: Ctrl 点击 Agent 矩阵移动 source
+**Package**: agent-nexus
+**Branch**: `main`
+
+### Summary
+
+Skill/Prompt Agent Matrix 支持按住 Ctrl 点击移动 source 到目标 Agent，旧 source 自动变为 target。包括 move_skill_source / move_prompt_source core service、Tauri commands、前端事件传递与交互、Project custom Skill sourceless 矩阵排除、文件系统与 DB 回滚、Rust 测试覆盖。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4e3f816` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
