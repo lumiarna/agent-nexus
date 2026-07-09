@@ -107,3 +107,38 @@ Added Pi as a canonical Agent across backend and frontend, updated Agent Matrix/
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Project Skill Propagate 支持选择当前项目
+
+**Date**: 2026-07-09
+**Task**: Project Skill Propagate 支持选择当前项目
+**Package**: agent-nexus
+**Branch**: `main`
+
+### Summary
+
+实现 Project custom Skill Propagate 支持选择 source/current Project 作为 target；更新前端目标列表、后端 Project target 校验、测试与相关 spec，并归档任务。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `db018a7` | (see git log) |
+| `c082ea0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
