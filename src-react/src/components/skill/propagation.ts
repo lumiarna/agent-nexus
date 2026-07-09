@@ -31,11 +31,12 @@ export interface PropagationTarget {
 
 /**
  * Compute the modal target list for a Project custom Skill: Global + every
- * other active Project. Each entry carries its current enabled state, derived
- * from the canonical row's Global cells (for Global) or the matching incoming
- * projection row (for a target Project). Foreign projection rows are matched
- * by `canonicalSkillId` + `placementProjectId`, so the source row stays the
- * single canonical source and never carries per-Project state itself.
+ * active Project, including the source Project. Each entry carries its current
+ * enabled state, derived from the canonical row's Global cells (for Global) or
+ * the matching incoming projection row (for a target Project). Foreign
+ * projection rows are matched by `canonicalSkillId` + `placementProjectId`, so
+ * the source row stays the single canonical source and never carries
+ * per-Project state itself.
  */
 export function computePropagationTargets(
   skill: Skill,
@@ -45,7 +46,6 @@ export function computePropagationTargets(
 ): PropagationTarget[] {
   if (!isProjectCustomSkill(skill)) return [];
 
-  const sourceProjectId = skill.projectId;
   const globalTargets = targetAgentsOf(skill.cells);
   const targets: PropagationTarget[] = [
     {
@@ -58,7 +58,6 @@ export function computePropagationTargets(
   ];
 
   for (const project of projects) {
-    if (project.id === sourceProjectId) continue;
     const incoming = allSkills.find(
       (s) =>
         s.canonicalSkillId === skill.id &&

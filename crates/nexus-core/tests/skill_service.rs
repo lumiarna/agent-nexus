@@ -491,6 +491,197 @@ description: Draft project release notes
 
 #[test]
 #[serial]
+fn propagates_project_custom_skill_to_source_project() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let skills = SkillService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create isolated home");
+    env::set_var("HOME", &home);
+    env::set_var("USERPROFILE", &home);
+    let repo = git_repo(&root, "source-project");
+    let project = projects
+        .record_project(repo.clone())
+        .expect("record source project");
+    let custom_dir = Path::new(&repo).join("skills/release-notes");
+
+    write_skill(
+        &custom_dir,
+        r#"---
+name: release-notes
+description: Draft project release notes
+---
+
+# Release Notes
+"#,
+    );
+    let scanned = skills.scan_skills().expect("scan skills");
+    assert_eq!(scanned.len(), 1);
+    let skill_id = scanned[0].id.clone();
+
+    let after = skills
+        .set_project_skill_project(SetProjectSkillProjectInput {
+            skill_id: skill_id.clone(),
+            target_project_id: project.id.clone(),
+            default_agent: "Claude Code".to_string(),
+            enabled: true,
+        })
+        .expect("propagate to source project");
+
+    let canonical = after
+        .iter()
+        .find(|skill| skill.id == skill_id)
+        .expect("canonical source row remains");
+    assert_eq!(canonical.canonical_skill_id, None);
+    assert_eq!(canonical.project_id.as_deref(), Some(project.id.as_str()));
+
+    let incoming = after
+        .iter()
+        .find(|skill| {
+            skill.canonical_skill_id.as_deref() == Some(skill_id.as_str())
+                && skill.placement_scope.as_deref() == Some("project")
+                && skill.placement_project_id.as_deref() == Some(project.id.as_str())
+        })
+        .expect("source project has a managed placement projection row");
+    assert_ne!(incoming.id, skill_id);
+    assert_eq!(incoming.project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(
+        incoming.source_project_id.as_deref(),
+        Some(project.id.as_str())
+    );
+    assert_eq!(incoming.cells["Claude Code"], "target");
+    assert!(!incoming.cells.values().any(|role| role == "source"));
+
+    let claude_link = Path::new(&repo).join(".claude/skills/release-notes");
+    assert_link_points_to(&custom_dir, &claude_link);
+    assert!(
+        !fs::symlink_metadata(&custom_dir)
+            .expect("custom source metadata")
+            .file_type()
+            .is_symlink(),
+        "Project Custom Source remains the real canonical directory"
+    );
+
+    let fanned = skills
+        .set_project_skill_target(SetProjectSkillTargetInput {
+            skill_id: skill_id.clone(),
+            target_project_id: project.id.clone(),
+            agent: "CodeX".to_string(),
+            enabled: true,
+        })
+        .expect("fan out inside source project");
+    let incoming = fanned
+        .iter()
+        .find(|skill| skill.canonical_skill_id.as_deref() == Some(skill_id.as_str()))
+        .expect("current project projection remains after fan-out");
+    assert_eq!(incoming.cells["Claude Code"], "target");
+    assert_eq!(incoming.cells["CodeX"], "target");
+    assert_link_points_to(
+        &custom_dir,
+        &Path::new(&repo).join(".codex/skills/release-notes"),
+    );
+
+    let rescanned = skills
+        .scan_skills()
+        .expect("rescan after current-project placement");
+    assert_eq!(
+        rescanned
+            .iter()
+            .filter(|skill| skill.canonical_skill_id.is_none())
+            .count(),
+        1,
+        "managed current-project placements must not become canonical Skills"
+    );
+    assert!(rescanned
+        .iter()
+        .any(|skill| skill.canonical_skill_id.as_deref() == Some(skill_id.as_str())));
+
+    let after_default_removed = skills
+        .set_project_skill_target(SetProjectSkillTargetInput {
+            skill_id: skill_id.clone(),
+            target_project_id: project.id.clone(),
+            agent: "Claude Code".to_string(),
+            enabled: false,
+        })
+        .expect("remove one placement inside source project");
+    assert!(after_default_removed
+        .iter()
+        .any(|skill| skill.canonical_skill_id.as_deref() == Some(skill_id.as_str())));
+
+    let after_cancel = skills
+        .set_project_skill_project(SetProjectSkillProjectInput {
+            skill_id: skill_id.clone(),
+            target_project_id: project.id.clone(),
+            default_agent: "Claude Code".to_string(),
+            enabled: false,
+        })
+        .expect("cancel source project target");
+    assert!(!after_cancel
+        .iter()
+        .any(|skill| skill.canonical_skill_id.as_deref() == Some(skill_id.as_str())));
+    assert!(!claude_link.exists(), "Claude placement link removed");
+    assert!(
+        !Path::new(&repo)
+            .join(".codex/skills/release-notes")
+            .exists(),
+        "CodeX placement link removed"
+    );
+}
+
+#[test]
+#[serial]
+fn source_project_propagation_fails_when_target_path_exists() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let skills = SkillService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create isolated home");
+    env::set_var("HOME", &home);
+    env::set_var("USERPROFILE", &home);
+    let repo = git_repo(&root, "source-project");
+    let project = projects
+        .record_project(repo.clone())
+        .expect("record project");
+    let custom_dir = Path::new(&repo).join("skills/release-notes");
+    write_skill(
+        &custom_dir,
+        r#"---
+name: release-notes
+description: Draft project release notes
+---
+
+# Release Notes
+"#,
+    );
+    let existing = Path::new(&repo).join(".claude/skills/release-notes");
+    write_skill(&existing, "---\nname: release-notes\n---\n# real skill\n");
+
+    let scanned = skills.scan_skills().expect("scan skills");
+    assert_eq!(scanned.len(), 2);
+    let project_custom = scanned
+        .iter()
+        .find(|skill| skill.source_kind == "project_custom")
+        .expect("find Project Custom Source");
+
+    let error = skills
+        .set_project_skill_project(SetProjectSkillProjectInput {
+            skill_id: project_custom.id.clone(),
+            target_project_id: project.id.clone(),
+            default_agent: "Claude Code".to_string(),
+            enabled: true,
+        })
+        .expect_err("current-project propagation should fail on existing real target");
+    assert!(
+        error.to_string().contains("link target already exists"),
+        "unexpected error: {error}"
+    );
+    assert!(existing.join("SKILL.md").is_file());
+}
+
+#[test]
+#[serial]
 fn target_project_incoming_row_fans_out_and_disappears() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());

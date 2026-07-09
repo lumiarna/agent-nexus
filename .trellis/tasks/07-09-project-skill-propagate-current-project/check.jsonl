@@ -1,0 +1,7 @@
+{"file":".trellis/spec/nexus-core/backend/quality-guidelines.md","reason":"核查后端测试覆盖 source Project as target 的启用、取消、冲突、扫描不重复 canonical source"}
+{"file":".trellis/spec/nexus-core/backend/error-handling.md","reason":"核查移除 source/target 不同限制后，其他校验和路径冲突错误仍正确传播"}
+{"file":".trellis/spec/agent-nexus/frontend/quality-guidelines.md","reason":"核查前端 typecheck/test，且不隐藏普通/现有传播 UI"}
+{"file":".trellis/spec/agent-nexus/frontend/type-safety.md","reason":"核查 projection row 使用 canonicalSkillId，避免把 display id 传给 mutation"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"核查 Rust DTO/service、前端 helper/UI、测试和扫描语义是否一致"}
+{"file":"CONTEXT.md","reason":"核查 Project Custom Source 仍为唯一 canonical source，当前 Project Agent 目录只是 managed placement"}
+{"file":"GOTCHAS.md","reason":"核查验证命令符合 Windows SQLite 陷阱要求"}

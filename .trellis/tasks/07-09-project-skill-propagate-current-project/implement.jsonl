@@ -1,0 +1,11 @@
+{"file":".trellis/spec/nexus-core/backend/index.md","reason":"本任务修改 nexus-core Skill service 校验和后端测试，需先按 backend index 路由读取具体规范"}
+{"file":".trellis/spec/nexus-core/backend/directory-structure.md","reason":"修改 crates/nexus-core/src/services/skills.rs 时需遵守 service / helper 放置边界"}
+{"file":".trellis/spec/nexus-core/backend/error-handling.md","reason":"保留 project_custom、target project、agent、路径冲突等 AppError/AppResult 校验语义"}
+{"file":".trellis/spec/nexus-core/backend/quality-guidelines.md","reason":"新增 source Project as target 的后端测试，并遵守 Windows SQLite 测试陷阱"}
+{"file":".trellis/spec/agent-nexus/frontend/index.md","reason":"本任务修改 src-react Skill propagation helper/UI，需按前端 index 路由读取具体规范"}
+{"file":".trellis/spec/agent-nexus/frontend/component-guidelines.md","reason":"Propagate modal 和 SkillRow projection row 行为需保持领域组件模式"}
+{"file":".trellis/spec/agent-nexus/frontend/type-safety.md","reason":"projection row 依赖 canonicalSkillId / placementProjectId 等 optional 字段，mutation 需传 canonical id"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"变更跨 React helper/UI、Rust service、SQLite projection、测试，需做跨层契约自检"}
+{"file":"CONTEXT.md","reason":"Project Custom Source、Canonical Source、Placement、Distribution 语义是本任务核心约束"}
+{"file":"GOTCHAS.md","reason":"Rust 测试命令必须避免裸 cargo test -p nexus-core，并处理 SQLite DLL 占用陷阱"}
+{"file":".trellis/tasks/archive/2026-07/07-08-project-skill-propagation-target/design.md","reason":"当前实现的 skill_project_distributions projection 模型来源；本任务是在其基础上允许 source Project target"}

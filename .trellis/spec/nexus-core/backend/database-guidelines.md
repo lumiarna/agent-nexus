@@ -58,7 +58,7 @@
 
 ### 3. Contracts
 - 仅 `skills.source_kind = 'project_custom'` 可写入 `skill_project_distributions`（service 在 `project_skill_context` 校验）。
-- `target_project_id` 必须不同于 canonical skill 的 `project_id`；目标 Project 必须存在且 `status = 'active'`。
+- `target_project_id` 可以等于 canonical skill 的 `project_id`（source/current Project target）；目标 Project 必须存在且 `status = 'active'`。
 - 落点用目标 Agent `skill.project_dir`（fixed project skills dir），**绝不**用目标 Project `customSkillsDirs`；`agent.project_dir` 不可用时失败。
 - 托管链接复用 `create_managed_directory_link` / `remove_managed_directory_link_if_present`；目标路径已存在真实目录/非托管文件即失败，不覆盖、不合并、不改名。
 - scan 重建 canonical sources 时，`discover_skill_sources` 跳过 symlink/junction，跨 Project placement 不会被误识别为 canonical source；scan 只会 reconcile `skill_project_distributions` 中断链的 target row。
@@ -66,15 +66,14 @@
 
 ### 4. Validation & Error Matrix
 - skill 不存在 -> `Validation("skill was not found")`
-- `source_kind != project_custom` -> `Validation("only Project custom Skills can be propagated across Projects")`
+- `source_kind != project_custom` -> `Validation("only Project custom Skills can be propagated to Project targets")`
 - canonical skill 无 `project_id` -> `Validation("skill has no source Project")`
-- `target_project_id == source_project_id` -> `Validation("target project must differ from the source project")`
 - target Project 不存在/非 active -> `Validation("target project was not found or is not active")`
 - Agent 无 skill surface -> `Validation("<agent> does not support skill placement")`
 - 目标路径被预占 -> managed link 创建失败，原内容保留
 
 ### 5. Good/Base/Bad Cases
-- Good: 源 Project custom Skill 传播到另一 active Project，目标默认 Agent project skills dir 出现托管链接，`list_skills` 返回该目标 Project 的 incoming projection row。源侧取消时该目标 Project 全部 Agent placement 与目标 row 一并清除。
+- Good: 源 Project custom Skill 传播到当前/source Project 或另一 active Project，目标默认 Agent project skills dir 出现托管链接，`list_skills` 返回该目标 Project 的 projection row。源侧取消时该目标 Project 全部 Agent placement 与目标 row 一并清除。
 - Base: 只传播到 Global 时走既有 `skill_distributions`，与 v19 改动无关。
 - Bad: 把 placement `target_path` 落到目标 `customSkillsDirs` -> rescan 会把它当新 canonical source，偷换 canonical 身份。
 

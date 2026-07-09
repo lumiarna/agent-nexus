@@ -212,8 +212,8 @@ impl SkillService {
         Ok(skills)
     }
 
-    /// Append incoming target-Project projection rows for `project_custom`
-    /// Skills that have been propagated to another Project. Each group of
+    /// Append target-Project projection rows for `project_custom` Skills,
+    /// including placements back into the source Project. Each group of
     /// `skill_project_distributions` rows for one `(skill_id, target_project_id)`
     /// with at least one live `target` becomes one projection `Skill` row,
     /// scoped to the target Project so the Project detail / Skill Project tab
@@ -473,8 +473,9 @@ impl SkillService {
     }
 
     /// Propagate a `project_custom` Skill to (or cancel it from) a target
-    /// Project. Enabling places a managed directory link at the target
-    /// Project's default entry Agent project skills dir; cancelling removes
+    /// Project, including its source Project. Enabling places a managed
+    /// directory link at the target Project's default entry Agent project
+    /// skills dir; cancelling removes
     /// every Agent placement for that target Project so the incoming row
     /// disappears. Returns the full skill list so the UI can refetch
     /// projection rows.
@@ -486,11 +487,6 @@ impl SkillService {
         let target_project_id = required_trimmed(&input.target_project_id, "target project id")?;
         let default_agent = require_agent(required_trimmed(&input.default_agent, "agent")?)?;
         let context = self.project_skill_context(skill_id)?;
-        if context.source_project_id == target_project_id {
-            return Err(AppError::Validation(
-                "target project must differ from the source project".to_string(),
-            ));
-        }
 
         let target_root = self.project_root(target_project_id)?;
         let target_path = project_target_path_for_skill(
@@ -532,11 +528,6 @@ impl SkillService {
         let target_project_id = required_trimmed(&input.target_project_id, "target project id")?;
         let target_agent = require_agent(required_trimmed(&input.agent, "agent")?)?;
         let context = self.project_skill_context(skill_id)?;
-        if context.source_project_id == target_project_id {
-            return Err(AppError::Validation(
-                "target project must differ from the source project".to_string(),
-            ));
-        }
 
         let target_root = self.project_root(target_project_id)?;
         let target_path = project_target_path_for_skill(
@@ -604,9 +595,9 @@ impl SkillService {
         Ok(())
     }
 
-    /// Context for cross-Project propagation: the canonical Skill must be a
-    /// `project_custom` source rooted in a source Project, and the target
-    /// Project must differ from that source Project.
+    /// Context for Project propagation: the canonical Skill must be a
+    /// `project_custom` source rooted in a source Project. The target may be
+    /// that same source Project or another active Project.
     fn project_skill_context(&self, skill_id: &str) -> AppResult<ProjectSkillContext> {
         let conn = self.db.connection()?;
         let row = conn
@@ -631,14 +622,16 @@ impl SkillService {
         let (source_kind, source_project_id, canonical_path) = row;
         if source_kind != SOURCE_KIND_PROJECT_CUSTOM {
             return Err(AppError::Validation(
-                "only Project custom Skills can be propagated across Projects".to_string(),
+                "only Project custom Skills can be propagated to Project targets".to_string(),
             ));
         }
-        let source_project_id = source_project_id
-            .ok_or_else(|| AppError::Validation("skill has no source Project".to_string()))?;
+        if source_project_id.is_none() {
+            return Err(AppError::Validation(
+                "skill has no source Project".to_string(),
+            ));
+        }
 
         Ok(ProjectSkillContext {
-            source_project_id,
             canonical_path: PathBuf::from(canonical_path),
         })
     }
@@ -902,9 +895,8 @@ struct SkillTargetContext {
     source_agent: Option<String>,
 }
 
-/// Context for cross-Project propagation of a `project_custom` Skill.
+/// Context for Project propagation of a `project_custom` Skill.
 struct ProjectSkillContext {
-    source_project_id: String,
     canonical_path: PathBuf,
 }
 
