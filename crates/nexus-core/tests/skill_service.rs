@@ -6,8 +6,8 @@ use nexus_core::{
         paths,
         projects::ProjectService,
         skills::{
-            SetProjectSkillProjectInput, SetProjectSkillTargetInput, SetSkillTargetInput,
-            SkillService,
+            MoveSkillSourceInput, SetProjectSkillProjectInput, SetProjectSkillTargetInput,
+            SetSkillTargetInput, SkillService,
         },
         symlink::create_managed_directory_link,
     },
@@ -1034,4 +1034,109 @@ description: Agent-sourced project skill
         error.to_string().contains("only Project custom Skills"),
         "unexpected error: {error}"
     );
+}
+
+#[test]
+#[serial]
+fn moves_agent_skill_source_and_turns_previous_source_into_target() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let skills = SkillService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create isolated home");
+    env::set_var("HOME", &home);
+    env::set_var("USERPROFILE", &home);
+    let repo = git_repo(&root, "agent-nexus");
+    projects
+        .record_project(repo.clone())
+        .expect("record project");
+    let repo = Path::new(&repo);
+    let source_dir = repo.join(".github/skills/tap-builder");
+    let target_dir = repo.join(".codex/skills/tap-builder");
+
+    write_skill(
+        &source_dir,
+        r#"---
+name: tap-builder
+description: Project-scoped TAP scaffolder
+---
+
+# Tap Builder
+"#,
+    );
+    let scanned = skills.scan_skills().expect("scan skills");
+    let linked = skills
+        .set_skill_target(SetSkillTargetInput {
+            skill_id: scanned[0].id.clone(),
+            agent: "CodeX".to_string(),
+            enabled: true,
+        })
+        .expect("enable CodeX target");
+    assert_eq!(linked.cells["Copilot"], "source");
+    assert_eq!(linked.cells["CodeX"], "target");
+
+    let moved = skills
+        .move_skill_source(MoveSkillSourceInput {
+            skill_id: linked.id.clone(),
+            agent: "CodeX".to_string(),
+        })
+        .expect("move source to CodeX");
+
+    assert_eq!(moved.source_agent.as_deref(), Some("CodeX"));
+    assert_eq!(moved.cells["CodeX"], "source");
+    assert_eq!(moved.cells["Copilot"], "target");
+    assert_eq!(
+        moved
+            .cells
+            .values()
+            .filter(|role| *role == "source")
+            .count(),
+        1
+    );
+    assert!(target_dir.join("SKILL.md").exists());
+    assert_eq!(
+        fs::canonicalize(&source_dir).expect("canonicalize old source target"),
+        fs::canonicalize(&target_dir).expect("canonicalize new source")
+    );
+}
+
+#[test]
+#[serial]
+fn rejects_moving_project_custom_skill_source() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let skills = SkillService::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create isolated home");
+    env::set_var("HOME", &home);
+    env::set_var("USERPROFILE", &home);
+    let repo = git_repo(&root, "agent-nexus");
+    projects
+        .record_project(repo.clone())
+        .expect("record project");
+    let custom_dir = Path::new(&repo).join("skills/release-notes");
+    write_skill(
+        &custom_dir,
+        r#"---
+name: release-notes
+---
+
+# Release Notes
+"#,
+    );
+    let scanned = skills.scan_skills().expect("scan skills");
+
+    let error = skills
+        .move_skill_source(MoveSkillSourceInput {
+            skill_id: scanned[0].id.clone(),
+            agent: "Claude Code".to_string(),
+        })
+        .expect_err("Project custom Skill cannot move source");
+
+    assert!(error
+        .to_string()
+        .contains("only Agent-sourced Skills can move source"));
+    assert_eq!(scanned[0].source_kind, "project_custom");
 }

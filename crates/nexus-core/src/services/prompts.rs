@@ -18,7 +18,7 @@ use crate::{
     },
     services::distribution::{self, MatrixSource},
     services::paths::{self, path_to_string},
-    services::projects::parse_dir_list,
+    services::projects::{self, parse_dir_list},
     services::symlink::{create_managed_file_link, remove_managed_file_link_if_present},
     services::system_open::{open_path, reveal_path},
     services::util::{now_epoch_seconds, require_agent, required_trimmed},
@@ -43,6 +43,13 @@ pub struct SetPromptTargetInput {
     pub prompt_id: String,
     pub agent: String,
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovePromptSourceInput {
+    pub prompt_id: String,
+    pub agent: String,
 }
 
 #[derive(Clone)]
@@ -71,9 +78,29 @@ struct PromptSource {
 #[derive(Debug, Clone)]
 struct PromptTargetContext {
     scope: String,
+    project_id: Option<String>,
     project_path: Option<PathBuf>,
+    project_name: Option<String>,
     canonical_path: PathBuf,
     source_agent: String,
+}
+
+#[derive(Debug, Clone)]
+struct ExtraPromptMove {
+    project_id: String,
+    old_rel: String,
+    new_rel: String,
+}
+
+struct PromptSourceDbMove<'a> {
+    prompt_id: &'a str,
+    old_source_agent: &'a str,
+    new_source_agent: &'a str,
+    scope: &'a str,
+    project_name: Option<&'a str>,
+    extra_prompt_move: Option<&'a ExtraPromptMove>,
+    old_source_target_path: &'a Path,
+    new_canonical_path: &'a Path,
 }
 
 #[derive(Debug, Clone)]
@@ -246,6 +273,105 @@ impl PromptService {
         });
         self.replace_scanned_sources(sources)?;
         self.list_prompts()
+    }
+
+    pub fn move_prompt_source(&self, input: MovePromptSourceInput) -> AppResult<Prompt> {
+        let prompt_id = required_trimmed(&input.prompt_id, "prompt id")?;
+        let target_agent = require_agent(required_trimmed(&input.agent, "agent")?)?;
+        if target_agent.prompt.is_none() {
+            return Err(AppError::Validation(
+                "agent does not support prompt targets".to_string(),
+            ));
+        }
+
+        let context = self.prompt_target_context(prompt_id)?;
+        let source_agent = require_agent(&context.source_agent)?;
+        if source_agent.name == target_agent.name {
+            return self.get_prompt(prompt_id);
+        }
+
+        let old_canonical_path = context.canonical_path;
+        let new_canonical_path = prompt_target_path(
+            &context.scope,
+            context.project_path.as_deref(),
+            &old_canonical_path,
+            source_agent,
+            target_agent,
+        )?
+        .ok_or_else(|| {
+            AppError::Validation("agent does not support prompt targets in this scope".to_string())
+        })?;
+        let old_source_target_path = old_canonical_path.clone();
+        let extra_prompt_move = if context.scope == "project" {
+            match (&context.project_id, context.project_path.as_deref()) {
+                (Some(project_id), Some(project_path)) => Some(ExtraPromptMove {
+                    project_id: project_id.clone(),
+                    old_rel: project_relative_prompt_path(project_path, &old_canonical_path)?,
+                    new_rel: project_relative_prompt_path(project_path, &new_canonical_path)?,
+                }),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let target_was_target =
+            self.distribution_role(prompt_id, target_agent.name)? == Some("target".to_string());
+
+        if target_was_target {
+            remove_managed_file_link_if_present(&old_canonical_path, &new_canonical_path)?;
+        }
+        let move_result = (|| -> AppResult<()> {
+            match fs::symlink_metadata(&new_canonical_path) {
+                Ok(_) => {
+                    return Err(AppError::Validation(format!(
+                        "prompt target path already exists: {}",
+                        new_canonical_path.display()
+                    )));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+            if let Some(parent) = new_canonical_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::rename(&old_canonical_path, &new_canonical_path)?;
+            Ok(())
+        })();
+        if let Err(error) = move_result {
+            if target_was_target {
+                let _ = create_managed_file_link(&old_canonical_path, &new_canonical_path);
+            }
+            return Err(error);
+        }
+        if let Err(error) = create_managed_file_link(&new_canonical_path, &old_source_target_path) {
+            let _ = fs::rename(&new_canonical_path, &old_canonical_path);
+            if target_was_target {
+                let _ = create_managed_file_link(&old_canonical_path, &new_canonical_path);
+            }
+            return Err(error);
+        }
+
+        let db_result = self.update_moved_prompt_source(PromptSourceDbMove {
+            prompt_id,
+            old_source_agent: source_agent.name,
+            new_source_agent: target_agent.name,
+            scope: &context.scope,
+            project_name: context.project_name.as_deref(),
+            extra_prompt_move: extra_prompt_move.as_ref(),
+            old_source_target_path: &old_source_target_path,
+            new_canonical_path: &new_canonical_path,
+        });
+        if db_result.is_err() {
+            let _ =
+                remove_managed_file_link_if_present(&new_canonical_path, &old_source_target_path);
+            let _ = fs::rename(&new_canonical_path, &old_canonical_path);
+            if target_was_target {
+                let _ = create_managed_file_link(&old_canonical_path, &new_canonical_path);
+            }
+        }
+        db_result?;
+
+        self.get_prompt(prompt_id)
     }
 
     pub fn set_prompt_target(&self, input: SetPromptTargetInput) -> AppResult<Prompt> {
@@ -467,7 +593,7 @@ impl PromptService {
         let conn = self.db.connection()?;
         conn.query_row(
             r#"
-            SELECT p.scope, project.path, p.canonical_path, d.agent
+            SELECT p.scope, p.project_id, project.path, project.name, p.canonical_path, d.agent
             FROM prompts p
             LEFT JOIN projects project ON project.id = p.project_id
             JOIN prompt_distributions d ON d.prompt_id = p.id AND d.role = 'source'
@@ -475,18 +601,86 @@ impl PromptService {
             "#,
             params![id],
             |row| {
-                let project_path: Option<String> = row.get(1)?;
-                let canonical_path: String = row.get(2)?;
+                let project_id: Option<String> = row.get(1)?;
+                let project_path: Option<String> = row.get(2)?;
+                let project_name: Option<String> = row.get(3)?;
+                let canonical_path: String = row.get(4)?;
                 Ok(PromptTargetContext {
                     scope: row.get(0)?,
+                    project_id,
                     project_path: project_path.map(PathBuf::from),
+                    project_name,
                     canonical_path: PathBuf::from(canonical_path),
-                    source_agent: row.get(3)?,
+                    source_agent: row.get(5)?,
                 })
             },
         )
         .optional()?
         .ok_or_else(|| AppError::Validation("prompt source was not found".to_string()))
+    }
+
+    fn distribution_role(&self, prompt_id: &str, agent: &str) -> AppResult<Option<String>> {
+        let conn = self.db.connection()?;
+        conn.query_row(
+            "SELECT role FROM prompt_distributions WHERE prompt_id = ?1 AND agent = ?2",
+            params![prompt_id, agent],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    fn update_moved_prompt_source(&self, update: PromptSourceDbMove<'_>) -> AppResult<()> {
+        let old_source_target_path =
+            path_to_string(update.old_source_target_path, "prompt target path")?;
+        let new_canonical_path_value = path_to_string(update.new_canonical_path, "prompt path")?;
+        let new_name =
+            prompt_display_name(update.scope, update.project_name, update.new_canonical_path)?;
+        let now = now_epoch_seconds()?;
+        let mut conn = self.db.connection()?;
+        let tx = conn.transaction()?;
+
+        tx.execute(
+            r#"
+            UPDATE prompts
+            SET name = ?2,
+                canonical_path = ?3,
+                updated_at = ?4
+            WHERE id = ?1
+            "#,
+            params![update.prompt_id, new_name, new_canonical_path_value, now],
+        )?;
+        tx.execute(
+            r#"
+            INSERT INTO prompt_distributions (prompt_id, agent, role, target_path)
+            VALUES (?1, ?2, 'target', ?3)
+            ON CONFLICT(prompt_id, agent) DO UPDATE SET
+                role = 'target',
+                target_path = excluded.target_path
+            "#,
+            params![
+                update.prompt_id,
+                update.old_source_agent,
+                old_source_target_path
+            ],
+        )?;
+        tx.execute(
+            r#"
+            INSERT INTO prompt_distributions (prompt_id, agent, role, target_path)
+            VALUES (?1, ?2, 'source', NULL)
+            ON CONFLICT(prompt_id, agent) DO UPDATE SET
+                role = 'source',
+                target_path = NULL
+            "#,
+            params![update.prompt_id, update.new_source_agent],
+        )?;
+
+        if let Some(extra_prompt_move) = update.extra_prompt_move {
+            update_project_extra_prompt_files_for_move(&tx, extra_prompt_move, now)?;
+        }
+
+        tx.commit()?;
+        Ok(())
     }
 
     fn prompt_canonical_path(&self, id: &str) -> AppResult<PathBuf> {
@@ -500,6 +694,83 @@ impl PromptService {
         .map(PathBuf::from)
         .ok_or_else(|| AppError::Validation("prompt was not found".to_string()))
     }
+}
+
+fn prompt_display_name(
+    scope: &str,
+    project_name: Option<&str>,
+    prompt_file: &Path,
+) -> AppResult<String> {
+    let file_name = prompt_file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| AppError::Validation("prompt file has no file name".to_string()))?;
+    match scope {
+        "global" => Ok(file_name.to_string()),
+        "project" => Ok(format!(
+            "{} · {}",
+            project_name.ok_or_else(|| {
+                AppError::Validation("project prompt source has no project name".to_string())
+            })?,
+            file_name
+        )),
+        _ => Err(AppError::Validation(format!(
+            "unsupported prompt scope: {scope}"
+        ))),
+    }
+}
+
+fn project_relative_prompt_path(project_path: &Path, prompt_file: &Path) -> AppResult<String> {
+    let rel = prompt_file
+        .strip_prefix(project_path)
+        .unwrap_or(prompt_file);
+    Ok(projects::normalize_custom_dir(&path_to_string(
+        rel,
+        "project prompt path",
+    )?))
+}
+
+fn update_project_extra_prompt_files_for_move(
+    tx: &rusqlite::Transaction<'_>,
+    prompt_move: &ExtraPromptMove,
+    now: i64,
+) -> AppResult<()> {
+    let current = tx
+        .query_row(
+            "SELECT extra_prompt_files FROM projects WHERE id = ?1",
+            params![prompt_move.project_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(current) = current else {
+        return Ok(());
+    };
+
+    let old_norm = projects::normalize_custom_dir(&prompt_move.old_rel);
+    let mut changed = false;
+    let mut seen = BTreeSet::new();
+    let mut next = Vec::new();
+    for file in parse_dir_list(&current) {
+        let candidate = if projects::normalize_custom_dir(&file) == old_norm {
+            changed = true;
+            prompt_move.new_rel.clone()
+        } else {
+            file
+        };
+        let identity = projects::normalize_custom_dir(&candidate);
+        if seen.insert(identity) {
+            next.push(candidate);
+        }
+    }
+
+    if changed {
+        tx.execute(
+            "UPDATE projects SET extra_prompt_files = ?2, updated_at = ?3 WHERE id = ?1",
+            params![prompt_move.project_id, next.join("\n"), now],
+        )?;
+    }
+
+    Ok(())
 }
 
 fn discover_prompt_source(
@@ -525,26 +796,7 @@ fn discover_prompt_source(
         return Ok(None);
     }
 
-    let file_name = prompt_file
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| AppError::Validation("prompt file has no file name".to_string()))?
-        .to_string();
-    let name = match scope {
-        "global" => file_name,
-        "project" => format!(
-            "{} · {}",
-            project_name.ok_or_else(|| {
-                AppError::Validation("project prompt source has no project name".to_string())
-            })?,
-            file_name
-        ),
-        _ => {
-            return Err(AppError::Validation(format!(
-                "unsupported prompt scope: {scope}"
-            )))
-        }
-    };
+    let name = prompt_display_name(scope, project_name, prompt_file)?;
 
     Ok(Some(PromptSource {
         source_agent: agent.name,

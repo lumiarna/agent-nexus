@@ -8,7 +8,7 @@ use nexus_core::{
     database::Database,
     services::{
         projects::ProjectService,
-        prompts::{PromptService, SetPromptTargetInput},
+        prompts::{MovePromptSourceInput, PromptService, SetPromptTargetInput},
     },
 };
 use serial_test::serial;
@@ -342,5 +342,107 @@ fn toggles_global_prompt_distribution_target_link() {
 
         assert_eq!(disabled.cells["CodeX"], "none");
         assert!(!target_file.exists());
+    });
+}
+
+#[test]
+#[serial]
+fn moves_project_prompt_source_and_turns_previous_source_into_target() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let prompts = PromptService::new(db);
+
+    with_isolated_home(|home| {
+        let repo = git_repo(&home.join("workspace"), "agent-nexus");
+        let project = projects
+            .record_project(repo.clone())
+            .expect("record project");
+        let repo = Path::new(&repo);
+        let source_file = repo.join("AGENTS.md");
+        let target_file = repo.join("CLAUDE.md");
+        write_prompt(&source_file, "# Project instructions\n");
+        let scanned = prompts.scan_prompts().expect("scan project prompt");
+        let linked = prompts
+            .set_prompt_target(SetPromptTargetInput {
+                prompt_id: scanned[0].id.clone(),
+                agent: "Claude Code".to_string(),
+                enabled: true,
+            })
+            .expect("enable Claude Code target");
+        assert_eq!(linked.cells["Generic Agent"], "source");
+        assert_eq!(linked.cells["Claude Code"], "target");
+
+        let moved = prompts
+            .move_prompt_source(MovePromptSourceInput {
+                prompt_id: linked.id.clone(),
+                agent: "Claude Code".to_string(),
+            })
+            .expect("move source to Claude Code");
+
+        assert_eq!(moved.project_id.as_deref(), Some(project.id.as_str()));
+        assert_eq!(moved.name, "agent-nexus · CLAUDE.md");
+        assert_eq!(moved.cells["Claude Code"], "source");
+        assert_eq!(moved.cells["Generic Agent"], "target");
+        assert_eq!(
+            moved
+                .cells
+                .values()
+                .filter(|role| *role == "source")
+                .count(),
+            1
+        );
+        assert_file_distribution_tracks_source_writes(&target_file, &source_file);
+    });
+}
+
+#[test]
+#[serial]
+fn moving_extra_project_prompt_source_updates_registered_extra_file() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let prompts = PromptService::new(db);
+
+    with_isolated_home(|home| {
+        let repo = git_repo(&home.join("workspace"), "agent-nexus");
+        let project = projects
+            .record_project(repo.clone())
+            .expect("record project");
+        let repo = Path::new(&repo);
+        let source_file = repo.join("AGENTS.local.md");
+        let target_file = repo.join("CLAUDE.local.md");
+        write_prompt(&source_file, "# Personal instructions\n");
+        projects
+            .set_project_extra_prompt_files(project.id.clone(), vec!["AGENTS.local.md".to_string()])
+            .expect("register extra prompt file");
+        let scanned = prompts.scan_prompts().expect("scan extra prompt");
+
+        let moved = prompts
+            .move_prompt_source(MovePromptSourceInput {
+                prompt_id: scanned[0].id.clone(),
+                agent: "Claude Code".to_string(),
+            })
+            .expect("move extra prompt source to Claude Code");
+
+        assert_eq!(moved.name, "agent-nexus · CLAUDE.local.md");
+        assert_eq!(moved.cells["Claude Code"], "source");
+        assert_eq!(moved.cells["Generic Agent"], "target");
+        assert_file_distribution_tracks_source_writes(&target_file, &source_file);
+
+        let reloaded = projects
+            .list_projects()
+            .expect("list projects")
+            .into_iter()
+            .find(|p| p.id == project.id)
+            .expect("project still listed");
+        assert_eq!(
+            reloaded.extra_prompt_files,
+            vec!["CLAUDE.local.md".to_string()]
+        );
+
+        let rescanned = prompts.scan_prompts().expect("rescan prompts");
+        assert_eq!(rescanned.len(), 1);
+        assert_eq!(rescanned[0].name, "agent-nexus · CLAUDE.local.md");
+        assert_eq!(rescanned[0].cells["Claude Code"], "source");
+        assert_eq!(rescanned[0].cells["Generic Agent"], "target");
     });
 }

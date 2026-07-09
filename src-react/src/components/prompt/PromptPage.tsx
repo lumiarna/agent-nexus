@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { MouseEvent } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -13,7 +14,11 @@ import { ScreenScroll } from "@/components/shell/screen";
 import { promptsApi } from "@/lib/api/prompts";
 import { AGENTS } from "@/config/agents";
 import { useProjectsQuery } from "@/lib/query/projects";
-import { usePromptsQuery, useSetPromptTargetMutation } from "@/lib/query/prompts";
+import {
+  useMovePromptSourceMutation,
+  usePromptsQuery,
+  useSetPromptTargetMutation,
+} from "@/lib/query/prompts";
 import { useDisabledAgents, useEnabledAgents } from "@/lib/query/agentPreferences";
 import { isTauriRuntime } from "@/lib/runtime";
 import { srcAgentOf } from "@/lib/tokens";
@@ -47,6 +52,7 @@ export function PromptPage() {
   const promptsQuery = usePromptsQuery();
   const projectsQuery = useProjectsQuery();
   const setPromptTarget = useSetPromptTargetMutation();
+  const movePromptSource = useMovePromptSourceMutation();
   const enabledAgents = useEnabledAgents();
   const disabledAgents = useDisabledAgents();
   const [scope, setScope] = useState<Scope>("global");
@@ -77,7 +83,11 @@ export function PromptPage() {
     }
   }
 
-  async function toggleCell(prompt: Prompt, agent: AgentName) {
+  async function toggleCell(
+    prompt: Prompt,
+    agent: AgentName,
+    event: MouseEvent<HTMLSpanElement>,
+  ) {
     if (prompt.cells[agent] === "source") return;
 
     if (!desktop) {
@@ -86,6 +96,12 @@ export function PromptPage() {
     }
 
     try {
+      if (event.ctrlKey) {
+        await movePromptSource.mutateAsync({ promptId: prompt.id, agent });
+        toast(`Source moved to ${agent}`);
+        return;
+      }
+
       await setPromptTarget.mutateAsync({
         promptId: prompt.id,
         agent,
@@ -259,7 +275,7 @@ export function PromptPage() {
               <AgentMatrixCells
                 cells={p.cells}
                 agents={matrixAgents}
-                onToggle={(a) => void toggleCell(p, a)}
+                onToggle={(a, event) => void toggleCell(p, a, event)}
               />
               <div className="flex flex-col items-end gap-[5px]">
                 <span

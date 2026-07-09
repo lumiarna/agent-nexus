@@ -2,7 +2,7 @@ use tauri::State;
 
 use nexus_core::{
     error::AppResult,
-    services::prompts::{Prompt, SetPromptTargetInput},
+    services::prompts::{MovePromptSourceInput, Prompt, SetPromptTargetInput},
 };
 
 use crate::store::AppState;
@@ -23,6 +23,14 @@ pub fn set_prompt_target(
     input: SetPromptTargetInput,
 ) -> AppResult<Prompt> {
     state.prompts.set_prompt_target(input)
+}
+
+#[tauri::command]
+pub fn move_prompt_source(
+    state: State<'_, AppState>,
+    input: MovePromptSourceInput,
+) -> AppResult<Prompt> {
+    state.prompts.move_prompt_source(input)
 }
 
 #[tauri::command]

@@ -7,6 +7,11 @@ export interface SetSkillTargetInput {
   enabled: boolean;
 }
 
+export interface MoveSkillSourceInput {
+  skillId: string;
+  agent: AgentName;
+}
+
 export interface SetProjectSkillProjectInput {
   skillId: string;
   targetProjectId: string;
@@ -32,6 +37,10 @@ export const skillsApi = {
 
   setTarget(input: SetSkillTargetInput): Promise<Skill> {
     return invokeCommand<Skill>("set_skill_target", { input });
+  },
+
+  moveSource(input: MoveSkillSourceInput): Promise<Skill> {
+    return invokeCommand<Skill>("move_skill_source", { input });
   },
 
   setDisabled(id: string, disabled: boolean): Promise<Skill> {

@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { promptsApi, type SetPromptTargetInput } from "@/lib/api/prompts";
+import {
+  promptsApi,
+  type MovePromptSourceInput,
+  type SetPromptTargetInput,
+} from "@/lib/api/prompts";
 import { isTauriRuntime } from "@/lib/runtime";
 import { projectKeys } from "@/lib/query/projects";
 import type { Prompt } from "@/types";
@@ -36,6 +40,20 @@ export function useSetPromptTargetMutation() {
       queryClient.setQueryData<Prompt[]>(promptKeys.all, (current) =>
         replacePrompt(current, prompt),
       );
+    },
+  });
+}
+
+export function useMovePromptSourceMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: MovePromptSourceInput) => promptsApi.moveSource(input),
+    onSuccess: (prompt) => {
+      queryClient.setQueryData<Prompt[]>(promptKeys.all, (current) =>
+        replacePrompt(current, prompt),
+      );
+      void queryClient.invalidateQueries({ queryKey: projectKeys.all });
     },
   });
 }

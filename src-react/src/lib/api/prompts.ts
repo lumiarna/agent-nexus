@@ -7,6 +7,11 @@ export interface SetPromptTargetInput {
   enabled: boolean;
 }
 
+export interface MovePromptSourceInput {
+  promptId: string;
+  agent: AgentName;
+}
+
 export const promptsApi = {
   list(): Promise<Prompt[]> {
     return invokeCommand<Prompt[]>("list_prompts");
@@ -18,6 +23,10 @@ export const promptsApi = {
 
   setTarget(input: SetPromptTargetInput): Promise<Prompt> {
     return invokeCommand<Prompt>("set_prompt_target", { input });
+  },
+
+  moveSource(input: MovePromptSourceInput): Promise<Prompt> {
+    return invokeCommand<Prompt>("move_prompt_source", { input });
   },
 
   openSource(id: string): Promise<void> {

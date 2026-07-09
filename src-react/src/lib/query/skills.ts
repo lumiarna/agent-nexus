@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   skillsApi,
+  type MoveSkillSourceInput,
   type SetProjectSkillProjectInput,
   type SetProjectSkillTargetInput,
   type SetSkillTargetInput,
@@ -37,6 +38,17 @@ export function useSetSkillTargetMutation() {
 
   return useMutation({
     mutationFn: (input: SetSkillTargetInput) => skillsApi.setTarget(input),
+    onSuccess: (skill) => {
+      queryClient.setQueryData<Skill[]>(skillKeys.all, (current) => replaceSkill(current, skill));
+    },
+  });
+}
+
+export function useMoveSkillSourceMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: MoveSkillSourceInput) => skillsApi.moveSource(input),
     onSuccess: (skill) => {
       queryClient.setQueryData<Skill[]>(skillKeys.all, (current) => replaceSkill(current, skill));
     },

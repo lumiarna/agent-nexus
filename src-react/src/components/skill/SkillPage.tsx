@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { MouseEvent } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { ScreenScroll } from "@/components/shell/screen";
 import { skillsApi } from "@/lib/api/skills";
 import { useProjectsQuery } from "@/lib/query/projects";
 import {
+  useMoveSkillSourceMutation,
   useSetProjectSkillProjectMutation,
   useSetProjectSkillTargetMutation,
   useSetSkillDisabledMutation,
@@ -48,6 +50,7 @@ export function SkillPage() {
   const skillsQuery = useSkillsQuery();
   const projectsQuery = useProjectsQuery();
   const setSkillTarget = useSetSkillTargetMutation();
+  const moveSkillSource = useMoveSkillSourceMutation();
   const setSkillDisabled = useSetSkillDisabledMutation();
   const setProjectSkillProject = useSetProjectSkillProjectMutation();
   const setProjectSkillTarget = useSetProjectSkillTargetMutation();
@@ -81,7 +84,11 @@ export function SkillPage() {
     }
   }
 
-  async function toggleCell(skill: Skill, agent: AgentName) {
+  async function toggleCell(
+    skill: Skill,
+    agent: AgentName,
+    event: MouseEvent<HTMLSpanElement>,
+  ) {
     if (skill.cells[agent] === "source") return;
 
     if (!desktop) {
@@ -90,6 +97,12 @@ export function SkillPage() {
     }
 
     try {
+      if (event.ctrlKey && !isProjectCustomSkill(skill)) {
+        await moveSkillSource.mutateAsync({ skillId: skill.id, agent });
+        toast(`Source moved to ${agent}`);
+        return;
+      }
+
       await setSkillTarget.mutateAsync({
         skillId: skill.id,
         agent,
@@ -169,7 +182,11 @@ export function SkillPage() {
     }
   }
 
-  async function toggleProjectCell(skill: Skill, agent: AgentName) {
+  async function toggleProjectCell(
+    skill: Skill,
+    agent: AgentName,
+    _event: MouseEvent<HTMLSpanElement>,
+  ) {
     if (!desktop) {
       toast("Desktop runtime required for changing skill targets");
       return;
@@ -368,8 +385,8 @@ export function SkillPage() {
                   : undefined
               }
               agents={enabledAgents}
-              onToggleCell={(a) => void toggleCell(k, a)}
-              onToggleProjectCell={(a) => void toggleProjectCell(k, a)}
+              onToggleCell={(a, event) => void toggleCell(k, a, event)}
+              onToggleProjectCell={(a, event) => void toggleProjectCell(k, a, event)}
               onToggleDmi={() => void toggleDmi(k)}
               onPropagateGlobal={(entry) => void propagateGlobal(k, entry)}
               onUnpropagateGlobal={() => void unpropagateGlobal(k)}

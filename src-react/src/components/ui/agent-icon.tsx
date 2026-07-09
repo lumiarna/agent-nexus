@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import type { AgentName, CellRole, Cells } from "@/types";
 import { AGENT_ORDER, agentColor } from "@/lib/tokens";
 import { AgentLogo } from "@/components/ui/agent-logo";
@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 interface AgentIconProps {
   role: CellRole;
   agent: AgentName;
-  onClick?: () => void;
+  onClick?: (event: MouseEvent<HTMLSpanElement>) => void;
   title?: string;
 }
 
@@ -93,8 +93,8 @@ function cellTitle(agent: AgentName, role: CellRole, sourceless: boolean): strin
     role === "source"
       ? " · source (fixed)"
       : role === "target"
-        ? " · target — click to remove"
-        : " · none — click to add target";
+        ? " · target — click to remove; Ctrl-click to move source here"
+        : " · none — click to add target; Ctrl-click to move source here";
   return agent + suffix;
 }
 
@@ -110,7 +110,7 @@ export function AgentMatrixCells({
   sourceless = false,
 }: {
   cells: Cells;
-  onToggle: (agent: AgentName) => void;
+  onToggle: (agent: AgentName, event: MouseEvent<HTMLSpanElement>) => void;
   agents?: AgentName[];
   sourceless?: boolean;
 }) {
@@ -122,7 +122,7 @@ export function AgentMatrixCells({
           agent={a}
           role={cells[a]}
           title={cellTitle(a, cells[a], sourceless)}
-          onClick={() => onToggle(a)}
+          onClick={(event) => onToggle(a, event)}
         />
       ))}
     </div>

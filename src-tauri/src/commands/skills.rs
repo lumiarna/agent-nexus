@@ -3,7 +3,8 @@ use tauri::State;
 use nexus_core::{
     error::AppResult,
     services::skills::{
-        SetProjectSkillProjectInput, SetProjectSkillTargetInput, SetSkillTargetInput, Skill,
+        MoveSkillSourceInput, SetProjectSkillProjectInput, SetProjectSkillTargetInput,
+        SetSkillTargetInput, Skill,
     },
 };
 
@@ -25,6 +26,14 @@ pub fn set_skill_target(
     input: SetSkillTargetInput,
 ) -> AppResult<Skill> {
     state.skills.set_skill_target(input)
+}
+
+#[tauri::command]
+pub fn move_skill_source(
+    state: State<'_, AppState>,
+    input: MoveSkillSourceInput,
+) -> AppResult<Skill> {
+    state.skills.move_skill_source(input)
 }
 
 #[tauri::command]

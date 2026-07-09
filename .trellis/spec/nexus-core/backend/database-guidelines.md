@@ -103,6 +103,59 @@ let target_path = project_target_path_for_skill(&target_root.path, &context.cano
 // 校验 source_kind=project_custom + target!=source + Agent skill-capable，再走 write_target
 ```
 
+## Scenario: Agent Matrix source move for Skill / Prompt
+
+### 1. Scope / Trigger
+- Trigger: 为 `Skill` 或 `Prompt` 的 Agent Matrix 增加/维护“移动 Source Agent”能力，涉及 service command、`*_distributions` source/target 角色、canonical 文件/目录移动和 managed placement 回滚。
+
+### 2. Signatures
+- Core service:
+  - `SkillService::move_skill_source(MoveSkillSourceInput { skill_id, agent }) -> AppResult<Skill>`
+  - `PromptService::move_prompt_source(MovePromptSourceInput { prompt_id, agent }) -> AppResult<Prompt>`
+- Tauri command:
+  - `move_skill_source(input: MoveSkillSourceInput) -> AppResult<Skill>`
+  - `move_prompt_source(input: MovePromptSourceInput) -> AppResult<Prompt>`
+- Frontend IPC payload uses camelCase: `{ skillId, agent }` / `{ promptId, agent }`.
+
+### 3. Contracts
+- 只允许 agent-sourced canonical asset 移动 source；`project_custom` Skill 没有 Agent source，不能通过该命令赋予 source。
+- 移动后必须恰好一个 `source` row：目标 Agent 变 `source`，旧 source Agent 变 `target`，旧 canonical path 成为指向新 canonical path 的 managed placement。
+- 若目标 Agent 原本是 `target`，先移除目标 managed placement，再把 canonical source 移动到目标 path；不能覆盖非托管文件/目录。
+- 文件系统操作早于 DB 写入时必须有回滚思路：DB 更新失败要尽力移回 canonical path、移除新建旧 source placement，并恢复原目标 target placement。
+- Prompt project extra file 从 `AGENTS*.md` / `CLAUDE*.md` namespace 互换时，必须同步更新 `projects.extra_prompt_files`，否则 rescan 后 canonical row 会丢失。
+
+### 4. Validation & Error Matrix
+- asset 不存在 -> `Validation("skill was not found")` / `Validation("prompt was not found")`
+- Skill `source_kind != 'agent'` -> `Validation("only Agent-sourced Skills can move source")`
+- 目标 Agent 无对应 surface -> validation error (`does not support skill placement` / `does not support prompt targets`)
+- 目标 Agent 已是当前 source -> 返回当前 asset，不做破坏性操作
+- 目标 path 存在非托管内容或真实 IO 错误 -> 返回错误，不覆盖，尽力恢复已移除 target placement
+
+### 5. Good/Base/Bad Cases
+- Good: Ctrl-click `target` cell 后目标 Agent 唯一 `source`，旧 source 是 `target`，旧 canonical path 是 managed link。
+- Base: 普通点击仍走 `set_skill_target` / `set_prompt_target`，只切换 target/none，不移动 canonical path。
+- Bad: 只更新 DB 的 `source_agent` 而不移动 canonical 文件/目录；下一次 scan 会按真实文件位置把 source 又识别回旧 Agent。
+
+### 6. Tests Required
+- `crates/nexus-core/tests/skill_service.rs`: agent-sourced Skill move source，assert source 唯一、旧 source 变 target、旧 source path link 指向新 canonical path。
+- `crates/nexus-core/tests/skill_service.rs`: Project custom Skill 调 move source 被拒绝。
+- `crates/nexus-core/tests/prompt_service.rs`: global/project Prompt move source，assert source 唯一、旧 source target link、内容仍可读。
+- Extra prompt case：移动 project extra prompt 后 assert `projects.extra_prompt_files` 从旧相对路径更新到新相对路径，并且 rescan 后 row 保留。
+
+### 7. Wrong vs Correct
+#### Wrong
+```rust
+// 只改 DB，不移动 canonical source；scan 会按文件系统事实覆盖回来。
+UPDATE skills SET source_agent = 'Claude Code' WHERE id = ?1;
+```
+
+#### Correct
+```rust
+// 先移除目标 managed target，移动 canonical path，创建旧 source placement，
+// 再在事务中更新 canonical_path/source_agent 与 distribution rows；失败则尽力回滚文件系统。
+service.move_skill_source(MoveSkillSourceInput { skill_id, agent })?;
+```
+
 ## 常见错误 / anti-pattern
 
 - 裸写 SQL 时忘记 `ON DELETE CASCADE` 或 service 级完整性检查。

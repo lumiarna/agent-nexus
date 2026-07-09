@@ -1,0 +1,4 @@
+{"file":".trellis/spec/agent-nexus/frontend/index.md","reason":"检查前端组件、hook、类型和验证命令是否符合规范"}
+{"file":".trellis/spec/agent-nexus/backend/index.md","reason":"检查 Tauri command 边界是否保持薄层透传"}
+{"file":".trellis/spec/nexus-core/backend/index.md","reason":"检查 core service、DB/文件系统一致性、测试与 Windows SQLite 注意事项"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查跨层字段/API/query/cache/测试是否同步"}

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { MouseEvent } from "react";
 import { Globe, Folder, Check, Plus } from "lucide-react";
 import { AgentLogo } from "@/components/ui/agent-logo";
 import { AgentMatrixCells, SourceBadge } from "@/components/ui/agent-icon";
@@ -24,11 +25,11 @@ interface SkillRowProps {
   sourceProjectName?: string;
   /** Enabled Agents in canonical order — narrows the rendered matrix columns. */
   agents?: AgentName[];
-  onToggleCell: (agent: AgentName) => void;
+  onToggleCell: (agent: AgentName, event: MouseEvent<HTMLSpanElement>) => void;
   /** Toggle a single Agent placement inside an incoming target-Project row.
    *  Required when the row is an incoming projection; the canonical
    *  `onToggleCell` is used otherwise. */
-  onToggleProjectCell?: (agent: AgentName) => void;
+  onToggleProjectCell?: (agent: AgentName, event: MouseEvent<HTMLSpanElement>) => void;
   onToggleDmi: () => void;
   /** Enable Global propagation for a Project custom Skill via the chosen entry Agent. */
   onPropagateGlobal?: (entryAgent: AgentName) => void;
@@ -279,7 +280,8 @@ export function SkillRow({
       <AgentMatrixCells
         cells={skill.cells}
         agents={agents}
-        onToggle={isIncoming ? (onToggleProjectCell ?? onToggleCell) : onToggleCell}        sourceless={isCustom}
+        onToggle={isIncoming ? (onToggleProjectCell ?? onToggleCell) : onToggleCell}
+        sourceless={isCustom}
       />
     );
   }, [

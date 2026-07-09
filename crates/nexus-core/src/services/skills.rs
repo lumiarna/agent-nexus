@@ -78,6 +78,13 @@ pub struct SetSkillTargetInput {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveSkillSourceInput {
+    pub skill_id: String,
+    pub agent: String,
+}
+
 /// Source-side: propagate a `project_custom` Skill to (or cancel it from) a
 /// target Project. Enabling places a managed placement into the target
 /// Project's default entry Agent project skills dir; cancelling removes every
@@ -428,6 +435,99 @@ impl SkillService {
         }
 
         Ok(())
+    }
+
+    pub fn move_skill_source(&self, input: MoveSkillSourceInput) -> AppResult<Skill> {
+        let skill_id = required_trimmed(&input.skill_id, "skill id")?;
+        let target_agent = require_agent(required_trimmed(&input.agent, "agent")?)?;
+        if target_agent.skill.is_none() {
+            return Err(AppError::Validation(format!(
+                "{} does not support skill placement",
+                target_agent.name
+            )));
+        }
+
+        let context = self.skill_target_context(skill_id)?;
+        if context.source_kind != SOURCE_KIND_AGENT {
+            return Err(AppError::Validation(
+                "only Agent-sourced Skills can move source".to_string(),
+            ));
+        }
+
+        let source_agent = require_agent(context.source_agent.as_deref().unwrap_or_default())?;
+        if source_agent.name == target_agent.name {
+            return self.get_skill(skill_id);
+        }
+
+        let old_canonical_path = context.canonical_path;
+        let new_canonical_path = target_path_for_parts(
+            SOURCE_KIND_AGENT,
+            &context.scope,
+            context.project_path.as_deref(),
+            &old_canonical_path,
+            target_agent,
+        )?
+        .ok_or_else(|| AppError::Validation("skill target path cannot be computed".to_string()))?;
+        let old_source_target_path = old_canonical_path.clone();
+        let target_was_target =
+            self.distribution_role(skill_id, target_agent.name)? == Some("target".to_string());
+
+        if target_was_target {
+            remove_managed_directory_link_if_present(&old_canonical_path, &new_canonical_path)?;
+        }
+        let move_result = (|| -> AppResult<()> {
+            match fs::symlink_metadata(&new_canonical_path) {
+                Ok(_) => {
+                    return Err(AppError::Validation(format!(
+                        "skill target path already exists: {}",
+                        new_canonical_path.display()
+                    )));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+            if let Some(parent) = new_canonical_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::rename(&old_canonical_path, &new_canonical_path)?;
+            Ok(())
+        })();
+        if let Err(error) = move_result {
+            if target_was_target {
+                let _ = create_managed_directory_link(&old_canonical_path, &new_canonical_path);
+            }
+            return Err(error);
+        }
+        if let Err(error) =
+            create_managed_directory_link(&new_canonical_path, &old_source_target_path)
+        {
+            let _ = fs::rename(&new_canonical_path, &old_canonical_path);
+            if target_was_target {
+                let _ = create_managed_directory_link(&old_canonical_path, &new_canonical_path);
+            }
+            return Err(error);
+        }
+
+        let db_result = self.update_moved_skill_source(
+            skill_id,
+            source_agent.name,
+            target_agent.name,
+            &old_source_target_path,
+            &new_canonical_path,
+        );
+        if db_result.is_err() {
+            let _ = remove_managed_directory_link_if_present(
+                &new_canonical_path,
+                &old_source_target_path,
+            );
+            let _ = fs::rename(&new_canonical_path, &old_canonical_path);
+            if target_was_target {
+                let _ = create_managed_directory_link(&old_canonical_path, &new_canonical_path);
+            }
+        }
+        db_result?;
+
+        self.get_skill(skill_id)
     }
 
     pub fn set_skill_target(&self, input: SetSkillTargetInput) -> AppResult<Skill> {
@@ -871,6 +971,67 @@ impl SkillService {
         )
         .optional()?
         .ok_or_else(|| AppError::Validation("skill was not found".to_string()))
+    }
+
+    fn distribution_role(&self, skill_id: &str, agent: &str) -> AppResult<Option<String>> {
+        let conn = self.db.connection()?;
+        conn.query_row(
+            "SELECT role FROM skill_distributions WHERE skill_id = ?1 AND agent = ?2",
+            params![skill_id, agent],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    fn update_moved_skill_source(
+        &self,
+        skill_id: &str,
+        old_source_agent: &str,
+        new_source_agent: &str,
+        old_source_target_path: &Path,
+        new_canonical_path: &Path,
+    ) -> AppResult<()> {
+        let old_source_target_path = path_to_string(old_source_target_path, "skill target path")?;
+        let new_canonical_path = path_to_string(new_canonical_path, "skill path")?;
+        let now = now_epoch_seconds()?;
+        let mut conn = self.db.connection()?;
+        let tx = conn.transaction()?;
+
+        tx.execute(
+            r#"
+            UPDATE skills
+            SET canonical_path = ?2,
+                source_agent = ?3,
+                updated_at = ?4
+            WHERE id = ?1
+            "#,
+            params![skill_id, new_canonical_path, new_source_agent, now],
+        )?;
+
+        tx.execute(
+            r#"
+            INSERT INTO skill_distributions (skill_id, agent, role, target_path)
+            VALUES (?1, ?2, 'target', ?3)
+            ON CONFLICT(skill_id, agent) DO UPDATE SET
+                role = 'target',
+                target_path = excluded.target_path
+            "#,
+            params![skill_id, old_source_agent, old_source_target_path],
+        )?;
+        tx.execute(
+            r#"
+            INSERT INTO skill_distributions (skill_id, agent, role, target_path)
+            VALUES (?1, ?2, 'source', NULL)
+            ON CONFLICT(skill_id, agent) DO UPDATE SET
+                role = 'source',
+                target_path = NULL
+            "#,
+            params![skill_id, new_source_agent],
+        )?;
+
+        tx.commit()?;
+        Ok(())
     }
 
     fn skill_canonical_path(&self, id: &str) -> AppResult<PathBuf> {

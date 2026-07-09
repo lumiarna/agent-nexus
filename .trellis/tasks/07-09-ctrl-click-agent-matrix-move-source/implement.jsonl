@@ -1,0 +1,4 @@
+{"file":".trellis/spec/agent-nexus/frontend/index.md","reason":"前端 Agent Matrix 组件、typed API、React Query mutation 约定"}
+{"file":".trellis/spec/agent-nexus/backend/index.md","reason":"Tauri command 只做 IPC 透传，业务逻辑留在 nexus-core"}
+{"file":".trellis/spec/nexus-core/backend/index.md","reason":"nexus-core service、数据库/文件系统一致性与测试规范"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"本任务跨 React、IPC、core service、SQLite 与文件系统 placement"}
