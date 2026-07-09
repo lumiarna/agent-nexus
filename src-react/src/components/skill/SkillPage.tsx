@@ -3,7 +3,7 @@ import type { MouseEvent } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { MatrixLegend } from "@/components/ui/agent-icon";
+import { MatrixLegend, isMoveSourceModifier } from "@/components/ui/agent-icon";
 import { Card, Input } from "@/components/ui/primitives";
 import { Chip, Segmented } from "@/components/ui/segmented";
 import { SkillRow } from "@/components/skill/SkillRow";
@@ -97,7 +97,7 @@ export function SkillPage() {
     }
 
     try {
-      if (event.ctrlKey && !isProjectCustomSkill(skill)) {
+      if (isMoveSourceModifier(event) && !isProjectCustomSkill(skill)) {
         await moveSkillSource.mutateAsync({ skillId: skill.id, agent });
         toast(`Source moved to ${agent}`);
         return;

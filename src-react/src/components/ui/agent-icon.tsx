@@ -80,6 +80,10 @@ export function SourceBadge({
   );
 }
 
+export function isMoveSourceModifier(event: MouseEvent): boolean {
+  return event.ctrlKey || event.metaKey;
+}
+
 function cellTitle(agent: AgentName, role: CellRole, sourceless: boolean): string {
   if (sourceless) {
     // Project custom Skill: no Agent source — cells only express Global placements.
@@ -93,8 +97,8 @@ function cellTitle(agent: AgentName, role: CellRole, sourceless: boolean): strin
     role === "source"
       ? " · source (fixed)"
       : role === "target"
-        ? " · target — click to remove; Ctrl-click to move source here"
-        : " · none — click to add target; Ctrl-click to move source here";
+        ? " · target — click to remove; Ctrl/Cmd-click to move source here"
+        : " · none — click to add target; Ctrl/Cmd-click to move source here";
   return agent + suffix;
 }
 

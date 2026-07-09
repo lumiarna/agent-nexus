@@ -6,6 +6,7 @@ import {
   AgentMatrixCells,
   MatrixLegend,
   SourceBadge,
+  isMoveSourceModifier,
 } from "@/components/ui/agent-icon";
 import { Button } from "@/components/ui/button";
 import { Card, Input } from "@/components/ui/primitives";
@@ -96,7 +97,7 @@ export function PromptPage() {
     }
 
     try {
-      if (event.ctrlKey) {
+      if (isMoveSourceModifier(event)) {
         await movePromptSource.mutateAsync({ promptId: prompt.id, agent });
         toast(`Source moved to ${agent}`);
         return;

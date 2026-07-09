@@ -5,6 +5,7 @@ import {
   AgentMatrixCells,
   MatrixLegend,
   SourceBadge,
+  isMoveSourceModifier,
 } from "@/components/ui/agent-icon";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/primitives";
@@ -123,7 +124,7 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
     }
 
     try {
-      if (event.ctrlKey && !isProjectCustomSkill(skill)) {
+      if (isMoveSourceModifier(event) && !isProjectCustomSkill(skill)) {
         await moveSkillSource.mutateAsync({ skillId: skill.id, agent });
         toast(`Source moved to ${agent}`);
         return;
@@ -266,7 +267,7 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
     }
 
     try {
-      if (event.ctrlKey) {
+      if (isMoveSourceModifier(event)) {
         await movePromptSource.mutateAsync({ promptId: prompt.id, agent });
         toast(`Source moved to ${agent}`);
         return;
