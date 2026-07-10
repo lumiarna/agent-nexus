@@ -158,7 +158,13 @@ function Copy-RuntimeDll {
     foreach ($profile in @("debug", "release")) {
         $dir = Join-Path $targetRoot $profile
         if (Test-Path -LiteralPath $dir) {
-            Copy-Item -LiteralPath $DllPath -Destination (Join-Path $dir "sqlite3.dll") -Force
+            $dest = Join-Path $dir "sqlite3.dll"
+            try {
+                Copy-Item -LiteralPath $DllPath -Destination $dest -Force -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "Cannot copy sqlite3.dll to $dest : $_ (likely locked by a running process)"
+            }
         }
     }
 }
