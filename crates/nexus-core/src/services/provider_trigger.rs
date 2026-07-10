@@ -21,8 +21,9 @@ use crate::{
             OutboundRequestContext, OutboundRequestError, OutboundRequestLogger,
         },
         provider_quota::{
-            http_client, ClaudeAccessToken, ClaudeAuthError, HttpUsageTransport,
-            LocalCredentialSource, CLAUDE_CODE_PROVIDER_ID,
+            http_client, read_codex_credentials, ClaudeAccessToken, ClaudeAuthError,
+            CodexCredentials, HttpUsageTransport, LocalCredentialSource, CHATGPT_ACCOUNT_ID_HEADER,
+            CLAUDE_CODE_PROVIDER_ID,
         },
         util::required_trimmed,
     },
@@ -35,6 +36,11 @@ const PROVIDER_WINDOW_SECONDS: i64 = 5 * 60 * 60;
 const CLAUDE_CODE_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 const CLAUDE_CODE_MODELS_URL: &str = "https://api.anthropic.com/v1/models";
 const CLAUDE_CODE_ALIAS: &str = "claude-code";
+const CODEX_PROVIDER_ID: &str = "codex";
+const CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+const CODEX_MODELS_URL: &str = "https://chatgpt.com/backend-api/codex/models";
+const CODEX_RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
+const CODEX_CLIENT_VERSION: &str = "0.1.0";
 const CLAUDE_UNIFIED_STATUS_HEADER: &str = "anthropic-ratelimit-unified-status";
 const CLAUDE_UNIFIED_CLAIM_HEADER: &str = "anthropic-ratelimit-unified-representative-claim";
 const CLAUDE_UNIFIED_RESET_HEADER: &str = "anthropic-ratelimit-unified-reset";
@@ -88,7 +94,7 @@ impl ProviderTriggerError {
     fn message(&self) -> &str {
         match self {
             Self::Retryable(message) | Self::Terminal(message) => message,
-            Self::AuthRequired => "Claude Code authorization was rejected; run claude /login",
+            Self::AuthRequired => "provider authorization was rejected; refresh credentials",
         }
     }
 
@@ -136,7 +142,7 @@ impl ProviderTriggerService {
     ) -> Self {
         Self {
             db,
-            runner: Arc::new(ClaudeCodeTriggerRunner::new(app_config, request_logger)),
+            runner: Arc::new(MultiProviderTriggerRunner::new(app_config, request_logger)),
             in_flight: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -561,6 +567,43 @@ impl Drop for WindowAlignmentRunGuard {
 }
 
 #[derive(Clone)]
+struct MultiProviderTriggerRunner {
+    claude: ClaudeCodeTriggerRunner,
+    codex: CodexTriggerRunner,
+}
+
+impl MultiProviderTriggerRunner {
+    fn new(app_config: AppConfigService, request_logger: OutboundRequestLogger) -> Self {
+        Self {
+            claude: ClaudeCodeTriggerRunner::new(app_config.clone(), request_logger.clone()),
+            codex: CodexTriggerRunner::new(app_config, request_logger),
+        }
+    }
+}
+
+impl ProviderTriggerRunner for MultiProviderTriggerRunner {
+    fn supports(&self, provider_id: &str) -> bool {
+        self.claude.supports(provider_id) || self.codex.supports(provider_id)
+    }
+
+    fn list_models<'a>(&'a self, provider_id: &'a str) -> ProviderModelsFuture<'a> {
+        if self.claude.supports(provider_id) {
+            self.claude.list_models(provider_id)
+        } else {
+            self.codex.list_models(provider_id)
+        }
+    }
+
+    fn trigger<'a>(&'a self, provider_id: &'a str, model_id: &'a str) -> ProviderTriggerFuture<'a> {
+        if self.claude.supports(provider_id) {
+            self.claude.trigger(provider_id, model_id)
+        } else {
+            self.codex.trigger(provider_id, model_id)
+        }
+    }
+}
+
+#[derive(Clone)]
 struct ClaudeCodeTriggerRunner {
     app_config: AppConfigService,
     credential_source: Arc<LocalCredentialSource>,
@@ -631,6 +674,59 @@ impl ProviderTriggerRunner for ClaudeCodeTriggerRunner {
                 |error| matches!(error, ProviderTriggerError::AuthRequired),
             )
             .await
+        })
+    }
+}
+
+#[derive(Clone)]
+struct CodexTriggerRunner {
+    app_config: AppConfigService,
+    request_logger: OutboundRequestLogger,
+}
+
+impl CodexTriggerRunner {
+    fn new(app_config: AppConfigService, request_logger: OutboundRequestLogger) -> Self {
+        Self {
+            app_config,
+            request_logger,
+        }
+    }
+
+    fn read_credentials(&self) -> Result<CodexCredentials, ProviderTriggerError> {
+        match read_codex_credentials(&self.app_config) {
+            Ok(Some(credentials)) => Ok(credentials),
+            Ok(None) => Err(ProviderTriggerError::AuthRequired),
+            Err(error) => Err(ProviderTriggerError::Terminal(error.to_string())),
+        }
+    }
+}
+
+impl ProviderTriggerRunner for CodexTriggerRunner {
+    fn supports(&self, provider_id: &str) -> bool {
+        provider_id == CODEX_PROVIDER_ID
+    }
+
+    fn list_models<'a>(&'a self, provider_id: &'a str) -> ProviderModelsFuture<'a> {
+        Box::pin(async move {
+            if !self.supports(provider_id) {
+                return Err(ProviderTriggerError::Terminal(format!(
+                    "window alignment is not supported for provider: {provider_id}"
+                )));
+            }
+            let credentials = self.read_credentials()?;
+            fetch_codex_models(&credentials, &self.request_logger).await
+        })
+    }
+
+    fn trigger<'a>(&'a self, provider_id: &'a str, model_id: &'a str) -> ProviderTriggerFuture<'a> {
+        Box::pin(async move {
+            if !self.supports(provider_id) {
+                return Err(ProviderTriggerError::Terminal(format!(
+                    "window alignment is not supported for provider: {provider_id}"
+                )));
+            }
+            let credentials = self.read_credentials()?;
+            trigger_codex(&credentials, model_id, &self.request_logger).await
         })
     }
 }
@@ -928,6 +1024,31 @@ struct ClaudeMessageUsage {
     output_tokens: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+struct CodexModelsResponse {
+    #[serde(default)]
+    models: Vec<CodexModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexModel {
+    slug: Option<String>,
+    display_name: Option<String>,
+    supported_in_api: Option<bool>,
+    priority: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexResponsesUsage {
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexSseErrorPayload {
+    message: Option<String>,
+}
+
 async fn fetch_claude_code_models(
     access_token: &str,
     request_logger: &OutboundRequestLogger,
@@ -940,7 +1061,12 @@ async fn fetch_claude_code_models(
                 .header("anthropic-version", "2023-06-01")
                 .header("anthropic-beta", "oauth-2025-04-20")
                 .header("Accept", "application/json"),
-            provider_trigger_log_context("claude_code_models", "GET", CLAUDE_CODE_MODELS_URL),
+            provider_trigger_log_context(
+                CLAUDE_CODE_PROVIDER_ID,
+                "claude_code_models",
+                "GET",
+                CLAUDE_CODE_MODELS_URL,
+            ),
         )
         .await
         .map_err(provider_trigger_request_error)?;
@@ -987,7 +1113,12 @@ async fn trigger_claude_code(
                     })
                     .to_string(),
                 ),
-            provider_trigger_log_context("claude_code_messages", "POST", CLAUDE_CODE_MESSAGES_URL),
+            provider_trigger_log_context(
+                CLAUDE_CODE_PROVIDER_ID,
+                "claude_code_messages",
+                "POST",
+                CLAUDE_CODE_MESSAGES_URL,
+            ),
         )
         .await
         .map_err(provider_trigger_request_error)?;
@@ -1001,6 +1132,7 @@ async fn trigger_claude_code(
     if !status.is_success() {
         let _ = request_logger.write_http_response_detail(
             provider_trigger_log_context(
+                CLAUDE_CODE_PROVIDER_ID,
                 "claude_code_messages_detail",
                 "POST",
                 CLAUDE_CODE_MESSAGES_URL,
@@ -1043,6 +1175,295 @@ async fn trigger_claude_code(
             .and_then(|usage| usage.output_tokens)
             .unwrap_or(0),
     })
+}
+
+async fn fetch_codex_models(
+    credentials: &CodexCredentials,
+    request_logger: &OutboundRequestLogger,
+) -> Result<Vec<ProviderTriggerModel>, ProviderTriggerError> {
+    let response = request_logger
+        .send(
+            codex_request_builder(
+                http_client()
+                    .get(CODEX_MODELS_URL)
+                    .query(&[("client_version", CODEX_CLIENT_VERSION)])
+                    .header("Accept", "application/json"),
+                credentials,
+            ),
+            provider_trigger_log_context(
+                CODEX_PROVIDER_ID,
+                "codex_models",
+                "GET",
+                CODEX_MODELS_URL,
+            ),
+        )
+        .await
+        .map_err(provider_trigger_request_error)?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| ProviderTriggerError::Retryable(error.to_string()))?;
+    ensure_success_status_or_trigger_error(status, &body, "CodeX models")?;
+    let parsed = serde_json::from_str::<CodexModelsResponse>(&body).map_err(|error| {
+        ProviderTriggerError::Terminal(format!("invalid CodeX models response: {error}"))
+    })?;
+    Ok(map_codex_models(parsed.models))
+}
+
+async fn trigger_codex(
+    credentials: &CodexCredentials,
+    model_id: &str,
+    request_logger: &OutboundRequestLogger,
+) -> Result<ProviderTriggerOutcome, ProviderTriggerError> {
+    let response = request_logger
+        .send(
+            codex_request_builder(
+                http_client()
+                    .post(CODEX_RESPONSES_URL)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "text/event-stream")
+                    .body(codex_response_request_body(model_id).to_string()),
+                credentials,
+            ),
+            provider_trigger_log_context(
+                CODEX_PROVIDER_ID,
+                "codex_responses",
+                "POST",
+                CODEX_RESPONSES_URL,
+            ),
+        )
+        .await
+        .map_err(provider_trigger_request_error)?;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| ProviderTriggerError::Retryable(error.to_string()))?;
+    if !status.is_success() {
+        let _ = request_logger.write_http_response_detail(
+            provider_trigger_log_context(
+                CODEX_PROVIDER_ID,
+                "codex_responses_detail",
+                "POST",
+                CODEX_RESPONSES_URL,
+            ),
+            status,
+            &headers,
+            &body,
+            Some(codex_trigger_request_metadata(model_id)),
+        );
+    }
+    ensure_success_status_or_trigger_error(status, &body, "CodeX responses")?;
+    consume_codex_response_stream(&body)
+}
+
+fn codex_request_builder(
+    mut request: reqwest::RequestBuilder,
+    credentials: &CodexCredentials,
+) -> reqwest::RequestBuilder {
+    request = request
+        .bearer_auth(&credentials.access_token)
+        .header("User-Agent", "agent-nexus")
+        .header("Origin", "https://chatgpt.com")
+        .header("Referer", format!("{CODEX_BASE_URL}/"));
+    if let Some(account_id) = credentials.account_id.as_deref() {
+        request = request.header(CHATGPT_ACCOUNT_ID_HEADER, account_id);
+    }
+    request
+}
+
+fn map_codex_models(models: Vec<CodexModel>) -> Vec<ProviderTriggerModel> {
+    let mut models = models
+        .into_iter()
+        .filter(|model| model.supported_in_api == Some(true))
+        .filter_map(|model| {
+            let slug = model.slug?;
+            let id = slug.trim().to_string();
+            if id.is_empty() {
+                return None;
+            }
+            let display_name = model
+                .display_name
+                .unwrap_or_else(|| id.clone())
+                .trim()
+                .to_string();
+            Some((
+                model.priority.unwrap_or(i64::MAX),
+                ProviderTriggerModel {
+                    id: id.clone(),
+                    display_name: if display_name.is_empty() {
+                        id
+                    } else {
+                        display_name
+                    },
+                },
+            ))
+        })
+        .collect::<Vec<_>>();
+    models.sort_by(
+        |(left_priority, left_model), (right_priority, right_model)| {
+            left_priority
+                .cmp(right_priority)
+                .then_with(|| left_model.id.cmp(&right_model.id))
+                .then_with(|| left_model.display_name.cmp(&right_model.display_name))
+        },
+    );
+    models.into_iter().map(|(_, model)| model).collect()
+}
+
+fn codex_response_request_body(model_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "model": model_id,
+        "instructions": "",
+        "input": [{
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": WINDOW_ALIGN_PROMPT,
+            }],
+        }],
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": false,
+        "reasoning": serde_json::Value::Null,
+        "include": [],
+        "store": false,
+        "stream": true,
+    })
+}
+
+fn consume_codex_response_stream(
+    body: &str,
+) -> Result<ProviderTriggerOutcome, ProviderTriggerError> {
+    let events = parse_sse_events(body);
+    let mut usage = ProviderTriggerOutcome {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+    };
+    let mut completed = false;
+
+    for event in events {
+        if event.data.trim().is_empty() {
+            continue;
+        }
+        if event.data.trim() == "[DONE]" {
+            completed = true;
+            continue;
+        }
+        match event.event.as_deref() {
+            Some("error") => {
+                return Err(ProviderTriggerError::Terminal(codex_error_message(
+                    &event.data,
+                    "CodeX stream returned error event",
+                )));
+            }
+            Some("response.failed") | Some("response.error") => {
+                return Err(ProviderTriggerError::Terminal(codex_error_message(
+                    &event.data,
+                    "CodeX response failed",
+                )));
+            }
+            _ => {}
+        }
+
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&event.data) {
+            if let Some(kind) = value.get("type").and_then(|value| value.as_str()) {
+                if matches!(kind, "response.failed" | "response.error") {
+                    return Err(ProviderTriggerError::Terminal(codex_error_message(
+                        &event.data,
+                        "CodeX response failed",
+                    )));
+                }
+                if kind == "response.completed" {
+                    completed = true;
+                }
+            }
+            if value.get("error").is_some() {
+                return Err(ProviderTriggerError::Terminal(codex_error_message(
+                    &event.data,
+                    "CodeX response failed",
+                )));
+            }
+            if let Some(parsed_usage) = value
+                .get("response")
+                .and_then(|response| response.get("usage"))
+                .and_then(|usage| serde_json::from_value::<CodexResponsesUsage>(usage.clone()).ok())
+                .or_else(|| serde_json::from_value::<CodexResponsesUsage>(value.clone()).ok())
+            {
+                usage.prompt_tokens = parsed_usage.input_tokens.unwrap_or(usage.prompt_tokens);
+                usage.completion_tokens = parsed_usage
+                    .output_tokens
+                    .unwrap_or(usage.completion_tokens);
+            }
+        }
+    }
+
+    if !completed {
+        return Err(ProviderTriggerError::Retryable(
+            "CodeX response stream ended before completion".to_string(),
+        ));
+    }
+    Ok(usage)
+}
+
+#[derive(Debug, Default)]
+struct SseEvent {
+    event: Option<String>,
+    data: String,
+}
+
+fn parse_sse_events(body: &str) -> Vec<SseEvent> {
+    let normalized = body.replace("\r\n", "\n");
+    normalized
+        .split("\n\n")
+        .filter_map(|chunk| {
+            let mut event = SseEvent::default();
+            for line in chunk.lines() {
+                if let Some(rest) = line.strip_prefix("event:") {
+                    event.event = Some(rest.trim().to_string());
+                } else if let Some(rest) = line.strip_prefix("data:") {
+                    if !event.data.is_empty() {
+                        event.data.push('\n');
+                    }
+                    event.data.push_str(rest.trim_start());
+                }
+            }
+            (!event.event.is_none() || !event.data.is_empty()).then_some(event)
+        })
+        .collect()
+}
+
+fn codex_error_message(data: &str, fallback: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(data)
+        .ok()
+        .and_then(|value| {
+            value
+                .pointer("/error/message")
+                .or_else(|| value.pointer("/response/error/message"))
+                .or_else(|| value.get("message"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            serde_json::from_str::<CodexSseErrorPayload>(data)
+                .ok()?
+                .message
+        })
+        .filter(|message| !message.trim().is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn codex_trigger_request_metadata(model_id: &str) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("modelId".to_string(), model_id.to_string()),
+        (
+            "promptChars".to_string(),
+            WINDOW_ALIGN_PROMPT.chars().count().to_string(),
+        ),
+        ("stream".to_string(), "true".to_string()),
+    ])
 }
 
 fn claude_trigger_model_rank(model_id: &str) -> (u8, &str) {
@@ -1131,6 +1552,7 @@ fn unix_seconds_to_local_label(epoch_seconds: i64) -> Option<String> {
 }
 
 fn provider_trigger_log_context(
+    provider_id: &str,
     operation: &'static str,
     method: &'static str,
     url: &str,
@@ -1138,7 +1560,7 @@ fn provider_trigger_log_context(
     OutboundRequestContext {
         category: "provider_trigger",
         operation,
-        provider_id: Some(CLAUDE_CODE_PROVIDER_ID.to_string()),
+        provider_id: Some(provider_id.to_string()),
         method,
         url: url.to_string(),
     }
@@ -1161,6 +1583,7 @@ fn response_error_detail(body: &str) -> String {
         .and_then(|value| {
             value
                 .pointer("/error/message")
+                .or_else(|| value.pointer("/response/error/message"))
                 .or_else(|| value.get("message"))
                 .and_then(|message| message.as_str())
                 .map(str::to_string)
@@ -1173,7 +1596,7 @@ mod tests {
     use std::{
         collections::VecDeque,
         sync::{
-            atomic::{AtomicUsize, Ordering},
+            atomic::{AtomicUsize, Ordering as AtomicOrdering},
             Arc, Mutex,
         },
     };
@@ -1255,7 +1678,7 @@ mod tests {
             _model_id: &'a str,
         ) -> ProviderTriggerFuture<'a> {
             Box::pin(async move {
-                self.trigger_count.fetch_add(1, Ordering::SeqCst);
+                self.trigger_count.fetch_add(1, AtomicOrdering::SeqCst);
                 let release = self.release.lock().expect("lock release").take();
                 if let Some(release) = release {
                     let _ = release.await;
@@ -1340,6 +1763,139 @@ mod tests {
         models.sort_by(|a, b| claude_trigger_model_rank(a).cmp(&claude_trigger_model_rank(b)));
 
         assert_eq!(models[0], "claude-haiku-4-5-20251001");
+    }
+
+    #[test]
+    fn codex_models_filter_unsupported_and_sort_by_priority_then_id() {
+        let models = map_codex_models(vec![
+            CodexModel {
+                slug: Some("codex-b".to_string()),
+                display_name: Some("CodeX B".to_string()),
+                supported_in_api: Some(true),
+                priority: Some(20),
+            },
+            CodexModel {
+                slug: Some("codex-a".to_string()),
+                display_name: Some("CodeX A".to_string()),
+                supported_in_api: Some(true),
+                priority: Some(10),
+            },
+            CodexModel {
+                slug: Some("ignored".to_string()),
+                display_name: Some("Ignored".to_string()),
+                supported_in_api: Some(false),
+                priority: Some(0),
+            },
+            CodexModel {
+                slug: None,
+                display_name: Some("Missing slug".to_string()),
+                supported_in_api: Some(true),
+                priority: Some(0),
+            },
+        ]);
+
+        assert_eq!(
+            models,
+            vec![
+                ProviderTriggerModel {
+                    id: "codex-a".to_string(),
+                    display_name: "CodeX A".to_string(),
+                },
+                ProviderTriggerModel {
+                    id: "codex-b".to_string(),
+                    display_name: "CodeX B".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_response_request_body_uses_minimal_streaming_payload() {
+        let body = codex_response_request_body("codex-mini");
+
+        assert_eq!(body["model"], "codex-mini");
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["store"], false);
+        assert_eq!(body["tools"], serde_json::json!([]));
+        assert_eq!(body["parallel_tool_calls"], false);
+        assert_eq!(body["input"][0]["content"][0]["text"], WINDOW_ALIGN_PROMPT);
+    }
+
+    #[test]
+    fn codex_sse_success_consumes_usage_and_done_marker() {
+        let outcome = consume_codex_response_stream(
+            "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\"}\n\n\
+             event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n\
+             data: [DONE]\n\n",
+        )
+        .expect("consume sse");
+
+        assert_eq!(
+            outcome,
+            ProviderTriggerOutcome {
+                prompt_tokens: 3,
+                completion_tokens: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn codex_sse_error_event_becomes_terminal_failure() {
+        let error = consume_codex_response_stream(
+            "event: error\ndata: {\"error\":{\"message\":\"quota exhausted\"}}\n\n",
+        )
+        .expect_err("error event should fail");
+
+        assert_eq!(
+            error,
+            ProviderTriggerError::Terminal("quota exhausted".to_string())
+        );
+    }
+
+    #[test]
+    fn codex_stream_without_completion_is_retryable() {
+        let error = consume_codex_response_stream(
+            "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\"}\n\n",
+        )
+        .expect_err("missing completion should fail");
+
+        assert_eq!(
+            error,
+            ProviderTriggerError::Retryable(
+                "CodeX response stream ended before completion".to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn status_mapping_treats_auth_and_retryable_codes_consistently() {
+        assert_eq!(
+            ensure_success_status_or_trigger_error(
+                reqwest::StatusCode::UNAUTHORIZED,
+                "",
+                "CodeX responses",
+            )
+            .expect_err("401 should fail"),
+            ProviderTriggerError::AuthRequired,
+        );
+        assert!(matches!(
+            ensure_success_status_or_trigger_error(
+                reqwest::StatusCode::TOO_MANY_REQUESTS,
+                "{\"error\":{\"message\":\"slow down\"}}",
+                "CodeX responses",
+            )
+            .expect_err("429 should fail"),
+            ProviderTriggerError::Retryable(_)
+        ));
+        assert!(matches!(
+            ensure_success_status_or_trigger_error(
+                reqwest::StatusCode::BAD_REQUEST,
+                "{\"error\":{\"message\":\"bad model\"}}",
+                "CodeX responses",
+            )
+            .expect_err("400 should fail"),
+            ProviderTriggerError::Terminal(_)
+        ));
     }
 
     #[test]
@@ -1595,7 +2151,7 @@ mod tests {
             tokio::spawn(async move { service.run_window_alignment_now("claude", "model-1").await })
         };
 
-        while runner.trigger_count.load(Ordering::SeqCst) == 0 {
+        while runner.trigger_count.load(AtomicOrdering::SeqCst) == 0 {
             tokio::task::yield_now().await;
         }
 
@@ -1604,7 +2160,7 @@ mod tests {
             .await
             .expect("coalesced manual trigger reads current settings");
         assert_eq!(second.window_align_last_status, "never");
-        assert_eq!(runner.trigger_count.load(Ordering::SeqCst), 1);
+        assert_eq!(runner.trigger_count.load(AtomicOrdering::SeqCst), 1);
 
         release_tx.send(()).expect("release first trigger");
         let first = first
@@ -1612,6 +2168,6 @@ mod tests {
             .expect("first task joins")
             .expect("first trigger succeeds");
         assert_eq!(first.window_align_last_status, "success");
-        assert_eq!(runner.trigger_count.load(Ordering::SeqCst), 1);
+        assert_eq!(runner.trigger_count.load(AtomicOrdering::SeqCst), 1);
     }
 }

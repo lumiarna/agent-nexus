@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/nexus-core/backend/index.md", "reason": "Check core service boundaries, validation and Windows-safe tests"}
+{"file": ".trellis/spec/agent-nexus/backend/index.md", "reason": "Check Tauri command thinness and cross-layer DTO consistency"}
+{"file": ".trellis/spec/agent-nexus/frontend/index.md", "reason": "Check Provider UI, React Query and TypeScript quality"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Full cross-layer/code-reuse review"}
+{"file": ".trellis/tasks/07-10-codex-window-alignment/research/codex-responses-protocol.md", "reason": "Check implementation against verified CodeX protocol"}

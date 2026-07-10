@@ -23,6 +23,7 @@ pub(crate) use claude_auth::{ClaudeAccessToken, ClaudeAuthError};
 pub(crate) use providers::claude_code::{
     ClaudeCodeCredentials, PROVIDER_ID as CLAUDE_CODE_PROVIDER_ID,
 };
+pub(crate) use providers::codex::{read_credentials as read_codex_credentials, CodexCredentials};
 pub use providers::{
     claude_code::{
         claude_code_quota_from_usage_response, ClaudeCodeUsageBucket, ClaudeCodeUsageResponse,
@@ -30,6 +31,7 @@ pub use providers::{
     codex::{
         codex_quota_from_usage_response, codex_reset_credit_windows, CodexRateLimit,
         CodexRateLimitWindow, CodexResetCredit, CodexResetCreditsResponse, CodexUsageResponse,
+        CHATGPT_ACCOUNT_ID_HEADER,
     },
     configured::{
         deepseek_balance_quota_from_usage_response,
@@ -54,7 +56,7 @@ pub use shared::{llm_gateway_quota_from_headers, llm_gateway_quota_from_headers_
 
 use providers::{
     claude_code::{ClaudeCodeQuotaAdapter, ClaudeOAuthRefreshResponse},
-    codex::{CodexCredentials, CodexQuotaAdapter},
+    codex::CodexQuotaAdapter,
     configured::{
         ConfiguredProviderCredentials, ConfiguredProviderQuotaAdapter,
         ConfiguredProviderQuotaConfig, ConfiguredProviderUsageResponse,

@@ -51,9 +51,11 @@ import { cn } from "@/lib/utils";
 import type { Provider, TrayMetric } from "@/types";
 import type { ProviderQuotaSnapshot } from "@/lib/api/providers";
 import { WindowAlignmentSection } from "./WindowAlignmentSection";
+import { supportsWindowAlignment } from "./windowAlignmentSupport";
 import { connectionEditorFor } from "./connection/registry";
 import { getErrorMessage } from "./getErrorMessage";
 import { useProviderDisplayPrefs } from "./useProviderDisplayPrefs";
+import { AGENTS } from "@/config/agents";
 
 const MSG: Record<string, { title: string; body: string }> = {
   expired: {
@@ -66,6 +68,20 @@ const MSG: Record<string, { title: string; body: string }> = {
   },
   failed: { title: "Request failed", body: "Quota request failed." },
 };
+
+function providerCredentialHint(providerId: string): string | null {
+  const agent = AGENTS.find((candidate) => candidate.providerId === providerId);
+  return agent?.authFile ?? null;
+}
+
+function buildTriggerModelsErrorMessage(providerId: string, error: unknown): string {
+  const message = getErrorMessage(error);
+  const hint = providerCredentialHint(providerId);
+  if (providerId === "codex" && hint) {
+    return `${message}。请确认 ${hint} 存在且已登录 CodeX。`;
+  }
+  return message;
+}
 
 function actionLabel(st: ProviderUiStatus, loading: boolean): string {
   if (st === "expired") return "Re-check";
@@ -211,7 +227,7 @@ export function ProviderPage() {
   );
   const setProviderScheduleSettings = useSetProviderScheduleSettingsMutation();
   const runProviderWindowAlignment = useRunProviderWindowAlignmentMutation();
-  const canUseWindowAlignment = configId === "claude";
+  const canUseWindowAlignment = supportsWindowAlignment(configId);
   const triggerModelsQuery = useProviderTriggerModelsQuery(configId, canUseWindowAlignment);
   const openSchedule = configId ? scheduleByProvider[configId] : undefined;
   const displayProviders = providerCatalog.map((provider) => {
@@ -344,7 +360,8 @@ export function ProviderPage() {
   const visible = ordered.filter((p) => display.cardVisible[p.id] !== false);
   const hidden = ordered.filter((p) => display.cardVisible[p.id] === false);
   const cfg = configId ? displayProviders.find((p) => p.id === configId) ?? null : null;
-  const triggerSupported = cfg?.id === "claude" && triggerModelsQuery.data?.supported !== false;
+  const triggerCapabilitySupported = triggerModelsQuery.data?.supported ?? false;
+  const triggerSupported = supportsWindowAlignment(cfg?.id) && triggerCapabilitySupported;
   const triggerModels = triggerModelsQuery.data?.models ?? [];
   const modelOptions =
     windowAlignModelId && !triggerModels.some((model) => model.id === windowAlignModelId)
@@ -709,6 +726,11 @@ export function ProviderPage() {
                 quotaFetching={!!quotaQueries[cfg.id]?.isFetching}
                 onTriggerNow={() => void triggerWindowAlignmentNow(cfg.id, windowAlignModelId)}
               />
+              {supportsWindowAlignment(cfg.id) && triggerModelsQuery.isError ? (
+                <div className="rounded-[12px] border border-[#e9c7c1] bg-[#fff7f6] px-[14px] py-[13px] text-[12px] leading-[1.5] text-[#9a4d42]">
+                  {buildTriggerModelsErrorMessage(cfg.id, triggerModelsQuery.error)}
+                </div>
+              ) : null}
             </div>
             <ModalFooter>
               <Button variant="subtle" onClick={() => setConfigId(null)}>
@@ -730,11 +752,12 @@ export function ProviderPage() {
                         providerId: cfg.id,
                         settings: {
                           quotaRefreshMinutes,
-                          windowAlignCron:
-                            cfg.id === "claude"
-                              ? windowAlignStartTimeToCron(windowAlignStartTime)
-                              : "",
-                          windowAlignModelId: cfg.id === "claude" ? windowAlignModelId : null,
+                          windowAlignCron: supportsWindowAlignment(cfg.id)
+                            ? windowAlignStartTimeToCron(windowAlignStartTime)
+                            : "",
+                          windowAlignModelId: supportsWindowAlignment(cfg.id)
+                            ? windowAlignModelId
+                            : null,
                         },
                       });
                       if (pendingCardVisible !== null) {

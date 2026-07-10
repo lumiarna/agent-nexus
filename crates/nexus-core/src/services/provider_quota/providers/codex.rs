@@ -22,6 +22,7 @@ use super::super::{
 };
 
 pub(crate) const PROVIDER_ID: &str = "codex";
+pub const CHATGPT_ACCOUNT_ID_HEADER: &str = "ChatGPT-Account-Id";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const RESET_CREDITS_URL: &str = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 const RESET_CREDIT_AVAILABLE_STATUS: &str = "available";
@@ -60,11 +61,11 @@ pub struct CodexResetCredit {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CodexCredentials {
+pub struct CodexCredentials {
     pub(crate) access_token: String,
     pub(crate) account_id: Option<String>,
-    plan: Option<String>,
-    source: String,
+    pub(crate) plan: Option<String>,
+    pub(crate) source: String,
 }
 
 pub(crate) struct CodexQuotaAdapter;
@@ -408,7 +409,7 @@ async fn codex_get(
         .header("User-Agent", "codex-cli")
         .header("Accept", "application/json");
     if let Some(account_id) = account_id {
-        request = request.header("ChatGPT-Account-Id", account_id);
+        request = request.header(CHATGPT_ACCOUNT_ID_HEADER, account_id);
     }
 
     let response = request_logger
