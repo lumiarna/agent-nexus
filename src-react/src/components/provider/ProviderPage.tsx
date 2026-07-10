@@ -362,7 +362,11 @@ export function ProviderPage() {
   const cfg = configId ? displayProviders.find((p) => p.id === configId) ?? null : null;
   const triggerCapabilitySupported = triggerModelsQuery.data?.supported ?? false;
   const triggerSupported = supportsWindowAlignment(cfg?.id) && triggerCapabilitySupported;
-  const triggerModels = triggerModelsQuery.data?.models ?? [];
+  const triggerModels = (triggerModelsQuery.data?.models ?? []).map((model) => ({
+    id: model.id,
+    displayName: model.displayName ?? (model as { display_name?: string }).display_name ?? model.id,
+  }));
+
   const modelOptions =
     windowAlignModelId && !triggerModels.some((model) => model.id === windowAlignModelId)
       ? [
@@ -486,7 +490,7 @@ export function ProviderPage() {
                                 ? 100
                                 : quotaMetricValue(w.used, display.trayMetric);
                               return (
-                                <div key={w.label}>
+                                <div key={`${w.label}-${w.usedLabel}-${w.reset}-${w.valueOnly ? "value" : "bar"}`}>
                                   <div className="mb-1.5 flex justify-between text-[12px]">
                                     <span className="text-[#6a6055]">{w.label}</span>
                                     <span className="font-bold" style={{ color: barColor }}>

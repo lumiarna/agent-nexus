@@ -40,7 +40,7 @@ const CODEX_PROVIDER_ID: &str = "codex";
 const CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const CODEX_MODELS_URL: &str = "https://chatgpt.com/backend-api/codex/models";
 const CODEX_RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
-const CODEX_CLIENT_VERSION: &str = "0.1.0";
+const CODEX_CLIENT_VERSION: &str = "0.0.0";
 const CLAUDE_UNIFIED_STATUS_HEADER: &str = "anthropic-ratelimit-unified-status";
 const CLAUDE_UNIFIED_CLAIM_HEADER: &str = "anthropic-ratelimit-unified-representative-claim";
 const CLAUDE_UNIFIED_RESET_HEADER: &str = "anthropic-ratelimit-unified-reset";
@@ -1087,7 +1087,11 @@ async fn fetch_claude_code_models(
             id: model.id,
         })
         .collect::<Vec<_>>();
-    models.sort_by(|a, b| claude_trigger_model_rank(&a.id).cmp(&claude_trigger_model_rank(&b.id)));
+    models.sort_by(|a, b| {
+        a.display_name
+            .cmp(&b.display_name)
+            .then_with(|| a.id.cmp(&b.id))
+    });
     Ok(models)
 }
 
@@ -1277,7 +1281,7 @@ fn codex_request_builder(
 fn map_codex_models(models: Vec<CodexModel>) -> Vec<ProviderTriggerModel> {
     let mut models = models
         .into_iter()
-        .filter(|model| model.supported_in_api == Some(true))
+        .filter(|model| model.supported_in_api != Some(false))
         .filter_map(|model| {
             let slug = model.slug?;
             let id = slug.trim().to_string();
@@ -1302,14 +1306,12 @@ fn map_codex_models(models: Vec<CodexModel>) -> Vec<ProviderTriggerModel> {
             ))
         })
         .collect::<Vec<_>>();
-    models.sort_by(
-        |(left_priority, left_model), (right_priority, right_model)| {
-            left_priority
-                .cmp(right_priority)
-                .then_with(|| left_model.id.cmp(&right_model.id))
-                .then_with(|| left_model.display_name.cmp(&right_model.display_name))
-        },
-    );
+    models.sort_by(|(_, left_model), (_, right_model)| {
+        left_model
+            .display_name
+            .cmp(&right_model.display_name)
+            .then_with(|| left_model.id.cmp(&right_model.id))
+    });
     models.into_iter().map(|(_, model)| model).collect()
 }
 
@@ -1464,19 +1466,6 @@ fn codex_trigger_request_metadata(model_id: &str) -> BTreeMap<String, String> {
         ),
         ("stream".to_string(), "true".to_string()),
     ])
-}
-
-fn claude_trigger_model_rank(model_id: &str) -> (u8, &str) {
-    let tier = if is_haiku_model(model_id) {
-        0
-    } else if model_id.contains("sonnet") {
-        1
-    } else if model_id.contains("opus") {
-        2
-    } else {
-        3
-    };
-    (tier, model_id)
 }
 
 fn is_haiku_model(model_id: &str) -> bool {
@@ -1753,20 +1742,35 @@ mod tests {
     }
 
     #[test]
-    fn claude_trigger_model_rank_prefers_haiku_for_window_alignment() {
-        let mut models = [
-            "claude-sonnet-4-6",
-            "claude-opus-4-8",
-            "claude-haiku-4-5-20251001",
+    fn claude_models_sort_by_display_name_then_id() {
+        let mut models = vec![
+            ProviderTriggerModel {
+                id: "claude-sonnet-4-6".to_string(),
+                display_name: "Claude Sonnet 4.6".to_string(),
+            },
+            ProviderTriggerModel {
+                id: "claude-opus-4-8".to_string(),
+                display_name: "Claude Opus 4.8".to_string(),
+            },
+            ProviderTriggerModel {
+                id: "claude-haiku-4-5-20251001".to_string(),
+                display_name: "Claude Haiku 4.5".to_string(),
+            },
         ];
 
-        models.sort_by(|a, b| claude_trigger_model_rank(a).cmp(&claude_trigger_model_rank(b)));
+        models.sort_by(|a, b| {
+            a.display_name
+                .cmp(&b.display_name)
+                .then_with(|| a.id.cmp(&b.id))
+        });
 
-        assert_eq!(models[0], "claude-haiku-4-5-20251001");
+        assert_eq!(models[0].display_name, "Claude Haiku 4.5");
+        assert_eq!(models[1].display_name, "Claude Opus 4.8");
+        assert_eq!(models[2].display_name, "Claude Sonnet 4.6");
     }
 
     #[test]
-    fn codex_models_filter_unsupported_and_sort_by_priority_then_id() {
+    fn codex_models_filter_unsupported_and_sort_by_display_name_then_id() {
         let models = map_codex_models(vec![
             CodexModel {
                 slug: Some("codex-b".to_string()),
@@ -1777,7 +1781,7 @@ mod tests {
             CodexModel {
                 slug: Some("codex-a".to_string()),
                 display_name: Some("CodeX A".to_string()),
-                supported_in_api: Some(true),
+                supported_in_api: None,
                 priority: Some(10),
             },
             CodexModel {
