@@ -13,6 +13,7 @@
     "src/components/project/projectInteractions.ts",
     "src/components/project/stringListEdit.ts",
     "src/components/provider/providerSchedule.ts",
+    "src/components/skill/visibility.ts",
     "src/components/sync/pathDisplay.ts",
     "src/components/sync/schedule.ts",
     "src/components/sync/systemRecords.ts",
