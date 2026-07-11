@@ -24,8 +24,9 @@ import {
   useEnabledAgents,
 } from "@/lib/query/agentPreferences";
 import { isTauriRuntime } from "@/lib/runtime";
-import { hasGlobalPlacement, isProjectCustomSkill, srcAgentOf, targetAgentsOf } from "@/lib/tokens";
+import { isProjectCustomSkill, srcAgentOf, targetAgentsOf } from "@/lib/tokens";
 import { computePropagationTargets } from "@/components/skill/propagation";
+import { showsInGlobalSkillPage } from "@/components/skill/visibility";
 import { cn } from "@/lib/utils";
 import type { AgentName, Skill } from "@/types";
 
@@ -264,7 +265,7 @@ export function SkillPage() {
   let set = skills.filter((k) =>
     isProj
       ? k.scope === "project" && (projectId === null || k.projectId === projectId)
-      : k.scope === "global" || (isProjectCustomSkill(k) && hasGlobalPlacement(k.cells)),
+      : showsInGlobalSkillPage(k),
   );
   if (q) set = set.filter((k) => k.name.toLowerCase().includes(q) || k.desc.toLowerCase().includes(q));
   // Hide Skills sourced by a disabled Agent; Project custom Skills have no
