@@ -1,4 +1,4 @@
-use std::{fs, path::Path, sync::Arc};
+use std::{env, ffi::OsString, fs, path::Path, sync::Arc};
 
 use nexus_core::{
     database::Database,
@@ -7,11 +7,40 @@ use nexus_core::{
         project_symlinks::ProjectSymlinkInventory,
         projects::ProjectService,
         prompts::{PromptService, SetPromptTargetInput},
-        skills::{SetSkillTargetInput, SkillService},
+        skills::{
+            SetProjectSkillProjectInput, SetProjectSkillTargetInput, SetSkillTargetInput,
+            SkillService,
+        },
         symlink::create_symlink_placement,
     },
 };
+use serial_test::serial;
 use tempfile::TempDir;
+
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &Path) -> Self {
+        let guard = Self {
+            key,
+            previous: env::var_os(key),
+        };
+        env::set_var(key, value);
+        guard
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(value) => env::set_var(self.key, value),
+            None => env::remove_var(self.key),
+        }
+    }
+}
 
 fn git_repo(parent: &TempDir, name: &str) -> String {
     let path = parent.path().join(name);
@@ -30,6 +59,13 @@ fn create_directory_link(source: &Path, target: &Path) {
     #[cfg(not(windows))]
     nexus_core::services::symlink::create_symlink_placement(source, target)
         .expect("create symlink link");
+}
+
+fn remove_directory_link(path: &Path) {
+    #[cfg(windows)]
+    fs::remove_dir(path).expect("remove junction link");
+    #[cfg(not(windows))]
+    fs::remove_file(path).expect("remove symlink link");
 }
 
 fn write_skill(dir: &Path) {
@@ -202,4 +238,137 @@ fn skips_project_skill_and_prompt_distribution_links() {
         .expect("list replaced project symlink");
     assert_eq!(links.len(), 1, "unrelated replacement should be listed");
     assert!(Path::new(&links[0].target_path).ends_with("CLAUDE.md"));
+}
+
+#[test]
+#[serial]
+fn skips_project_custom_skill_propagation_placements_but_keeps_replacements_and_unrelated_links() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let skills = SkillService::new(db.clone());
+    let inventory = ProjectSymlinkInventory::new(db);
+    let root = TempDir::new().expect("create temp dir");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("create isolated home");
+    let _home_guard = EnvVarGuard::set("HOME", &home);
+    let _userprofile_guard = EnvVarGuard::set("USERPROFILE", &home);
+
+    let source_repo = git_repo(&root, "source-project");
+    let target_repo = git_repo(&root, "target-project");
+    let source_project = projects
+        .record_project(source_repo.clone())
+        .expect("record source project");
+    let target_project = projects
+        .record_project(target_repo.clone())
+        .expect("record target project");
+    let source_root = Path::new(&source_repo);
+    let target_root = Path::new(&target_repo);
+    let custom_dir = source_root.join("skills/release-notes");
+    write_skill(&custom_dir);
+
+    let skill_id = skills
+        .scan_skills()
+        .expect("scan project custom skill")
+        .into_iter()
+        .find(|skill| skill.source_kind == "project_custom")
+        .expect("find project custom skill")
+        .id;
+
+    // Propagate to both the source/current Project and another Project, then
+    // fan each placement out to a second Agent.
+    skills
+        .set_project_skill_project(SetProjectSkillProjectInput {
+            skill_id: skill_id.clone(),
+            target_project_id: source_project.id.clone(),
+            default_agent: "Claude Code".to_string(),
+            enabled: true,
+        })
+        .expect("propagate to source project");
+    skills
+        .set_project_skill_target(SetProjectSkillTargetInput {
+            skill_id: skill_id.clone(),
+            target_project_id: source_project.id.clone(),
+            agent: "CodeX".to_string(),
+            enabled: true,
+        })
+        .expect("fan out source project placement");
+    skills
+        .set_project_skill_project(SetProjectSkillProjectInput {
+            skill_id: skill_id.clone(),
+            target_project_id: target_project.id.clone(),
+            default_agent: "Generic Agent".to_string(),
+            enabled: true,
+        })
+        .expect("propagate to other project");
+    skills
+        .set_project_skill_target(SetProjectSkillTargetInput {
+            skill_id,
+            target_project_id: target_project.id.clone(),
+            agent: "Pi".to_string(),
+            enabled: true,
+        })
+        .expect("fan out other project placement");
+
+    let unrelated_source = root.path().join("unrelated-source");
+    fs::create_dir_all(&unrelated_source).expect("create unrelated source");
+    let unrelated_link = target_root.join("manual-link");
+    create_directory_link(&unrelated_source, &unrelated_link);
+
+    let managed_targets = [
+        source_root.join(".claude/skills/release-notes"),
+        source_root.join(".codex/skills/release-notes"),
+        target_root.join(".agents/skills/release-notes"),
+        target_root.join(".pi/skills/release-notes"),
+    ];
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list project symlinks");
+    assert_eq!(links.len(), 1, "only the unrelated link should be listed");
+    assert!(Path::new(&links[0].target_path).ends_with("manual-link"));
+    for target in &managed_targets {
+        assert!(
+            !links
+                .iter()
+                .any(|link| Path::new(&link.target_path) == target),
+            "managed Project Skill placement should be hidden: {}",
+            target.display()
+        );
+    }
+
+    // Keep the distribution row but replace one managed link with a link to an
+    // unrelated source. Matching the target path alone must not hide it.
+    let replaced_target = &managed_targets[1];
+    remove_directory_link(replaced_target);
+    let replacement_source = root.path().join("replacement-skill");
+    fs::create_dir_all(&replacement_source).expect("create replacement source");
+    create_directory_link(&replacement_source, replaced_target);
+
+    let links = inventory
+        .list_project_symlinks()
+        .expect("list replaced project symlinks");
+    assert_eq!(
+        links.len(),
+        2,
+        "replacement and unrelated links should show"
+    );
+    assert!(
+        links
+            .iter()
+            .any(|link| Path::new(&link.target_path).ends_with(".codex/skills/release-notes")),
+        "replacement target should be listed: {links:?}"
+    );
+    assert!(
+        links
+            .iter()
+            .any(|link| Path::new(&link.target_path).ends_with("manual-link")),
+        "unrelated target should be listed: {links:?}"
+    );
+    assert!(
+        !nexus_core::services::distribution::placement_points_to(
+            replaced_target,
+            &root.path().join("deleted-canonical-source"),
+        )
+        .expect("stale canonical source should be treated as an unmanaged link"),
+        "a removed canonical source must not keep a replacement hidden"
+    );
 }

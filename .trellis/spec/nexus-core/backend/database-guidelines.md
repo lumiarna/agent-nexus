@@ -186,3 +186,49 @@ service.move_skill_source(MoveSkillSourceInput { skill_id, agent })?;
 - 将 Session 正文写入数据库；设计文档要求 session_index 只存元数据和摘要，正文留文件系统/Cloud。
 - 把 `Project Path` 当稳定身份；稳定身份是 `Project Key`。
 - 把跨 Project placement 落到目标 `customSkillsDirs` 而非默认 Agent fixed project skills dir——会被 rescan 误判为 canonical source。
+
+## Scenario: Project Symlink Inventory managed identity
+
+### 1. Scope / Trigger
+- Trigger: 修改 `ProjectSymlinkInventory`、`project_managed_target_identities` 或新增会创建项目目录 symlink/junction 的 Distribution placement。
+
+### 2. Signatures
+- `distribution::project_managed_target_identities(&Connection) -> AppResult<HashSet<String>>`
+- `distribution::placement_points_to(target_path: &Path, source_path: &Path) -> AppResult<bool>`
+
+### 3. Contracts
+- managed identity 查询必须覆盖 `skill_project_distributions` 中 `role = 'target'` 且有 `target_path` 的 `project_custom` Project Skill。
+- Inventory 只能在实际 target path 是链接且 `canonicalize(target_path) == canonicalize(canonical_path)` 时隐藏；不能仅凭数据库 target path 隐藏。
+- canonical source 已删除时，placement 匹配返回 `false`；NotFound 不应阻断整个 inventory 扫描，其他 IO 错误仍须传播。
+
+### 4. Validation & Error Matrix
+- target 不是链接或链接目标不存在 -> `placement_points_to = Ok(false)`。
+- target 指向不匹配 source -> `Ok(false)`，Inventory 保留该 symlink。
+- source canonicalize 发生非 NotFound IO 错误 -> `AppError::Io`，不得静默隐藏。
+
+### 5. Good/Base/Bad Cases
+- Good: source Project、其他 Project 及多个 Agent 的 managed placements 均由关系查询返回并按实际 source 匹配隐藏。
+- Base: 未被 Distribution 或 Sync task 管理的项目 symlink 继续出现在列表中。
+- Bad: 只比较 target path，用户将 managed placement 替换为其他 source 后仍被隐藏。
+
+### 6. Tests Required
+- `crates/nexus-core/tests/project_symlink_inventory.rs`：覆盖 source/other Project、多 Agent、replacement、stale source 与 unrelated symlink。
+- 保留既有普通 Skill/Prompt Distribution 与 Sync task managed link 的隐藏回归测试。
+
+### 7. Wrong vs Correct
+#### Wrong
+```rust
+// 仅凭记录的 target path 隐藏，无法发现被替换的链接。
+managed_targets.contains(&target_path)
+```
+
+#### Correct
+```rust
+let mut managed = false;
+for (source, target) in managed_targets {
+    if target == actual_target && placement_points_to(actual_target, source)? {
+        managed = true;
+        break;
+    }
+}
+```

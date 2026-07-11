@@ -212,6 +212,16 @@ pub fn project_managed_target_identities(conn: &Connection) -> AppResult<HashSet
 
         UNION ALL
 
+        SELECT skill.canonical_path, distribution.target_path
+        FROM skills skill
+        JOIN skill_project_distributions distribution ON distribution.skill_id = skill.id
+        WHERE skill.scope = 'project'
+          AND skill.source_kind = 'project_custom'
+          AND distribution.role = 'target'
+          AND distribution.target_path IS NOT NULL
+
+        UNION ALL
+
         SELECT prompt.canonical_path, distribution.target_path
         FROM prompts prompt
         JOIN prompt_distributions distribution ON distribution.prompt_id = prompt.id
@@ -252,5 +262,12 @@ pub fn placement_points_to(target_path: &Path, source_path: &Path) -> AppResult<
     let Ok(resolved_target) = target_path.canonicalize() else {
         return Ok(false);
     };
-    Ok(resolved_target == source_path.canonicalize()?)
+    let resolved_source = match source_path.canonicalize() {
+        Ok(path) => path,
+        // A stale distribution must not make inventory scanning fail or hide a
+        // replacement link just because its recorded source was removed.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(resolved_target == resolved_source)
 }
