@@ -1327,6 +1327,92 @@ fn deletes_unknown_task_group_id_is_idempotent() {
 }
 
 #[test]
+fn renames_task_group_successfully() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db, request_logger());
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Original name".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: "/workspace/config".to_string(),
+                target_type: "Cloud".to_string(),
+                target: "backup/config".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    let renamed = sync
+        .rename_task_group(created.id.clone(), "  Renamed group  ".to_string())
+        .expect("rename task group");
+
+    assert_eq!(renamed.id, created.id);
+    assert_eq!(renamed.name, "Renamed group");
+    assert_eq!(renamed.tasks, created.tasks);
+    assert_eq!(
+        sync.list_task_groups().expect("list task groups")[0].name,
+        "Renamed group"
+    );
+}
+
+#[test]
+fn rename_task_group_rejects_blank_name() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db, request_logger());
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Original name".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: "/workspace/config".to_string(),
+                target_type: "Cloud".to_string(),
+                target: "backup/config".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    let error = sync
+        .rename_task_group(created.id, "   ".to_string())
+        .expect_err("blank task group name should fail");
+
+    assert!(error.to_string().contains("task group name is required"));
+}
+
+#[test]
+fn rename_task_group_rejects_unknown_group_id() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db, request_logger());
+
+    let error = sync
+        .rename_task_group("nonexistent-uuid".to_string(), "Renamed group".to_string())
+        .expect_err("unknown task group should fail");
+
+    assert!(error.to_string().contains("task group not found"));
+}
+
+#[test]
+fn rename_task_group_rejects_system_group_id() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let projects = ProjectService::new(db.clone());
+    let sync = SyncService::new(db, request_logger());
+    let root = TempDir::new().expect("create temp dir");
+    projects
+        .record_project(git_repo(&root, "agent-nexus"))
+        .expect("record project");
+    let system_group_id = "system:session-backup".to_string();
+
+    let error = sync
+        .rename_task_group(system_group_id, "Renamed group".to_string())
+        .expect_err("system task group should fail");
+
+    assert!(error.to_string().contains("task group not found"));
+}
+
+#[test]
 fn adds_symlink_task_to_existing_group_and_creates_placement() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());

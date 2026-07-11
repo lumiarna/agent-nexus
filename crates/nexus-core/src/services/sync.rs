@@ -175,6 +175,10 @@ impl SyncService {
         self.task_lifecycle.delete_task_group(id)
     }
 
+    pub fn rename_task_group(&self, group_id: String, name: String) -> AppResult<TaskGroup> {
+        self.task_lifecycle.rename_task_group(group_id, name)
+    }
+
     pub fn add_task(&self, group_id: String, task: CreateTaskInput) -> AppResult<TaskGroup> {
         self.task_lifecycle.add_task(group_id, task)
     }

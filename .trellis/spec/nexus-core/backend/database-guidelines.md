@@ -24,6 +24,30 @@
 - `Agent Matrix` 每个 agent 集合完整、source 唯一等不变量由 service 维护，不能只依赖 UI 或 partial unique index。
 - `Sync Task` 的 `direction` 由 `source_type` / `target_type` 派生；`Cloud→Cloud` 非法；`Symlink` / `Junction` 仅限 Distribution。
 
+### Convention: task_groups 系统记录防御（system_kind）
+
+**What**: `task_groups.system_kind` 区分用户组（`NULL`）与系统内置组（`NOT NULL`，如 `session_backup`，固定 id `system:session-backup`）。所有面向用户组的 **查询/写入/删除** SQL，WHERE 必须带 `system_kind IS NULL`。
+
+**Why**: 系统 group 由 reconciler 维护（`session_backup_reconciler.rs`），不应被用户 CRUD 命令误改/误删。漏掉该条件会破坏系统内置行为。`list_task_groups` / `reorder_task_groups` / `rename_task_group` 均带此条件；`delete_task_group` 当前**缺失**（已知不一致，待补）。
+
+**Example**:
+```rust
+// Correct: WHERE 同时防「不存在」与「命中系统组」，rows_affected==0 一并判定
+let affected = conn.execute(
+    "UPDATE task_groups SET name = ?2, updated_at = ?3
+     WHERE id = ?1 AND system_kind IS NULL",
+    params![group_id, name, now],
+)?;
+if affected == 0 {
+    return Err(AppError::Validation("task group not found".to_string()));
+}
+
+// Wrong: 漏 system_kind IS NULL → 可能误改系统组
+conn.execute("UPDATE task_groups SET name = ?2 WHERE id = ?1", params![group_id, name])?;
+```
+
+**Related**: 用户组与系统组在 UI 层也分离——系统组走独立 query（`list_session_backups`）与独立 "System-managed records" section，不进入 `TaskGroupCard`。新增针对 `task_groups` 的写命令时，单测须含「系统组 id 报 `task group not found`」守门用例（参考 `tests/sync_service.rs::rename_task_group_rejects_system_group_id`）。
+
 ## 表和字段命名
 
 - 表名和字段名对齐 `CONTEXT.md` 领域词：`projects`、`skills`、`prompts`、`providers`、`session_index`、`task_groups`、`tasks`、`skill_distributions`、`skill_project_distributions`（跨 Project 投影，见下文 Scenario）。

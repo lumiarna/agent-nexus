@@ -56,6 +56,9 @@ export const syncApi = {
   deleteTaskGroup(id: string): Promise<void> {
     return invokeCommand<void>("delete_task_group", { id });
   },
+  renameTaskGroup(groupId: string, name: string): Promise<TaskGroup> {
+    return invokeCommand<TaskGroup>("rename_task_group", { groupId, name });
+  },
   addTask(groupId: string, task: AddTaskInput): Promise<TaskGroup> {
     return invokeCommand<TaskGroup>("add_task", { groupId, task });
   },

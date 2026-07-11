@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/nexus-core/backend/index.md", "reason": "校验后端 rename SQL/required_trimmed/系统 group 防御/错误文案一致性"}
+{"file": ".trellis/spec/agent-nexus/backend/index.md", "reason": "校验 command 透传与 invoke_handler 注册一致性"}
+{"file": ".trellis/spec/agent-nexus/frontend/index.md", "reason": "校验前端 inline 编辑状态机、乐观 setQueryData、stopPropagation、失败 toast"}
+{"file": ".trellis/spec/guides/index.md", "reason": "跨包通用思考/质量检查指南"}

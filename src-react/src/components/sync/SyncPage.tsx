@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useQueryClient } from "@tanstack/react-query";
-import { Copy, Loader2, RefreshCw } from "lucide-react";
+import { Copy, Loader2, Pencil, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dot, Input, Spinner } from "@/components/ui/primitives";
@@ -41,6 +41,7 @@ import {
   useCreateTaskGroupMutation,
   useDeleteTaskGroupMutation,
   useDeleteTaskMutation,
+  useRenameTaskGroupMutation,
   useReorderTaskGroupsMutation,
   useReorderTasksMutation,
   useRunTaskMutation,
@@ -312,8 +313,10 @@ interface TaskGroupCardProps {
   open: boolean;
   onToggle: () => void;
   running: boolean;
+  renaming: boolean;
   onRunGroup: (group: TaskGroup) => void;
   onGroupSchedule: (group: TaskGroup) => void;
+  onRenameGroup: (group: TaskGroup, name: string) => Promise<void>;
   onEditSchedule: (group: TaskGroup, task: Task) => void;
   onRunTask: (group: TaskGroup, task: Task) => void;
   onAddTask?: (group: TaskGroup) => void;
@@ -327,8 +330,10 @@ function TaskGroupCard({
   open,
   onToggle,
   running,
+  renaming,
   onRunGroup,
   onGroupSchedule,
+  onRenameGroup,
   onEditSchedule,
   onRunTask,
   onAddTask,
@@ -336,6 +341,54 @@ function TaskGroupCard({
   onDeleteTask,
 }: TaskGroupCardProps) {
   const hasCopyTask = group.tasks.some((task) => task.action === "Copy");
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(group.name);
+  const committingNameRef = useRef(false);
+
+  useEffect(() => {
+    if (!editingName) {
+      setDraftName(group.name);
+    }
+  }, [editingName, group.name]);
+
+  async function commitRename() {
+    if (committingNameRef.current) return;
+    committingNameRef.current = true;
+    const trimmed = draftName.trim();
+
+    if (trimmed === group.name) {
+      setEditingName(false);
+      setDraftName(group.name);
+      committingNameRef.current = false;
+      return;
+    }
+
+    if (!trimmed) {
+      toast("名称不能为空");
+      setEditingName(false);
+      setDraftName(group.name);
+      committingNameRef.current = false;
+      return;
+    }
+
+    try {
+      await onRenameGroup(group, trimmed);
+      setEditingName(false);
+    } catch (error) {
+      toast(getErrorMessage(error));
+      setEditingName(false);
+      setDraftName(group.name);
+    } finally {
+      committingNameRef.current = false;
+    }
+  }
+
+  function cancelRename() {
+    committingNameRef.current = false;
+    setEditingName(false);
+    setDraftName(group.name);
+  }
+
   return (
     <div
       ref={sortable?.setNodeRef}
@@ -366,7 +419,44 @@ function TaskGroupCard({
             ⠿
           </span>
         ) : null}
-        <div className="text-[14.5px] font-extrabold text-nexus-ink">{group.name}</div>
+        {editingName ? (
+          <Input
+            value={draftName}
+            autoFocus
+            disabled={renaming}
+            onFocus={(e) => e.target.select()}
+            onChange={(e) => setDraftName(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") {
+                void commitRename();
+              } else if (e.key === "Escape") {
+                cancelRename();
+              }
+            }}
+            onBlur={() => {
+              void commitRename();
+            }}
+            className="h-6 w-[240px] max-w-full py-0 text-[14.5px] font-extrabold"
+          />
+        ) : (
+          <div className="flex items-center gap-2">
+            <div className="text-[14.5px] font-extrabold text-nexus-ink">{group.name}</div>
+            <button
+              type="button"
+              title="Rename group"
+              onClick={(e) => {
+                e.stopPropagation();
+                setDraftName(group.name);
+                setEditingName(true);
+              }}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-nexus-border2 bg-nexus-bg text-[#7a6f60] hover:bg-[#ece2d5]"
+            >
+              <Pencil size={14} />
+            </button>
+          </div>
+        )}
         <span className="text-[11px] text-[#b3a999]">
           {group.tasks.length} {group.tasks.length === 1 ? "task" : "tasks"}
         </span>
@@ -613,6 +703,7 @@ export function SyncPage() {
   const createTaskGroupMutation = useCreateTaskGroupMutation();
   const deleteTaskMutation = useDeleteTaskMutation();
   const deleteTaskGroupMutation = useDeleteTaskGroupMutation();
+  const renameTaskGroupMutation = useRenameTaskGroupMutation();
   const addTaskMutation = useAddTaskMutation();
   const runTaskMutation = useRunTaskMutation();
   const reorderTaskGroupsMutation = useReorderTaskGroupsMutation();
@@ -639,6 +730,7 @@ export function SyncPage() {
   const [addError, setAddError] = useState<string | null>(null);
   const [platform, setPlatform] = useState<HostPlatform>("unknown");
   const [runningGroupId, setRunningGroupId] = useState<string | null>(null);
+  const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
   const [activeDrag, setActiveDrag] = useState<
     { type: "group"; group: TaskGroup } | { type: "task"; task: Task } | null
   >(null);
@@ -816,6 +908,16 @@ export function SyncPage() {
       toast(`Run complete · ${task.direction} · ${task.source || "task"}`);
     } catch (error) {
       toast(getErrorMessage(error));
+    }
+  }
+
+  async function renameGroup(group: TaskGroup, name: string) {
+    setRenamingGroupId(group.id);
+    try {
+      await renameTaskGroupMutation.mutateAsync({ groupId: group.id, name });
+      toast(`已重命名 · ${name}`);
+    } finally {
+      setRenamingGroupId(null);
     }
   }
 
@@ -1003,8 +1105,10 @@ export function SyncPage() {
                         open={openGroups[g.id] !== false}
                         onToggle={() => toggleGroup(g.id)}
                         running={runningGroupId === g.id}
+                        renaming={renamingGroupId === g.id}
                         onRunGroup={(group) => void runGroup(group)}
                         onGroupSchedule={openGroupSchedule}
+                        onRenameGroup={renameGroup}
                         onEditSchedule={openSchedule}
                         onRunTask={(group, task) => void runTask(group.id, task)}
                         onAddTask={openAddTask}

@@ -299,6 +299,31 @@ impl TaskLifecycle {
         Ok(())
     }
 
+    pub(super) fn rename_task_group(&self, group_id: String, name: String) -> AppResult<TaskGroup> {
+        let group_id = required_trimmed(&group_id, "task group id")?.to_string();
+        let name = required_trimmed(&name, "task group name")?;
+        let now = now_epoch_seconds()?;
+        let conn = self.db.connection()?;
+        let rows_affected = conn.execute(
+            r#"
+            UPDATE task_groups
+            SET name = ?2, updated_at = ?3
+            WHERE id = ?1 AND system_kind IS NULL
+            "#,
+            params![group_id, name, now],
+        )?;
+        drop(conn);
+
+        if rows_affected == 0 {
+            return Err(AppError::Validation("task group not found".to_string()));
+        }
+
+        self.list_task_groups()?
+            .into_iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| AppError::Internal("renamed task group was not found".to_string()))
+    }
+
     pub(super) fn add_task(&self, group_id: String, task: CreateTaskInput) -> AppResult<TaskGroup> {
         let group_id = required_trimmed(&group_id, "task group id")?.to_string();
         let prepared = prepare_task(&task)?;

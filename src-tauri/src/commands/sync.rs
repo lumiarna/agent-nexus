@@ -60,6 +60,15 @@ pub fn delete_task_group(state: State<'_, AppState>, id: String) -> AppResult<()
 }
 
 #[tauri::command]
+pub fn rename_task_group(
+    state: State<'_, AppState>,
+    group_id: String,
+    name: String,
+) -> AppResult<TaskGroup> {
+    state.sync.rename_task_group(group_id, name)
+}
+
+#[tauri::command]
 pub fn add_task(
     state: State<'_, AppState>,
     group_id: String,

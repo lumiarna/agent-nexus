@@ -72,6 +72,19 @@ export function useDeleteTaskGroupMutation() {
   });
 }
 
+export function useRenameTaskGroupMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, name }: { groupId: string; name: string }) =>
+      syncApi.renameTaskGroup(groupId, name),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<TaskGroup[]>(syncKeys.taskGroups, (groups) =>
+        groups?.map((group) => (group.id === updated.id ? updated : group)),
+      );
+    },
+  });
+}
+
 export function useAddTaskMutation() {
   const queryClient = useQueryClient();
   return useMutation({

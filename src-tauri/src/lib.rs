@@ -98,6 +98,7 @@ pub fn run() {
             commands::app_config::set_provider_display_preferences,
             commands::sync::delete_task,
             commands::sync::delete_task_group,
+            commands::sync::rename_task_group,
             commands::sync::add_task,
             commands::sync::get_webdav_settings,
             commands::project_symlinks::list_project_symlinks,
