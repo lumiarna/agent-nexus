@@ -1,0 +1,18 @@
+{"file": "CONTEXT.md", "reason": "Project Custom Source、Canonical Source、Placement、Distribution 与 Agent Matrix 领域契约。"}
+{"file": "docs/adr/0003-asset-custom-sources.md", "reason": "限制本任务只深化 Project custom Skill，不强行统一 Prompt/Session。"}
+{"file": "docs/design/Architecture Design.md", "reason": "nexus-core deep module、Tauri 薄壳、React Query 单一真相源。"}
+{"file": ".trellis/spec/nexus-core/backend/directory-structure.md", "reason": "core module 放置、Distribution 复用与禁止 Tauri 依赖。"}
+{"file": ".trellis/spec/nexus-core/backend/database-guidelines.md", "reason": "Project custom Skill 表、不变量、事务与现有测试契约。"}
+{"file": ".trellis/spec/nexus-core/backend/error-handling.md", "reason": "AppError 分类、文件系统失败和回滚规范。"}
+{"file": ".trellis/spec/nexus-core/backend/quality-guidelines.md", "reason": "core 测试、TempDir、Windows SQLite 与领域约束。"}
+{"file": ".trellis/spec/agent-nexus/backend/directory-structure.md", "reason": "Tauri command 薄 adapter 与 AppState 装配规则。"}
+{"file": ".trellis/spec/agent-nexus/backend/error-handling.md", "reason": "Tauri 保留结构化 AppError 的要求。"}
+{"file": ".trellis/spec/agent-nexus/frontend/type-safety.md", "reason": "当前 projection wire 契约及跨层类型更新检查面。"}
+{"file": ".trellis/spec/agent-nexus/frontend/hook-guidelines.md", "reason": "React Query mutation、cache 替换与跨领域 invalidation。"}
+{"file": ".trellis/spec/agent-nexus/frontend/state-management.md", "reason": "server state 单一真相源与禁止页面镜像。"}
+{"file": ".trellis/spec/agent-nexus/frontend/component-guidelines.md", "reason": "SkillRow 领域 props、页面委托和 UI 事实边界。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Rust serde、Tauri、TS、query、SQLite 与测试完整数据流。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "避免重复传播规则并复用现有 Distribution/Agent capability。"}
+{"file": ".trellis/tasks/07-14-deepen-project-custom-skill-propagation/research/design-it-twice.md", "reason": "四种 interface 比较、推荐混合与已确认原子性取舍。"}
+{"file": "docs/design/Database Schema.md", "reason": "schema v21 reconciliation evidence 表与 migration 文档同步。"}
+{"file": ".trellis/spec/agent-nexus/frontend/quality-guidelines.md", "reason": "前端 typecheck、unit/component 测试门槛。"}

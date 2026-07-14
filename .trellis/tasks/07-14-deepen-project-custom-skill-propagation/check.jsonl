@@ -1,0 +1,12 @@
+{"file": "CONTEXT.md", "reason": "检查领域术语和 Project Custom Source / Placement 语义未漂移。"}
+{"file": "docs/adr/0003-asset-custom-sources.md", "reason": "检查没有把 Prompt/Session 拉入 Project custom Skill seam。"}
+{"file": ".trellis/spec/nexus-core/backend/database-guidelines.md", "reason": "检查事务、schema、路径与跨 Project 不变量。"}
+{"file": ".trellis/spec/nexus-core/backend/error-handling.md", "reason": "检查 validation/IO/database/reconciliation 分类与补偿。"}
+{"file": ".trellis/spec/nexus-core/backend/quality-guidelines.md", "reason": "检查 core 测试面与 Windows 验证命令。"}
+{"file": ".trellis/spec/agent-nexus/backend/quality-guidelines.md", "reason": "检查 Tauri 仍为薄 adapter。"}
+{"file": ".trellis/spec/agent-nexus/frontend/type-safety.md", "reason": "检查 discriminated union 与 IPC payload 一致。"}
+{"file": ".trellis/spec/agent-nexus/frontend/hook-guidelines.md", "reason": "检查权威 cache 替换和 Project invalidation。"}
+{"file": ".trellis/spec/agent-nexus/frontend/quality-guidelines.md", "reason": "检查 typecheck、unit/component 测试覆盖。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查跨层字段、规则与测试没有漏层。"}
+{"file": ".trellis/tasks/07-14-deepen-project-custom-skill-propagation/research/design-it-twice.md", "reason": "核对实现是否保持推荐 interface 的 depth/locality/leverage 取舍。"}
+{"file": "docs/design/Database Schema.md", "reason": "检查 evidence schema、fresh database 与 v20→v21 migration 文档一致。"}
