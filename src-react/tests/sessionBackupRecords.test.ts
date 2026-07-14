@@ -27,6 +27,7 @@ test("maps backend Session Backup tasks into a system-managed Task Group", () =>
   assert.deepEqual(group, {
     id: "system:session-backup",
     name: "Session Backup",
+    collapsed: false,
     tasks: [task],
   });
 });

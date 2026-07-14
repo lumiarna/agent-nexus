@@ -232,3 +232,54 @@ for (source, target) in managed_targets {
     }
 }
 ```
+
+## Scenario: Sync Task Group display state
+
+### 1. Scope / Trigger
+- Trigger: 持久化用户自定义 Sync Task Group 的展开/折叠状态，或新增读取/写入 `task_groups` 展示字段。
+
+### 2. Signatures
+- DB：`task_groups.collapsed INTEGER NOT NULL DEFAULT 0`，schema v20；Group 与 Task 的顺序仍分别使用 `task_groups.sort_index` / `tasks.sort_index`。
+- Core：`TaskGroup { id, name, collapsed, tasks }`。
+- Service：`set_task_group_collapsed(group_id: String, collapsed: bool) -> AppResult<TaskGroup>`。
+- Tauri command：`set_task_group_collapsed(group_id: String, collapsed: bool) -> AppResult<TaskGroup>`。
+
+### 3. Contracts
+- `0` / `false` 表示展开，`1` / `true` 表示折叠；新建及 v19 迁移数据默认展开。
+- 读取用户 groups 时必须 SELECT `collapsed` 并通过 serde `camelCase` 返回 `collapsed`。
+- 写入用户 group 必须使用 `WHERE id = ?1 AND system_kind IS NULL`，成功后返回包含完整 tasks 的 TaskGroup。
+- Session Backup 不通过该字段控制，继续由独立 UI section 管理。
+
+### 4. Validation & Error Matrix
+- 空白 group id -> `required_trimmed` validation error。
+- 不存在或 `system_kind IS NOT NULL` 的 group -> `Validation("task group not found")`。
+- 合法用户 group -> 更新 `collapsed` 与 `updated_at`，返回最新完整 group。
+
+### 5. Good/Base/Bad Cases
+- Good：`UPDATE task_groups SET collapsed = ?2 ... WHERE id = ?1 AND system_kind IS NULL`，前端 mutation 成功后替换完整 cache group。
+- Base：旧数据库迁移后所有 group `collapsed = 0`，新 group 默认展开。
+- Bad：把 Group 折叠状态放入 `settings` 或 `tasks` 的重复字段，导致 group 删除/读取链路出现第二份状态。
+
+### 6. Tests Required
+- `crates/nexus-core` schema test：v19 -> v20 后 `collapsed` 存在且默认 0。
+- `crates/nexus-core/tests/sync_service.rs`：默认展开、折叠/展开 round-trip、未知 group 和系统 group 拒绝。
+- 前端：`TaskGroup` 类型/Session Backup 映射测试，以及 Sync 页面 cache 乐观更新与错误回滚覆盖。
+
+### 7. Wrong vs Correct
+#### Wrong
+```rust
+// 只按 id 更新，可能改到 Session Backup 系统组。
+conn.execute("UPDATE task_groups SET collapsed = ?2 WHERE id = ?1", params![id, collapsed])?;
+```
+
+#### Correct
+```rust
+let affected = conn.execute(
+    "UPDATE task_groups SET collapsed = ?2, updated_at = ?3
+     WHERE id = ?1 AND system_kind IS NULL",
+    params![group_id, collapsed, now],
+)?;
+if affected == 0 {
+    return Err(AppError::Validation("task group not found".to_string()));
+}
+```

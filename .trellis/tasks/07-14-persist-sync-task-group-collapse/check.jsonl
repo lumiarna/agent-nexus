@@ -1,0 +1,10 @@
+{"file":".trellis/spec/nexus-core/backend/database-guidelines.md","reason":"检查新增 task_groups 字段的 schema、迁移和 system_kind 写入防御。"}
+{"file":".trellis/spec/agent-nexus/backend/quality-guidelines.md","reason":"检查 Tauri command 保持薄壳、Rust fmt/check/test 门槛。"}
+{"file":".trellis/spec/agent-nexus/frontend/quality-guidelines.md","reason":"检查 TypeScript strict、相关 unit/component 测试与验证命令。"}
+{"file":".trellis/spec/agent-nexus/frontend/state-management.md","reason":"检查 collapsed 是否以 React Query server state 为单一真相源，未残留 openGroups 镜像。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"逐层核对 migration、Rust serde、command、types/API/query、UI 构造点。"}
+{"file":".trellis/tasks/07-14-persist-sync-task-group-collapse/prd.md","reason":"逐项核对重启恢复、失败回滚、Group 生命周期和 Session Backup 范围。"}
+{"file":".trellis/tasks/07-14-persist-sync-task-group-collapse/design.md","reason":"核对 task_groups.collapsed 方案、v20 migration 和乐观更新/回滚。"}
+{"file":"crates/nexus-core/src/database/schema.rs","reason":"确认 fresh schema 与 v19->v20 migration 都包含 collapsed。"}
+{"file":"crates/nexus-core/tests/sync_service.rs","reason":"核对默认值、round-trip、不存在 group 和系统 group 防御测试。"}
+{"file":"src-react/src/components/sync/SyncPage.tsx","reason":"核对渲染、toggle、删除/改名/排序/任务操作和 Session Backup 行为。"}

@@ -50,6 +50,7 @@ pub struct Task {
 pub struct TaskGroup {
     pub id: String,
     pub name: String,
+    pub collapsed: bool,
     pub tasks: Vec<Task>,
 }
 
@@ -157,6 +158,15 @@ impl SyncService {
 
     pub fn list_task_groups(&self) -> AppResult<Vec<TaskGroup>> {
         self.task_lifecycle.list_task_groups()
+    }
+
+    pub fn set_task_group_collapsed(
+        &self,
+        group_id: String,
+        collapsed: bool,
+    ) -> AppResult<TaskGroup> {
+        self.task_lifecycle
+            .set_task_group_collapsed(group_id, collapsed)
     }
 
     pub fn list_session_backups(&self) -> AppResult<Vec<SessionBackup>> {

@@ -191,6 +191,7 @@ export interface Task {
 export interface TaskGroup {
   id: string;
   name: string;
+  collapsed: boolean;
   tasks: Task[];
 }
 

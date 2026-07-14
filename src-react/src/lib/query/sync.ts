@@ -48,6 +48,19 @@ export function useSessionBackupsQuery() {
   });
 }
 
+export function useSetTaskGroupCollapsedMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ groupId, collapsed }: { groupId: string; collapsed: boolean }) =>
+      syncApi.setTaskGroupCollapsed(groupId, collapsed),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<TaskGroup[]>(syncKeys.taskGroups, (groups) =>
+        groups?.map((group) => (group.id === updated.id ? updated : group)),
+      );
+    },
+  });
+}
+
 export function useCreateTaskGroupMutation() {
   const queryClient = useQueryClient();
   return useMutation({

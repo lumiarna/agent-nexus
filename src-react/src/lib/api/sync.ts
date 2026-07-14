@@ -47,6 +47,9 @@ export const syncApi = {
   listSessionBackups(): Promise<SessionBackup[]> {
     return invokeCommand<SessionBackup[]>("list_session_backups");
   },
+  setTaskGroupCollapsed(groupId: string, collapsed: boolean): Promise<TaskGroup> {
+    return invokeCommand<TaskGroup>("set_task_group_collapsed", { groupId, collapsed });
+  },
   createTaskGroup(input: CreateTaskGroupInput): Promise<TaskGroup> {
     return invokeCommand<TaskGroup>("create_task_group", { input });
   },

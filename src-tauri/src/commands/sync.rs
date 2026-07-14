@@ -42,6 +42,15 @@ pub fn list_session_backups(state: State<'_, AppState>) -> AppResult<Vec<Session
 }
 
 #[tauri::command]
+pub fn set_task_group_collapsed(
+    state: State<'_, AppState>,
+    group_id: String,
+    collapsed: bool,
+) -> AppResult<TaskGroup> {
+    state.sync.set_task_group_collapsed(group_id, collapsed)
+}
+
+#[tauri::command]
 pub fn create_task_group(
     state: State<'_, AppState>,
     input: CreateTaskGroupInput,

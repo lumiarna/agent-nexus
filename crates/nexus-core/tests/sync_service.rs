@@ -1327,6 +1327,71 @@ fn deletes_unknown_task_group_id_is_idempotent() {
 }
 
 #[test]
+fn task_group_collapsed_defaults_and_round_trips() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let sync = SyncService::new(db, request_logger());
+    let created = sync
+        .create_task_group(CreateTaskGroupInput {
+            name: "Collapsible group".to_string(),
+            tasks: vec![CreateTaskInput {
+                action: "Copy".to_string(),
+                source_type: "Local".to_string(),
+                source: "/workspace/config".to_string(),
+                target_type: "Cloud".to_string(),
+                target: "backup/config".to_string(),
+                schedule: "manual".to_string(),
+            }],
+        })
+        .expect("create task group");
+
+    assert!(!created.collapsed, "new groups should be expanded");
+
+    let collapsed = sync
+        .set_task_group_collapsed(created.id.clone(), true)
+        .expect("collapse task group");
+    assert!(collapsed.collapsed);
+    assert_eq!(collapsed.tasks, created.tasks);
+
+    let expanded = sync
+        .set_task_group_collapsed(created.id.clone(), false)
+        .expect("expand task group");
+    assert!(!expanded.collapsed);
+    assert!(
+        !sync
+            .list_task_groups()
+            .expect("list task groups")
+            .into_iter()
+            .find(|group| group.id == created.id)
+            .expect("group exists")
+            .collapsed
+    );
+}
+
+#[test]
+fn set_task_group_collapsed_rejects_unknown_and_system_groups() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    {
+        let conn = db.connection().expect("open db connection");
+        conn.execute(
+            "INSERT INTO task_groups (id, name, system_kind, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
+            ("system:session-backup", "Session Backup", "session_backup", 0_i64),
+        )
+        .expect("insert system task group");
+    }
+    let sync = SyncService::new(db, request_logger());
+
+    let unknown = sync
+        .set_task_group_collapsed("missing".to_string(), true)
+        .expect_err("unknown group should be rejected");
+    assert!(unknown.to_string().contains("task group not found"));
+
+    let system = sync
+        .set_task_group_collapsed("system:session-backup".to_string(), true)
+        .expect_err("system group should be rejected");
+    assert!(system.to_string().contains("task group not found"));
+}
+
+#[test]
 fn renames_task_group_successfully() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());

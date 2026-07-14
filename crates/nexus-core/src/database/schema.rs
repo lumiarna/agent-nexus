@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 19;
+const CURRENT_SCHEMA_VERSION: i64 = 20;
 
 /// Default Project custom skills directory — every Project scans `<root>/skills`
 /// as a Project custom source unless the user edits the list.
@@ -88,6 +88,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 19 {
             migrate_to_v19(conn)?;
         }
+        if current < 20 {
+            migrate_to_v20(conn)?;
+        }
     }
 
     Ok(())
@@ -119,7 +122,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (19);
+        INSERT INTO schema_version (version) VALUES (20);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -261,6 +264,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             name TEXT NOT NULL,
             system_kind TEXT,
             sort_index INTEGER,
+            collapsed INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
@@ -1030,6 +1034,22 @@ fn migrate_to_v19(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
+fn migrate_to_v20(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        ALTER TABLE task_groups ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0;
+        UPDATE schema_version SET version = 20;
+        COMMIT;
+        "#,
+    )
+    .inspect_err(|_| {
+        let _ = conn.execute("ROLLBACK", params![]);
+    })?;
+
+    Ok(())
+}
+
 fn add_column_if_missing(conn: &Connection, column: &str, definition: &str) -> AppResult<()> {
     if task_column_exists(conn, column)? {
         return Ok(());
@@ -1217,7 +1237,52 @@ mod tests {
             .expect("collect prompt columns");
         assert!(prompt_columns.contains(&"scope".to_string()));
         assert!(prompt_columns.contains(&"project_id".to_string()));
+        let task_group_columns = conn
+            .prepare("PRAGMA table_info(task_groups)")
+            .expect("prepare task group columns")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query task group columns")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect task group columns");
+        assert!(task_group_columns.contains(&"collapsed".to_string()));
         assert!(table_exists(&conn, "provider_schedule_settings"));
+    }
+
+    #[test]
+    fn migrates_v19_task_groups_with_default_collapsed_state() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (19);
+            CREATE TABLE task_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                system_kind TEXT,
+                sort_index INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            INSERT INTO task_groups (id, name, created_at, updated_at)
+            VALUES ('g1', 'Group', 1, 1);
+            "#,
+        )
+        .expect("seed v19 task groups");
+
+        migrate(&conn).expect("migrate schema to v20");
+
+        let collapsed: i64 = conn
+            .query_row(
+                "SELECT collapsed FROM task_groups WHERE id = 'g1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read default collapsed state");
+        assert_eq!(collapsed, 0);
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
     }
 
     #[test]

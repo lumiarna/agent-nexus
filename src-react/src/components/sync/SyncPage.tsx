@@ -46,6 +46,7 @@ import {
   useReorderTasksMutation,
   useRunTaskMutation,
   useSessionBackupsQuery,
+  useSetTaskGroupCollapsedMutation,
   useTaskGroupsQuery,
   useUpdateGroupScheduleMutation,
   useUpdateTaskScheduleMutation,
@@ -706,6 +707,7 @@ export function SyncPage() {
   const renameTaskGroupMutation = useRenameTaskGroupMutation();
   const addTaskMutation = useAddTaskMutation();
   const runTaskMutation = useRunTaskMutation();
+  const setTaskGroupCollapsedMutation = useSetTaskGroupCollapsedMutation();
   const reorderTaskGroupsMutation = useReorderTaskGroupsMutation();
   const reorderTasksMutation = useReorderTasksMutation();
   const updateTaskScheduleMutation = useUpdateTaskScheduleMutation();
@@ -715,9 +717,6 @@ export function SyncPage() {
   const deleteProjectSymlinkMutation = useDeleteProjectSymlinkMutation();
   const templates = TASK_TEMPLATES;
   const [openSec, setOpenSec] = useState({ backup: false });
-  // Task Groups are expanded by default (primary work area); a group is collapsed only when its
-  // id is explicitly set to false here.
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [tpl, setTpl] = useState("blank");
   const [form, setForm] = useState<FormState>({ name: "", tasks: [newTask()] });
@@ -940,7 +939,27 @@ export function SyncPage() {
   }
 
   function toggleGroup(groupId: string) {
-    setOpenGroups((state) => ({ ...state, [groupId]: state[groupId] === false }));
+    const group = groups.find((candidate) => candidate.id === groupId);
+    if (!group) return;
+
+    const snapshot = group;
+    const collapsed = !group.collapsed;
+    updateTaskGroups((gs) =>
+      gs.map((candidate) =>
+        candidate.id === groupId ? { ...candidate, collapsed } : candidate,
+      ),
+    );
+    setTaskGroupCollapsedMutation.mutate(
+      { groupId, collapsed },
+      {
+        onError: (error) => {
+          updateTaskGroups((gs) =>
+            gs.map((candidate) => (candidate.id === groupId ? snapshot : candidate)),
+          );
+          toast(getErrorMessage(error));
+        },
+      },
+    );
   }
 
   function openSchedule(group: TaskGroup, task: Task) {
@@ -1102,7 +1121,7 @@ export function SyncPage() {
                       <TaskGroupCard
                         group={g}
                         sortable={sortable}
-                        open={openGroups[g.id] !== false}
+                        open={g.collapsed !== true}
                         onToggle={() => toggleGroup(g.id)}
                         running={runningGroupId === g.id}
                         renaming={renamingGroupId === g.id}

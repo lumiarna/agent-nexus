@@ -126,27 +126,60 @@ impl TaskLifecycle {
         let conn = self.db.connection()?;
         let mut group_stmt = conn.prepare(
             r#"
-            SELECT id, name
+            SELECT id, name, collapsed
             FROM task_groups
             WHERE system_kind IS NULL
             ORDER BY sort_index IS NULL, sort_index, created_at, name
             "#,
         )?;
         let group_rows = group_stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, bool>(2)?,
+            ))
         })?;
 
         let mut groups = Vec::new();
         for group_row in group_rows {
-            let (id, name) = group_row?;
+            let (id, name, collapsed) = group_row?;
             groups.push(TaskGroup {
                 tasks: list_tasks_for_group(&conn, &id)?,
                 id,
                 name,
+                collapsed,
             });
         }
 
         Ok(groups)
+    }
+
+    pub(super) fn set_task_group_collapsed(
+        &self,
+        group_id: String,
+        collapsed: bool,
+    ) -> AppResult<TaskGroup> {
+        let group_id = required_trimmed(&group_id, "task group id")?.to_string();
+        let now = now_epoch_seconds()?;
+        let conn = self.db.connection()?;
+        let rows_affected = conn.execute(
+            r#"
+            UPDATE task_groups
+            SET collapsed = ?2, updated_at = ?3
+            WHERE id = ?1 AND system_kind IS NULL
+            "#,
+            params![group_id, collapsed, now],
+        )?;
+        drop(conn);
+
+        if rows_affected == 0 {
+            return Err(AppError::Validation("task group not found".to_string()));
+        }
+
+        self.list_task_groups()?
+            .into_iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| AppError::Internal("updated task group was not found".to_string()))
     }
 
     pub(super) fn list_session_backups(&self) -> AppResult<Vec<SessionBackup>> {

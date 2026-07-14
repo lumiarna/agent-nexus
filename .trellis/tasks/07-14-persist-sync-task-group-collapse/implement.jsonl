@@ -1,0 +1,13 @@
+{"file":".trellis/spec/nexus-core/backend/database-guidelines.md","reason":"TaskGroup 领域字段必须落在 task_groups；新增 task_groups 字段、迁移和 system_kind 防御约定。"}
+{"file":".trellis/spec/agent-nexus/frontend/state-management.md","reason":"TaskGroup collapsed 作为 React Query server state，避免继续维护独立 openGroups 本地副本。"}
+{"file":".trellis/spec/agent-nexus/frontend/hook-guidelines.md","reason":"规定 Sync API/query/mutation 分层、cache 更新和 IPC 边界。"}
+{"file":".trellis/spec/agent-nexus/backend/database-guidelines.md","reason":"Tauri 只暴露 command，schema 与事务逻辑放在 nexus-core。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"本任务跨 schema、core serde、Tauri command、前端 types/API/query/UI。"}
+{"file":".trellis/tasks/07-14-persist-sync-task-group-collapse/prd.md","reason":"修订后的需求：折叠字段属于 task_groups，不使用 settings。"}
+{"file":".trellis/tasks/07-14-persist-sync-task-group-collapse/design.md","reason":"修订后的 task_groups.collapsed 数据流、迁移和乐观更新设计。"}
+{"file":".trellis/tasks/07-14-persist-sync-task-group-collapse/implement.md","reason":"修订后的 schema/core/command/frontend 实现顺序与验证计划。"}
+{"file":"crates/nexus-core/src/database/schema.rs","reason":"当前 schema version 19、task_groups 定义和迁移入口。"}
+{"file":"crates/nexus-core/src/services/sync.rs","reason":"TaskGroup serde 模型和 SyncService 透传边界。"}
+{"file":"crates/nexus-core/src/services/sync/task_lifecycle.rs","reason":"list/reorder/create TaskGroup 数据链路和 sort_index 持久化模式。"}
+{"file":"src-react/src/components/sync/SyncPage.tsx","reason":"当前 openGroups/toggleGroup UI 状态和 Session Backup 独立 section。"}
+{"file":"src-react/src/lib/query/sync.ts","reason":"现有 Sync React Query cache 乐观更新模式。"}

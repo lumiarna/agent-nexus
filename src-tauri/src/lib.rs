@@ -104,6 +104,7 @@ pub fn run() {
             commands::project_symlinks::list_project_symlinks,
             commands::sync::list_task_groups,
             commands::sync::list_session_backups,
+            commands::sync::set_task_group_collapsed,
             commands::sync::reorder_task_groups,
             commands::sync::reorder_tasks,
             commands::sync::run_task,
