@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/guides/index.md","reason":"检查候选是否保持跨层一致性、减少重复并把复杂度收进正确 module。"}
+{"file":".trellis/spec/agent-nexus/frontend/index.md","reason":"检查前端候选是否符合 React Query 真相源、类型与测试约定。"}
+{"file":".trellis/spec/agent-nexus/backend/index.md","reason":"检查 Tauri 壳层候选是否避免承载领域逻辑并符合质量约定。"}
+{"file":".trellis/spec/nexus-core/backend/index.md","reason":"检查 core 候选的 module depth、持久化不变量、adapter 与测试面。"}
+{"file":".trellis/tasks/07-14-architecture-deepening-review/research/architecture-review.md","reason":"核对所有保留候选的证据、ADR 约束、推荐强度与任务映射。"}

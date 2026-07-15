@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/guides/index.md","reason":"架构审查横跨领域与层级，需要遵循代码复用和跨层数据流思考指南。"}
+{"file":".trellis/spec/agent-nexus/frontend/index.md","reason":"候选覆盖 React 页面、React Query cache mutation 与 Provider 展示偏好，需要前端 module 与状态边界规范。"}
+{"file":".trellis/spec/agent-nexus/backend/index.md","reason":"候选覆盖 Tauri command、后台运行及 Tray/Window 生命周期，需要壳层职责规范。"}
+{"file":".trellis/spec/nexus-core/backend/index.md","reason":"候选覆盖 Distribution、Task Group 持久化与 Provider capability，需要 core deep module、数据库及 adapter 规范。"}
+{"file":".trellis/tasks/07-14-architecture-deepening-review/research/architecture-review.md","reason":"提供候选证据、deletion test、推荐排序、拒绝项与跨子任务顺序。"}
