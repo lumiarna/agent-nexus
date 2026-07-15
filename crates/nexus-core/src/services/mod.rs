@@ -5,6 +5,7 @@ pub mod distribution;
 pub mod outbound_request_log;
 pub mod paths;
 pub mod placement;
+mod project_custom_skill_propagation;
 pub mod project_symlinks;
 pub mod projects;
 pub mod prompts;

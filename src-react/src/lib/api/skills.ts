@@ -1,4 +1,9 @@
-import type { AgentName, Skill } from "@/types";
+import type {
+  AgentName,
+  ProjectCustomSkillIntent,
+  ProjectCustomSkillMutationResult,
+  Skill,
+} from "@/types";
 import { invokeCommand } from "@/lib/api/tauri";
 
 export interface SetSkillTargetInput {
@@ -12,20 +17,6 @@ export interface MoveSkillSourceInput {
   agent: AgentName;
 }
 
-export interface SetProjectSkillProjectInput {
-  skillId: string;
-  targetProjectId: string;
-  defaultAgent: AgentName;
-  enabled: boolean;
-}
-
-export interface SetProjectSkillTargetInput {
-  skillId: string;
-  targetProjectId: string;
-  agent: AgentName;
-  enabled: boolean;
-}
-
 export const skillsApi = {
   list(): Promise<Skill[]> {
     return invokeCommand<Skill[]>("list_skills");
@@ -35,16 +26,16 @@ export const skillsApi = {
     return invokeCommand<Skill[]>("scan_skills");
   },
 
-  setTarget(input: SetSkillTargetInput): Promise<Skill> {
-    return invokeCommand<Skill>("set_skill_target", { input });
+  setTarget(input: SetSkillTargetInput): Promise<Skill[]> {
+    return invokeCommand<Skill[]>("set_skill_target", { input });
   },
 
-  moveSource(input: MoveSkillSourceInput): Promise<Skill> {
-    return invokeCommand<Skill>("move_skill_source", { input });
+  moveSource(input: MoveSkillSourceInput): Promise<Skill[]> {
+    return invokeCommand<Skill[]>("move_skill_source", { input });
   },
 
-  setDisabled(id: string, disabled: boolean): Promise<Skill> {
-    return invokeCommand<Skill>("set_skill_disabled", { id, disabled });
+  setDisabled(id: string, disabled: boolean): Promise<Skill[]> {
+    return invokeCommand<Skill[]>("set_skill_disabled", { id, disabled });
   },
 
   openSource(id: string): Promise<void> {
@@ -55,15 +46,12 @@ export const skillsApi = {
     return invokeCommand<void>("reveal_skill_path", { id });
   },
 
-  /** Source-side: propagate a Project custom Skill to (or cancel it from) a
-   *  target Project. Returns the full skill list so projection rows refresh. */
-  setProjectSkillProject(input: SetProjectSkillProjectInput): Promise<Skill[]> {
-    return invokeCommand<Skill[]>("set_project_skill_project", { input });
-  },
-
-  /** Target-side: toggle one Agent placement inside an incoming target
-   *  Project Skill row. Returns the full skill list. */
-  setProjectSkillTarget(input: SetProjectSkillTargetInput): Promise<Skill[]> {
-    return invokeCommand<Skill[]>("set_project_skill_target", { input });
+  applyProjectCustomIntent(
+    intent: ProjectCustomSkillIntent,
+  ): Promise<ProjectCustomSkillMutationResult> {
+    return invokeCommand<ProjectCustomSkillMutationResult>(
+      "apply_project_custom_skill_intent",
+      { intent },
+    );
   },
 };

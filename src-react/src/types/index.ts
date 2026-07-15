@@ -10,9 +10,14 @@ import type { AgentName as CapabilityAgentName } from "../config/agents.js";
 
 export type AgentName = CapabilityAgentName;
 
-/** Role of an agent in a Skill/Prompt Agent Matrix row. One source per row. */
+/** Agent canonical matrices have exactly one source; Project custom
+ * placement matrices deliberately cannot represent a source cell. */
 export type CellRole = "source" | "target" | "none";
+export type AgentCellRole = CellRole;
+export type PlacementCellRole = "target" | "none";
 export type Cells = Record<AgentName, CellRole>;
+export type AgentCells = Record<AgentName, AgentCellRole>;
+export type PlacementCells = Record<AgentName, PlacementCellRole>;
 
 // ─── Provider ───────────────────────────────────────────────────────────────
 
@@ -94,42 +99,83 @@ export interface ScanResult {
 
 // ─── Skill / Prompt ─────────────────────────────────────────────────────────
 
-/** Canonical source kind for a Skill.
- *  `agent` — owned by a fixed Agent project/global skills dir; the Agent Matrix
- *  has exactly one `source` cell.
- *  `project_custom` — discovered from a Project `custom_skills_dir`; the canonical
- *  source belongs to no Agent, so the row has no `source` cell. Global placements
- *  are managed symlinks/junctions and show only as `target` / `none`. */
-export type SkillSourceKind = "agent" | "project_custom";
-
-export interface Skill {
+export interface ProjectRef {
   id: string;
   name: string;
-  scope: "global" | "project";
-  projectId?: string;
+}
+
+export interface SkillSummary {
+  /** Canonical backend `skills.id` for every row variant. */
+  skillId: string;
+  name: string;
   desc: string;
   path: string;
   disabled: boolean;
-  cells: Cells;
-  /** Canonical source kind. Absent payloads are treated as `agent` for
-   *  backward compatibility with backends that predate project custom sources. */
-  sourceKind?: SkillSourceKind;
-  /** Owning Agent when `sourceKind === "agent"`; `undefined` for `project_custom`. */
-  sourceAgent?: AgentName;
-  /** Canonical backend `skills.id` for an incoming target-Project projection
-   *  row. Present only when `placementScope === "project"`; in that case `id`
-   *  is a composite display id and mutations must pass this canonical id. */
-  canonicalSkillId?: string;
-  /** ` "project"` on an incoming target-Project projection row; `undefined` on
-   *  canonical rows. Distinguishes a foreign Skill row (sourceless Agent Matrix
-   *  driven by `skill_project_distributions`) from the source row. */
-  placementScope?: "project";
-  /** Target Project id for an incoming projection row. The row is scoped to
-   *  this Project so the Project detail / Skill Project tab group it there. */
-  placementProjectId?: string;
-  /** Source Project id for an incoming projection row — used to render the
-   *  `Project source` tooltip. Equals the canonical Skill's `projectId`. */
-  sourceProjectId?: string;
+}
+
+export type SkillContext =
+  | { kind: "global" }
+  | { kind: "project"; project: ProjectRef };
+
+export type ProjectCustomDestinationState =
+  | { kind: "global"; cells: PlacementCells }
+  | { kind: "project"; project: ProjectRef; cells: PlacementCells };
+
+export interface AgentCanonicalSkillRow {
+  kind: "agentCanonical";
+  rowKey: string;
+  skill: SkillSummary;
+  context: SkillContext;
+  sourceAgent: AgentName;
+  cells: AgentCells;
+}
+
+export interface ProjectCustomCanonicalSkillRow {
+  kind: "projectCustomCanonical";
+  rowKey: string;
+  skill: SkillSummary;
+  sourceProject: ProjectRef;
+  destinations: ProjectCustomDestinationState[];
+}
+
+export interface ProjectCustomIncomingSkillRow {
+  kind: "projectCustomIncoming";
+  rowKey: string;
+  skill: SkillSummary;
+  sourceProject: ProjectRef;
+  targetProject: ProjectRef;
+  cells: PlacementCells;
+}
+
+/** Read-side Skill row. The discriminant makes canonical Agent identity,
+ * Project Custom Source identity, and incoming Placement identity exclusive. */
+export type Skill =
+  | AgentCanonicalSkillRow
+  | ProjectCustomCanonicalSkillRow
+  | ProjectCustomIncomingSkillRow;
+
+export type ProjectCustomSkillDestination =
+  | { kind: "global" }
+  | { kind: "project"; projectId: string };
+
+export type ProjectCustomSkillIntent =
+  | {
+      kind: "setTargetEnabled";
+      skillId: string;
+      destination: ProjectCustomSkillDestination;
+      enabled: boolean;
+    }
+  | {
+      kind: "setAgentPlacement";
+      skillId: string;
+      destination: ProjectCustomSkillDestination;
+      agent: AgentName;
+      enabled: boolean;
+    };
+
+export interface ProjectCustomSkillMutationResult {
+  changed: boolean;
+  skills: Skill[];
 }
 
 export interface Prompt {

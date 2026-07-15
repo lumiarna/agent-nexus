@@ -18,7 +18,8 @@ crates/nexus-core/src/
     ├── util.rs / paths.rs / system_open.rs
     ├── agent_capabilities.rs
     ├── projects.rs / skills.rs / prompts.rs / sessions.rs
-    ├── distribution.rs          # Skill/Prompt Agent Matrix deep module
+    ├── distribution.rs          # Agent-sourced Skill/Prompt 单 Placement deep module
+    ├── project_custom_skill_propagation.rs # Project custom Skill eager read + intent/补偿
     ├── placement.rs / symlink.rs
     ├── provider_quota/          # Provider adapter + provider-specific modules
     ├── sync.rs / sync/          # Task lifecycle, file state, copy, reconciler
@@ -31,7 +32,7 @@ crates/nexus-core/src/
 ## 模块边界
 
 - `services/<domain>.rs` 承载领域 service；跨领域通用 helper 放入 `util.rs`、`paths.rs`、`system_open.rs`，不要复制。
-- Skill / Prompt 传播共享 `services/distribution.rs`；新增可传播资产时优先复用 `MatrixSource` / matrix rows 思路。
+- Agent-sourced Skill / Prompt 单 Placement 传播共享 `services/distribution.rs`；Project custom Skill 的 Global / Project 多 Placement 编排留在私有 `project_custom_skill_propagation.rs`，不要泛化成 Prompt/Session 共同 seam。
 - Sync 的复杂生命周期拆到 `services/sync/` 子模块；`sync.rs` 暴露 public service 和类型。
 - Provider quota 已按 `provider_quota/` 子目录组织；新增 provider 应放入 `providers/` 并通过 adapter/registry 接入。
 

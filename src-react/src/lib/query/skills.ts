@@ -3,100 +3,79 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   skillsApi,
   type MoveSkillSourceInput,
-  type SetProjectSkillProjectInput,
-  type SetProjectSkillTargetInput,
   type SetSkillTargetInput,
 } from "@/lib/api/skills";
 import { isTauriRuntime } from "@/lib/runtime";
 import { projectKeys } from "@/lib/query/projects";
-import type { Skill } from "@/types";
+import type { ProjectCustomSkillIntent, Skill } from "@/types";
 
 export const skillKeys = {
   all: ["skills"] as const,
 };
 
-function replaceSkill(current: Skill[] | undefined, next: Skill): Skill[] {
-  if (!current) return [next];
-  return current.map((skill) => (skill.id === next.id ? next : skill));
+function replaceCatalog(queryClient: ReturnType<typeof useQueryClient>, skills: Skill[]) {
+  queryClient.setQueryData<Skill[]>(skillKeys.all, skills);
 }
 
 export function useSkillsQuery() {
-  const queryClient = useQueryClient();
   return useQuery({
     queryKey: skillKeys.all,
-    queryFn: async () => {
-      const skills = await skillsApi.scan();
-      void queryClient.invalidateQueries({ queryKey: projectKeys.all });
-      return skills;
-    },
+    queryFn: () => skillsApi.list(),
     enabled: isTauriRuntime(),
+  });
+}
+
+/** Scan (re-discover) skills: writes new/changed sources into the database
+ *  and returns the authoritative catalog. Use via the Refresh button, not
+ *  as a normal query — it acquires the mutation lock and modifies state. */
+export function useScanSkillsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => skillsApi.scan(),
+    onSuccess: (skills) => {
+      replaceCatalog(queryClient, skills);
+      // Scanning discovers new Project custom Skills, which affects
+      // incoming row counts visible on Project cards.
+      void queryClient.invalidateQueries({ queryKey: projectKeys.all });
+    },
   });
 }
 
 export function useSetSkillTargetMutation() {
   const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: (input: SetSkillTargetInput) => skillsApi.setTarget(input),
-    onSuccess: (skill) => {
-      queryClient.setQueryData<Skill[]>(skillKeys.all, (current) => replaceSkill(current, skill));
-    },
+    onSuccess: (skills) => replaceCatalog(queryClient, skills),
   });
 }
 
 export function useMoveSkillSourceMutation() {
   const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: (input: MoveSkillSourceInput) => skillsApi.moveSource(input),
-    onSuccess: (skill) => {
-      queryClient.setQueryData<Skill[]>(skillKeys.all, (current) => replaceSkill(current, skill));
-    },
+    onSuccess: (skills) => replaceCatalog(queryClient, skills),
   });
 }
 
 export function useSetSkillDisabledMutation() {
   const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: ({ id, disabled }: { id: string; disabled: boolean }) =>
       skillsApi.setDisabled(id, disabled),
-    onSuccess: (skill) => {
-      queryClient.setQueryData<Skill[]>(skillKeys.all, (current) => replaceSkill(current, skill));
-    },
+    onSuccess: (skills) => replaceCatalog(queryClient, skills),
   });
 }
 
-/** Cross-Project propagation mutations return the full skill list (projection
- *  rows are derived server-side), so they replace the whole cache and also
- *  invalidate the Project list — incoming rows change Project skill counts. */
-function setFullSkillList(_current: Skill[] | undefined, next: Skill[]): Skill[] {
-  return next;
-}
-
-export function useSetProjectSkillProjectMutation() {
+/** The sole Project custom Skill write adapter. Core owns identity, default
+ * Agent selection, fan-out, withdrawal, compensation, and the resulting eager
+ * read model; the hook only installs the authoritative catalog. */
+export function useApplyProjectCustomSkillIntentMutation() {
   const queryClient = useQueryClient();
-
   return useMutation({
-    mutationFn: (input: SetProjectSkillProjectInput) => skillsApi.setProjectSkillProject(input),
-    onSuccess: (skills) => {
-      queryClient.setQueryData<Skill[]>(skillKeys.all, (current) =>
-        setFullSkillList(current, skills),
-      );
-      void queryClient.invalidateQueries({ queryKey: projectKeys.all });
-    },
-  });
-}
-
-export function useSetProjectSkillTargetMutation() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (input: SetProjectSkillTargetInput) => skillsApi.setProjectSkillTarget(input),
-    onSuccess: (skills) => {
-      queryClient.setQueryData<Skill[]>(skillKeys.all, (current) =>
-        setFullSkillList(current, skills),
-      );
+    mutationFn: (intent: ProjectCustomSkillIntent) =>
+      skillsApi.applyProjectCustomIntent(intent),
+    onSuccess: (result) => {
+      replaceCatalog(queryClient, result.skills);
       void queryClient.invalidateQueries({ queryKey: projectKeys.all });
     },
   });

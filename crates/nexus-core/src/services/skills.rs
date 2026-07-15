@@ -2,10 +2,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -13,6 +13,7 @@ use crate::{
     database::Database,
     error::{AppError, AppResult},
     services::agent_capabilities::{agent_capability_surfaces, AgentCapabilitySurface},
+    services::app_config::AppConfigService,
     services::distribution::{self, MatrixSource},
     services::paths::{self, path_to_string},
     services::projects,
@@ -23,52 +24,114 @@ use crate::{
     services::util::{now_epoch_seconds, require_agent, required_trimmed},
 };
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Skill {
+pub struct ProjectRef {
     pub id: String,
     pub name: String,
-    pub scope: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSummary {
+    pub skill_id: String,
+    pub name: String,
     pub desc: String,
     pub path: String,
     pub disabled: bool,
-    pub cells: BTreeMap<String, String>,
-    /// Canonical source kind: `agent` (owned by a fixed Agent skills dir) or
-    /// `project_custom` (from a Project custom_skills_dir, no Agent source).
-    pub source_kind: String,
-    /// Owning Agent for `source_kind = agent`; `None` for `project_custom`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_agent: Option<String>,
-    /// Canonical backend `skills.id` for a projection row. Present only on
-    /// incoming target-Project rows, where [`Skill::id`] is a composite display
-    /// id (`{skill_id}::project::{target_project_id}`) used as a React key.
-    /// Mutations on a projection row must pass this canonical id, not `id`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub canonical_skill_id: Option<String>,
-    /// `Some("project")` on an incoming target-Project projection row; `None`
-    /// on canonical rows. Distinguishes a foreign Skill row (rendered with a
-    /// sourceless Agent Matrix driven by `skill_project_distributions`) from
-    /// the source Project custom Skill row.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub placement_scope: Option<String>,
-    /// Target Project id for an incoming projection row. The row is scoped to
-    /// this Project so `ProjectDetailView` / the Skill Project tab group it
-    /// under the target Project.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub placement_project_id: Option<String>,
-    /// Source Project id for an incoming projection row, used by the UI to
-    /// render the `Project source` tooltip ("Linked from Project custom source
-    /// · <source Project name> · <canonical path>"). Equals the canonical
-    /// Skill's `project_id`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_project_id: Option<String>,
 }
 
-/// Source kind discriminants stored in `skills.source_kind`.
-const SOURCE_KIND_AGENT: &str = "agent";
-const SOURCE_KIND_PROJECT_CUSTOM: &str = "project_custom";
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentCellRole {
+    Source,
+    Target,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlacementCellRole {
+    Target,
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum SkillContext {
+    Global,
+    Project { project: ProjectRef },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ProjectCustomDestinationState {
+    Global {
+        cells: BTreeMap<String, PlacementCellRole>,
+    },
+    Project {
+        project: ProjectRef,
+        cells: BTreeMap<String, PlacementCellRole>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum SkillRow {
+    AgentCanonical {
+        row_key: String,
+        skill: SkillSummary,
+        context: SkillContext,
+        source_agent: String,
+        cells: BTreeMap<String, AgentCellRole>,
+    },
+    ProjectCustomCanonical {
+        row_key: String,
+        skill: SkillSummary,
+        source_project: ProjectRef,
+        destinations: Vec<ProjectCustomDestinationState>,
+    },
+    ProjectCustomIncoming {
+        row_key: String,
+        skill: SkillSummary,
+        source_project: ProjectRef,
+        target_project: ProjectRef,
+        cells: BTreeMap<String, PlacementCellRole>,
+    },
+}
+
+impl SkillRow {
+    pub fn row_key(&self) -> &str {
+        match self {
+            Self::AgentCanonical { row_key, .. }
+            | Self::ProjectCustomCanonical { row_key, .. }
+            | Self::ProjectCustomIncoming { row_key, .. } => row_key,
+        }
+    }
+
+    pub fn skill(&self) -> &SkillSummary {
+        match self {
+            Self::AgentCanonical { skill, .. }
+            | Self::ProjectCustomCanonical { skill, .. }
+            | Self::ProjectCustomIncoming { skill, .. } => skill,
+        }
+    }
+}
+
+pub(crate) const SOURCE_KIND_AGENT: &str = "agent";
+pub(crate) const SOURCE_KIND_PROJECT_CUSTOM: &str = "project_custom";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,46 +148,49 @@ pub struct MoveSkillSourceInput {
     pub agent: String,
 }
 
-/// Source-side: propagate a `project_custom` Skill to (or cancel it from) a
-/// target Project. Enabling places a managed placement into the target
-/// Project's default entry Agent project skills dir; cancelling removes every
-/// Agent placement for that target Project.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetProjectSkillProjectInput {
-    pub skill_id: String,
-    pub target_project_id: String,
-    pub default_agent: String,
-    pub enabled: bool,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ProjectCustomSkillDestination {
+    Global,
+    Project { project_id: String },
 }
 
-/// Target-side: toggle a single Agent placement inside an incoming target
-/// Project Skill row (the projection row's Agent Matrix cell).
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetProjectSkillTargetInput {
-    pub skill_id: String,
-    pub target_project_id: String,
-    pub agent: String,
-    pub enabled: bool,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ProjectCustomSkillIntent {
+    SetTargetEnabled {
+        skill_id: String,
+        destination: ProjectCustomSkillDestination,
+        enabled: bool,
+    },
+    SetAgentPlacement {
+        skill_id: String,
+        destination: ProjectCustomSkillDestination,
+        agent: String,
+        enabled: bool,
+    },
 }
 
-/// One row of the `skill_project_distributions` projection query.
-struct ProjectionRow {
-    skill_id: String,
-    target_project_id: String,
-    agent: String,
-    role: String,
-    name: String,
-    desc: String,
-    canonical_path: String,
-    disabled: bool,
-    source_project_id: Option<String>,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCustomSkillMutationResult {
+    pub changed: bool,
+    pub skills: Vec<SkillRow>,
 }
 
 #[derive(Clone)]
 pub struct SkillService {
     db: Arc<Database>,
+    app_config: AppConfigService,
+    mutation_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Clone)]
@@ -180,144 +246,21 @@ struct SkillMetadata {
 }
 
 impl SkillService {
-    pub fn new(db: Arc<Database>) -> Self {
-        Self { db }
-    }
-
-    pub fn list_skills(&self) -> AppResult<Vec<Skill>> {
-        let conn = self.db.connection()?;
-        let mut stmt = conn.prepare(
-            r#"
-            SELECT
-                s.id,
-                s.name,
-                s.scope,
-                s.project_id,
-                COALESCE(s.description, ''),
-                s.canonical_path,
-                s.disabled,
-                s.source_kind,
-                s.source_agent
-            FROM skills s
-            LEFT JOIN projects p ON p.id = s.project_id
-            ORDER BY
-                s.scope,
-                p.sort_index IS NULL,
-                p.sort_index,
-                p.created_at,
-                p.name,
-                s.name,
-                s.canonical_path
-            "#,
-        )?;
-        let rows = stmt.query_map([], |row| skill_from_row(row, &conn))?;
-        let mut skills = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(AppError::from)?;
-        drop(stmt);
-        self.append_project_projection_rows(&conn, &mut skills)?;
-        Ok(skills)
-    }
-
-    /// Append target-Project projection rows for `project_custom` Skills,
-    /// including placements back into the source Project. Each group of
-    /// `skill_project_distributions` rows for one `(skill_id, target_project_id)`
-    /// with at least one live `target` becomes one projection `Skill` row,
-    /// scoped to the target Project so the Project detail / Skill Project tab
-    /// surface it there. Cells come only from `skill_project_distributions`
-    /// (`target` / `none`, no `source`); the canonical `id`/path/source come
-    /// from the canonical Skill row.
-    fn append_project_projection_rows(
-        &self,
-        conn: &rusqlite::Connection,
-        skills: &mut Vec<Skill>,
-    ) -> AppResult<()> {
-        let mut stmt = conn.prepare(
-            r#"
-            SELECT
-                spd.skill_id,
-                spd.target_project_id,
-                spd.agent,
-                spd.role,
-                s.name,
-                COALESCE(s.description, ''),
-                s.canonical_path,
-                s.disabled,
-                s.project_id AS source_project_id
-            FROM skill_project_distributions spd
-            JOIN skills s ON s.id = spd.skill_id
-            WHERE s.source_kind = 'project_custom'
-            ORDER BY
-                s.name,
-                s.canonical_path,
-                spd.target_project_id
-            "#,
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(ProjectionRow {
-                skill_id: row.get(0)?,
-                target_project_id: row.get(1)?,
-                agent: row.get(2)?,
-                role: row.get(3)?,
-                name: row.get(4)?,
-                desc: row.get(5)?,
-                canonical_path: row.get(6)?,
-                disabled: row.get::<_, i64>(7)? != 0,
-                source_project_id: row.get(8)?,
-            })
-        })?;
-        let rows = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(AppError::from)?;
-        drop(stmt);
-
-        // Group consecutive rows by (skill_id, target_project_id) — the ORDER BY
-        // above keeps them contiguous.
-        let mut iter = rows.into_iter().peekable();
-        while let Some(first) = iter.next() {
-            let mut cells = distribution::empty_cells();
-            if first.role == "target" {
-                cells.insert(first.agent.clone(), "target".to_string());
-            }
-            let mut has_target = first.role == "target";
-            while iter.peek().is_some_and(|next| {
-                next.skill_id == first.skill_id && next.target_project_id == first.target_project_id
-            }) {
-                let next = iter.next().unwrap();
-                if next.role == "target" {
-                    cells.insert(next.agent.clone(), "target".to_string());
-                    has_target = true;
-                } else {
-                    cells.insert(next.agent.clone(), "none".to_string());
-                }
-            }
-            if !has_target {
-                continue;
-            }
-
-            let display_id = format!("{}::project::{}", first.skill_id, first.target_project_id);
-            skills.push(Skill {
-                id: display_id,
-                cells,
-                name: first.name,
-                scope: "project".to_string(),
-                project_id: Some(first.target_project_id.clone()),
-                desc: first.desc,
-                path: paths::collapse_home(&first.canonical_path),
-                disabled: first.disabled,
-                source_kind: SOURCE_KIND_PROJECT_CUSTOM.to_string(),
-                source_agent: None,
-                canonical_skill_id: Some(first.skill_id.clone()),
-                placement_scope: Some("project".to_string()),
-                placement_project_id: Some(first.target_project_id.clone()),
-                source_project_id: first.source_project_id,
-            });
+    pub fn new(db: Arc<Database>, app_config: AppConfigService) -> Self {
+        Self {
+            db,
+            app_config,
+            mutation_lock: Arc::new(Mutex::new(())),
         }
-
-        Ok(())
     }
 
-    pub fn scan_skills(&self) -> AppResult<Vec<Skill>> {
+    pub fn list_skills(&self) -> AppResult<Vec<SkillRow>> {
+        let conn = self.db.connection()?;
+        super::project_custom_skill_propagation::catalog_from_connection(&conn)
+    }
+
+    pub fn scan_skills(&self) -> AppResult<Vec<SkillRow>> {
+        let _guard = self.lock_mutations()?;
         let projects = self.list_project_roots()?;
         let mut sources = Vec::new();
 
@@ -437,7 +380,8 @@ impl SkillService {
         Ok(())
     }
 
-    pub fn move_skill_source(&self, input: MoveSkillSourceInput) -> AppResult<Skill> {
+    pub fn move_skill_source(&self, input: MoveSkillSourceInput) -> AppResult<Vec<SkillRow>> {
+        let _guard = self.lock_mutations()?;
         let skill_id = required_trimmed(&input.skill_id, "skill id")?;
         let target_agent = require_agent(required_trimmed(&input.agent, "agent")?)?;
         if target_agent.skill.is_none() {
@@ -456,7 +400,7 @@ impl SkillService {
 
         let source_agent = require_agent(context.source_agent.as_deref().unwrap_or_default())?;
         if source_agent.name == target_agent.name {
-            return self.get_skill(skill_id);
+            return self.list_skills();
         }
 
         let old_canonical_path = context.canonical_path;
@@ -527,22 +471,24 @@ impl SkillService {
         }
         db_result?;
 
-        self.get_skill(skill_id)
+        self.list_skills()
     }
 
-    pub fn set_skill_target(&self, input: SetSkillTargetInput) -> AppResult<Skill> {
+    pub fn set_skill_target(&self, input: SetSkillTargetInput) -> AppResult<Vec<SkillRow>> {
+        let _guard = self.lock_mutations()?;
         let skill_id = required_trimmed(&input.skill_id, "skill id")?;
         let target_agent = require_agent(required_trimmed(&input.agent, "agent")?)?;
         let context = self.skill_target_context(skill_id)?;
-        // An agent-sourced skill cannot toggle its own source cell. A Project custom
-        // skill has no Agent source, so every Agent is a valid Global placement target.
-        if context.source_kind == SOURCE_KIND_AGENT {
-            let source_agent = require_agent(context.source_agent.as_deref().unwrap_or_default())?;
-            if source_agent.name == target_agent.name {
-                return Err(AppError::Validation(
-                    "source agent cannot be toggled as a target".to_string(),
-                ));
-            }
+        if context.source_kind != SOURCE_KIND_AGENT {
+            return Err(AppError::Validation(
+                "Project custom Skills require a propagation intent".to_string(),
+            ));
+        }
+        let source_agent = require_agent(context.source_agent.as_deref().unwrap_or_default())?;
+        if source_agent.name == target_agent.name {
+            return Err(AppError::Validation(
+                "source agent cannot be toggled as a target".to_string(),
+            ));
         }
 
         let target_path = target_path_for_parts(
@@ -569,186 +515,19 @@ impl SkillService {
             None,
         )?;
 
-        self.get_skill(skill_id)
-    }
-
-    /// Propagate a `project_custom` Skill to (or cancel it from) a target
-    /// Project, including its source Project. Enabling places a managed
-    /// directory link at the target Project's default entry Agent project
-    /// skills dir; cancelling removes
-    /// every Agent placement for that target Project so the incoming row
-    /// disappears. Returns the full skill list so the UI can refetch
-    /// projection rows.
-    pub fn set_project_skill_project(
-        &self,
-        input: SetProjectSkillProjectInput,
-    ) -> AppResult<Vec<Skill>> {
-        let skill_id = required_trimmed(&input.skill_id, "skill id")?;
-        let target_project_id = required_trimmed(&input.target_project_id, "target project id")?;
-        let default_agent = require_agent(required_trimmed(&input.default_agent, "agent")?)?;
-        let context = self.project_skill_context(skill_id)?;
-
-        let target_root = self.project_root(target_project_id)?;
-        let target_path = project_target_path_for_skill(
-            &target_root.path,
-            &context.canonical_path,
-            default_agent,
-        )?;
-
-        if input.enabled {
-            distribution::write_target(
-                &self.db,
-                "skill_project_distributions",
-                "skill_id",
-                skill_id,
-                default_agent.name,
-                true,
-                &context.canonical_path,
-                &target_path,
-                "skill target path",
-                create_managed_directory_link,
-                remove_managed_directory_link_if_present,
-                Some(("target_project_id", target_project_id)),
-            )?;
-        } else {
-            self.remove_project_skill_placements(skill_id, target_project_id)?;
-        }
-
         self.list_skills()
     }
 
-    /// Toggle a single Agent placement inside an incoming target Project Skill
-    /// row. When the last `target` is removed the projection row naturally
-    /// disappears on the next `list_skills` (no group with a live target).
-    pub fn set_project_skill_target(
+    pub fn apply_project_custom_skill_intent(
         &self,
-        input: SetProjectSkillTargetInput,
-    ) -> AppResult<Vec<Skill>> {
-        let skill_id = required_trimmed(&input.skill_id, "skill id")?;
-        let target_project_id = required_trimmed(&input.target_project_id, "target project id")?;
-        let target_agent = require_agent(required_trimmed(&input.agent, "agent")?)?;
-        let context = self.project_skill_context(skill_id)?;
-
-        let target_root = self.project_root(target_project_id)?;
-        let target_path = project_target_path_for_skill(
-            &target_root.path,
-            &context.canonical_path,
-            target_agent,
-        )?;
-
-        distribution::write_target(
-            &self.db,
-            "skill_project_distributions",
-            "skill_id",
-            skill_id,
-            target_agent.name,
-            input.enabled,
-            &context.canonical_path,
-            &target_path,
-            "skill target path",
-            create_managed_directory_link,
-            remove_managed_directory_link_if_present,
-            Some(("target_project_id", target_project_id)),
-        )?;
-
-        self.list_skills()
+        intent: ProjectCustomSkillIntent,
+    ) -> AppResult<ProjectCustomSkillMutationResult> {
+        let _guard = self.lock_mutations()?;
+        super::project_custom_skill_propagation::apply_intent(&self.db, &self.app_config, intent)
     }
 
-    /// Remove every Agent placement for one (skill, target Project) pair:
-    /// drop the on-disk managed links first, then delete the distribution rows.
-    /// Used by source-side cancellation.
-    fn remove_project_skill_placements(
-        &self,
-        skill_id: &str,
-        target_project_id: &str,
-    ) -> AppResult<()> {
-        let targets: Vec<(String, String)> = {
-            let conn = self.db.connection()?;
-            let mut stmt = conn.prepare(
-                r#"
-                SELECT agent, target_path
-                FROM skill_project_distributions
-                WHERE skill_id = ?1 AND target_project_id = ?2 AND role = 'target'
-                "#,
-            )?;
-            let rows = stmt.query_map(params![skill_id, target_project_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-
-        let canonical_path = self.skill_canonical_path(skill_id)?;
-        for (_agent, target_path) in &targets {
-            let target = PathBuf::from(target_path);
-            // Removal is best-effort per placement; a missing link is not an error.
-            let _ = remove_managed_directory_link_if_present(&canonical_path, &target);
-        }
-
-        let conn = self.db.connection()?;
-        conn.execute(
-            r#"
-            DELETE FROM skill_project_distributions
-            WHERE skill_id = ?1 AND target_project_id = ?2
-            "#,
-            params![skill_id, target_project_id],
-        )?;
-        Ok(())
-    }
-
-    /// Context for Project propagation: the canonical Skill must be a
-    /// `project_custom` source rooted in a source Project. The target may be
-    /// that same source Project or another active Project.
-    fn project_skill_context(&self, skill_id: &str) -> AppResult<ProjectSkillContext> {
-        let conn = self.db.connection()?;
-        let row = conn
-            .query_row(
-                r#"
-                SELECT s.source_kind, s.project_id, s.canonical_path
-                FROM skills s
-                WHERE s.id = ?1
-                "#,
-                params![skill_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
-            )
-            .optional()?
-            .ok_or_else(|| AppError::Validation("skill was not found".to_string()))?;
-
-        let (source_kind, source_project_id, canonical_path) = row;
-        if source_kind != SOURCE_KIND_PROJECT_CUSTOM {
-            return Err(AppError::Validation(
-                "only Project custom Skills can be propagated to Project targets".to_string(),
-            ));
-        }
-        if source_project_id.is_none() {
-            return Err(AppError::Validation(
-                "skill has no source Project".to_string(),
-            ));
-        }
-
-        Ok(ProjectSkillContext {
-            canonical_path: PathBuf::from(canonical_path),
-        })
-    }
-
-    /// Fetch one active Project root by id. Returns a validation error if the
-    /// Project does not exist or is not active — cross-Project propagation
-    /// only targets active Projects.
-    fn project_root(&self, project_id: &str) -> AppResult<ProjectRoot> {
-        self.list_project_roots()?
-            .into_iter()
-            .find(|root| root.id == project_id)
-            .ok_or_else(|| {
-                AppError::Validation("target project was not found or is not active".to_string())
-            })
-    }
-
-    pub fn set_skill_disabled(&self, id: String, disabled: bool) -> AppResult<Skill> {
+    pub fn set_skill_disabled(&self, id: String, disabled: bool) -> AppResult<Vec<SkillRow>> {
+        let _guard = self.lock_mutations()?;
         let id = required_trimmed(&id, "skill id")?;
         let canonical_path = self.skill_canonical_path(id)?;
         let skill_file = canonical_path.join("SKILL.md");
@@ -756,10 +535,11 @@ impl SkillService {
         let next = set_disable_model_invocation(&original, disabled);
         fs::write(&skill_file, next)?;
 
-        let result = (|| -> AppResult<Skill> {
+        let result = (|| -> AppResult<Vec<SkillRow>> {
             let now = now_epoch_seconds()?;
-            let conn = self.db.connection()?;
-            let changed = conn.execute(
+            let mut conn = self.db.connection()?;
+            let tx = conn.transaction()?;
+            let changed = tx.execute(
                 r#"
                 UPDATE skills
                 SET disabled = ?2,
@@ -771,8 +551,9 @@ impl SkillService {
             if changed == 0 {
                 return Err(AppError::Validation("skill was not found".to_string()));
             }
-            drop(conn);
-            self.get_skill(id)
+            let catalog = super::project_custom_skill_propagation::catalog_from_connection(&tx)?;
+            tx.commit()?;
+            Ok(catalog)
         })();
 
         if result.is_err() {
@@ -796,25 +577,27 @@ impl SkillService {
 
     fn list_project_roots(&self) -> AppResult<Vec<ProjectRoot>> {
         let conn = self.db.connection()?;
-        let mut stmt = conn.prepare(
-            r#"
-            SELECT id, path, custom_skills_dirs
-            FROM projects
-            WHERE status = 'active'
-            ORDER BY sort_index IS NULL, sort_index, created_at, name
-            "#,
-        )?;
-        let rows = stmt.query_map([], |row| {
-            let path: String = row.get(1)?;
-            let custom_skills_dirs: String = row.get(2)?;
-            Ok(ProjectRoot {
-                id: row.get(0)?,
-                path: PathBuf::from(path),
+        let effective = projects::list_effective_projects(&conn)?;
+        let mut roots = Vec::with_capacity(effective.len());
+        for project in effective {
+            let custom_skills_dirs = conn.query_row(
+                "SELECT custom_skills_dirs FROM projects WHERE id = ?1",
+                [&project.id],
+                |row| row.get::<_, String>(0),
+            )?;
+            roots.push(ProjectRoot {
+                id: project.id,
+                path: project.path,
                 custom_dirs: projects::parse_dir_list(&custom_skills_dirs),
-            })
-        })?;
+            });
+        }
+        Ok(roots)
+    }
 
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    fn lock_mutations(&self) -> AppResult<std::sync::MutexGuard<'_, ()>> {
+        self.mutation_lock
+            .lock()
+            .map_err(|_| AppError::Internal("Skill mutation lock poisoned".to_string()))
     }
 
     fn replace_scanned_sources(&self, sources: Vec<SkillSource>) -> AppResult<()> {
@@ -931,22 +714,6 @@ impl SkillService {
         Ok(())
     }
 
-    fn get_skill(&self, id: &str) -> AppResult<Skill> {
-        let conn = self.db.connection()?;
-        conn.query_row(
-            r#"
-            SELECT id, name, scope, project_id, COALESCE(description, ''), canonical_path, disabled,
-                   source_kind, source_agent
-            FROM skills
-            WHERE id = ?1
-            "#,
-            params![id],
-            |row| skill_from_row(row, &conn),
-        )
-        .optional()?
-        .ok_or_else(|| AppError::Validation("skill was not found".to_string()))
-    }
-
     fn skill_target_context(&self, id: &str) -> AppResult<SkillTargetContext> {
         let conn = self.db.connection()?;
         conn.query_row(
@@ -1054,11 +821,6 @@ struct SkillTargetContext {
     canonical_path: PathBuf,
     source_kind: String,
     source_agent: Option<String>,
-}
-
-/// Context for Project propagation of a `project_custom` Skill.
-struct ProjectSkillContext {
-    canonical_path: PathBuf,
 }
 
 fn discover_skill_sources(
@@ -1223,45 +985,6 @@ fn target_path_for_parts(
         return Ok(None);
     };
     Ok(Some(project_path.join(skill.project_dir).join(dir_name)))
-}
-
-/// Target path for a cross-Project placement: the target Project's fixed Agent
-/// project skills dir (e.g. `<target_project>/.claude/skills/<skill>`). Never
-/// the target Project `custom_skills_dirs`, so a placement can never be
-/// mistaken for a new canonical source.
-fn project_target_path_for_skill(
-    target_project_path: &Path,
-    canonical_path: &Path,
-    agent: &AgentCapabilitySurface,
-) -> AppResult<PathBuf> {
-    let Some(skill) = agent.skill else {
-        return Err(AppError::Validation(format!(
-            "{} does not support skill placement",
-            agent.name
-        )));
-    };
-    let dir_name = skill_dir_name(canonical_path)?;
-    Ok(target_project_path.join(skill.project_dir).join(dir_name))
-}
-
-fn skill_from_row(row: &Row<'_>, conn: &rusqlite::Connection) -> rusqlite::Result<Skill> {
-    let id: String = row.get(0)?;
-    Ok(Skill {
-        cells: distribution::cells(conn, "skill_distributions", "skill_id", &id)?,
-        id,
-        name: row.get(1)?,
-        scope: row.get(2)?,
-        project_id: row.get(3)?,
-        desc: row.get(4)?,
-        path: paths::collapse_home(&row.get::<_, String>(5)?),
-        disabled: row.get::<_, i64>(6)? != 0,
-        source_kind: row.get(7)?,
-        source_agent: row.get(8)?,
-        canonical_skill_id: None,
-        placement_scope: None,
-        placement_project_id: None,
-        source_project_id: None,
-    })
 }
 
 fn skill_dir_name(path: &Path) -> AppResult<String> {

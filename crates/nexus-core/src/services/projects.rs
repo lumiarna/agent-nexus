@@ -38,7 +38,14 @@ const PROJECT_SELECT_COLUMNS: &str = r#"
     p.path,
     p.sessions_dir,
     NULL AS sessions_note,
-    (SELECT COUNT(*) FROM skills WHERE project_id = p.id) AS skills,
+    (
+        (SELECT COUNT(*) FROM skills WHERE project_id = p.id)
+        +
+        (SELECT COUNT(DISTINCT distribution.skill_id)
+         FROM skill_project_distributions distribution
+         WHERE distribution.target_project_id = p.id
+           AND distribution.role = 'target')
+    ) AS skills,
     (SELECT COUNT(*) FROM session_index WHERE project_id = p.id) AS sessions,
     0 AS sync,
     p.key,
@@ -98,6 +105,53 @@ pub struct ProjectDefaults {
     pub sessions_dir: String,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct EffectiveProject {
+    pub id: String,
+    pub name: String,
+    pub path: PathBuf,
+}
+
+/// Resolve the effective Project state used by both Project reads and
+/// Project-custom Skill propagation. A database `active` flag is necessary but
+/// not sufficient: the current Project Path must also resolve and exist.
+pub(crate) fn effective_project_path(status: &str, path: &str) -> Option<PathBuf> {
+    if status != "active" {
+        return None;
+    }
+    paths::resolve_local_path(path)
+        .ok()
+        .filter(|resolved| resolved.exists() && resolved.is_dir())
+}
+
+pub(crate) fn list_effective_projects(
+    conn: &rusqlite::Connection,
+) -> AppResult<Vec<EffectiveProject>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, name, status, path
+        FROM projects
+        ORDER BY sort_index IS NULL, sort_index, created_at, name
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    let mut projects = Vec::new();
+    for row in rows {
+        let (id, name, status, path) = row?;
+        if let Some(path) = effective_project_path(&status, &path) {
+            projects.push(EffectiveProject { id, name, path });
+        }
+    }
+    Ok(projects)
+}
+
 #[derive(Clone)]
 pub struct ProjectService {
     db: Arc<Database>,
@@ -122,12 +176,9 @@ impl ProjectService {
         let mut projects = rows.collect::<Result<Vec<_>, _>>()?;
 
         for project in &mut projects {
-            // `path` is collapsed to `~` for display; resolve it back before the
-            // on-disk staleness check (an unresolvable path counts as missing).
-            let exists = paths::resolve_local_path(&project.path)
-                .map(|path| path.exists())
-                .unwrap_or(false);
-            if project.status == "active" && !exists {
+            if project.status == "active"
+                && effective_project_path(&project.status, &project.path).is_none()
+            {
                 project.status = "stale".to_string();
             }
         }

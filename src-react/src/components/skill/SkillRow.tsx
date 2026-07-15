@@ -1,70 +1,56 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { MouseEvent } from "react";
-import { Globe, Folder, Check, Plus } from "lucide-react";
+import { Check, Folder, Globe, Plus } from "lucide-react";
 import { AgentLogo } from "@/components/ui/agent-logo";
 import { AgentMatrixCells, SourceBadge } from "@/components/ui/agent-icon";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalHeader } from "@/components/ui/modal";
 import { Toggle } from "@/components/ui/toggle";
-import { agentColor, isProjectCustomSkill, srcAgentOf } from "@/lib/tokens";
-import type { AgentName, Skill } from "@/types";
-import type { PropagationTarget } from "./propagation";
+import { agentColor, targetAgentsOf } from "@/lib/tokens";
+import type {
+  AgentName,
+  PlacementCells,
+  ProjectCustomDestinationState,
+  ProjectCustomSkillIntent,
+  Skill,
+} from "@/types";
 
 interface SkillRowProps {
   skill: Skill;
-  /** Which page the row is rendered in. In `project` view a Project custom
-   *  Skill that is the *source* shows a "Propagate to…" control; an *incoming*
-   *  target-Project projection row shows a sourceless Agent Matrix instead. */
   mode: "global" | "project";
-  /** Owning/source Project name — used in the Project custom source tooltip for
-   *  the source row. For an incoming projection row, pass the *source* Project
-   *  name via `sourceProjectName` instead. */
-  projectName?: string;
-  /** Source Project name for an incoming projection row (the Project the
-   *  canonical `Project custom source` lives in). Falls back to `projectName`. */
-  sourceProjectName?: string;
-  /** Enabled Agents in canonical order — narrows the rendered matrix columns. */
   agents?: AgentName[];
-  onToggleCell: (agent: AgentName, event: MouseEvent<HTMLSpanElement>) => void;
-  /** Toggle a single Agent placement inside an incoming target-Project row.
-   *  Required when the row is an incoming projection; the canonical
-   *  `onToggleCell` is used otherwise. */
-  onToggleProjectCell?: (agent: AgentName, event: MouseEvent<HTMLSpanElement>) => void;
+  onToggleAgentCell: (agent: AgentName, event: MouseEvent<HTMLSpanElement>) => void;
+  onProjectCustomIntent: (intent: ProjectCustomSkillIntent) => void;
   onToggleDmi: () => void;
-  /** Enable Global propagation for a Project custom Skill via the chosen entry Agent. */
-  onPropagateGlobal?: (entryAgent: AgentName) => void;
-  /** Remove every Global placement for a Project custom Skill. */
-  onUnpropagateGlobal?: () => void;
-  /** Source-side: propagate to (or cancel) a target Project. */
-  onPropagateProject?: (projectId: string, defaultAgent: AgentName) => void;
-  onUnpropagateProject?: (projectId: string) => void;
-  /** Modal target list for a source Project custom Skill (Global + Projects),
-   *  computed by the parent from the full skill list. */
-  propagationTargets?: PropagationTarget[];
   onOpen: () => void;
   onReveal: () => void;
 }
 
-/** Source-row "Propagate to…" control: a button with an enabled-target count
- *  badge that opens a modal listing Global + other active Projects with their
- *  current state and an Add/Remove action each. One target per click — no
- *  multi-select batch propagation. */
+function destinationIdentity(target: ProjectCustomDestinationState) {
+  return target.kind === "global"
+    ? ({ kind: "global" } as const)
+    : ({ kind: "project", projectId: target.project.id } as const);
+}
+
+function destinationName(target: ProjectCustomDestinationState): string {
+  return target.kind === "global" ? "Global" : target.project.name;
+}
+
+function hasTarget(cells: PlacementCells): boolean {
+  return Object.values(cells).some((role) => role === "target");
+}
+
 function PropagateTo({
+  skillId,
   targets,
-  onPropagateGlobal,
-  onUnpropagateGlobal,
-  onPropagateProject,
-  onUnpropagateProject,
+  onIntent,
 }: {
-  targets: PropagationTarget[];
-  onPropagateGlobal?: (entryAgent: AgentName) => void;
-  onUnpropagateGlobal?: () => void;
-  onPropagateProject?: (projectId: string, defaultAgent: AgentName) => void;
-  onUnpropagateProject?: (projectId: string) => void;
+  skillId: string;
+  targets: ProjectCustomDestinationState[];
+  onIntent: (intent: ProjectCustomSkillIntent) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const enabledCount = targets.filter((t) => t.enabled).length;
-
+  const enabledCount = targets.filter((target) => hasTarget(target.cells)).length;
   return (
     <div className="relative flex flex-col items-center gap-1.5">
       <button
@@ -81,12 +67,10 @@ function PropagateTo({
       </span>
       {open ? (
         <PropagateModal
+          skillId={skillId}
           targets={targets}
+          onIntent={onIntent}
           onClose={() => setOpen(false)}
-          onPropagateGlobal={onPropagateGlobal}
-          onUnpropagateGlobal={onUnpropagateGlobal}
-          onPropagateProject={onPropagateProject}
-          onUnpropagateProject={onUnpropagateProject}
         />
       ) : null}
     </div>
@@ -94,23 +78,18 @@ function PropagateTo({
 }
 
 function PropagateModal({
+  skillId,
   targets,
+  onIntent,
   onClose,
-  onPropagateGlobal,
-  onUnpropagateGlobal,
-  onPropagateProject,
-  onUnpropagateProject,
 }: {
-  targets: PropagationTarget[];
+  skillId: string;
+  targets: ProjectCustomDestinationState[];
+  onIntent: (intent: ProjectCustomSkillIntent) => void;
   onClose: () => void;
-  onPropagateGlobal?: (entryAgent: AgentName) => void;
-  onUnpropagateGlobal?: () => void;
-  onPropagateProject?: (projectId: string, defaultAgent: AgentName) => void;
-  onUnpropagateProject?: (projectId: string) => void;
 }) {
-  const global = targets.filter((t) => t.kind === "global");
-  const projects = targets.filter((t) => t.kind === "project");
-
+  const global = targets.filter((target) => target.kind === "global");
+  const projects = targets.filter((target) => target.kind === "project");
   return (
     <Modal open onClose={onClose} className="w-[460px]">
       <ModalHeader
@@ -124,39 +103,43 @@ function PropagateModal({
             <ModalTargetRow
               key="global"
               target={target}
-              pathPreview="~/.agents/skills (Global placement)"
-              onToggle={
-                target.enabled
-                  ? () => onUnpropagateGlobal?.()
-                  : () => onPropagateGlobal?.(target.defaultAgent)
+              onToggle={() =>
+                onIntent({
+                  kind: "setTargetEnabled",
+                  skillId,
+                  destination: destinationIdentity(target),
+                  enabled: !hasTarget(target.cells),
+                })
               }
             />
           ))}
         </ModalSection>
-
         <ModalSection label="Projects" icon={<Folder size={12} />}>
           {projects.length === 0 ? (
             <div className="px-2 py-2 text-[11px] text-[#b3a999]">
-              No other active Projects.
+              No effectively active Projects.
             </div>
           ) : (
             projects.map((target) => (
               <ModalTargetRow
-                key={target.projectId}
+                key={target.kind === "project" ? target.project.id : "global"}
                 target={target}
-                pathPreview={`${target.projectName}/.claude/skills (project placement)`}
-                onToggle={
-                  target.enabled
-                    ? () => onUnpropagateProject?.(target.projectId!)
-                    : () => onPropagateProject?.(target.projectId!, target.defaultAgent)
-                }              />
+                onToggle={() =>
+                  onIntent({
+                    kind: "setTargetEnabled",
+                    skillId,
+                    destination: destinationIdentity(target),
+                    enabled: !hasTarget(target.cells),
+                  })
+                }
+              />
             ))
           )}
         </ModalSection>
       </div>
       <div className="border-t border-nexus-panel px-5 py-3 text-[10.5px] text-[#b3a999]">
-        One target per click · target Agent uses the Settings default · a target
-        path that already exists is not overwritten
+        One target per click · entry Agent is resolved from current Settings · conflicting paths
+        are never overwritten
       </div>
     </Modal>
   );
@@ -184,30 +167,34 @@ function ModalSection({
 
 function ModalTargetRow({
   target,
-  pathPreview,
   onToggle,
 }: {
-  target: PropagationTarget;
-  pathPreview: string;
+  target: ProjectCustomDestinationState;
   onToggle: () => void;
 }) {
+  const enabled = hasTarget(target.cells);
+  const targetAgents = targetAgentsOf(target.cells);
   return (
     <div className="flex items-center justify-between gap-3 rounded-[10px] px-2 py-2 hover:bg-nexus-sand">
       <div className="min-w-0">
-        <div className="text-[12px] font-semibold text-nexus-ink">{target.projectName}</div>
-        <div className="mt-0.5 font-mono text-[10.5px] text-[#a99a89]">{pathPreview}</div>
+        <div className="text-[12px] font-semibold text-nexus-ink">
+          {destinationName(target)}
+        </div>
+        <div className="mt-0.5 font-mono text-[10.5px] text-[#a99a89]">
+          Managed {target.kind === "global" ? "Global" : "Project"} placement
+        </div>
         <div className="mt-1 flex items-center gap-1.5">
-          {target.enabled ? (
+          {enabled ? (
             <>
               <span className="text-[10.5px] font-semibold text-nexus-good">On ·</span>
-              {target.targetAgents.map((a) => (
+              {targetAgents.map((agent) => (
                 <span
-                  key={a}
-                  title={a}
+                  key={agent}
+                  title={agent}
                   className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px]"
-                  style={{ background: agentColor(a) + "26" }}
+                  style={{ background: agentColor(agent) + "26" }}
                 >
-                  <AgentLogo agent={a} className="h-[11px] w-[11px]" />
+                  <AgentLogo agent={agent} className="h-[11px] w-[11px]" />
                 </span>
               ))}
             </>
@@ -217,12 +204,12 @@ function ModalTargetRow({
         </div>
       </div>
       <Button
-        variant={target.enabled ? "subtle" : "primary"}
+        variant={enabled ? "subtle" : "primary"}
         size="sm"
         className="px-3"
         onClick={onToggle}
       >
-        {target.enabled ? (
+        {enabled ? (
           <>
             <Check size={12} /> Remove
           </>
@@ -236,68 +223,82 @@ function ModalTargetRow({
   );
 }
 
-/** One Skill table row — shared by the Skill page and Project detail.
- *  Columns: Skill · Distribution · Disable invoke · Source file. */
 export function SkillRow({
   skill,
   mode,
-  projectName,
-  sourceProjectName,
   agents,
-  onToggleCell,
-  onToggleProjectCell,
+  onToggleAgentCell,
+  onProjectCustomIntent,
   onToggleDmi,
-  onPropagateGlobal,
-  onUnpropagateGlobal,
-  onPropagateProject,
-  onUnpropagateProject,
-  propagationTargets,
   onOpen,
   onReveal,
 }: SkillRowProps) {
-  const isCustom = isProjectCustomSkill(skill);
-  const isIncoming = isCustom && skill.placementScope === "project";
-  const isSourceCustomRow = isCustom && !isIncoming && mode === "project";
-  const sourceTooltip = isCustom
-    ? `Linked from Project custom source${
-        (sourceProjectName ?? projectName) ? ` · ${sourceProjectName ?? projectName}` : ""
-      } · ${skill.path}`
-    : undefined;
+  const summary = skill.skill;
+  const sourceTooltip =
+    skill.kind === "agentCanonical"
+      ? undefined
+      : `Linked from Project custom source · ${skill.sourceProject.name} · ${summary.path}`;
 
-  const distributionCell = useMemo(() => {
-    if (isSourceCustomRow && propagationTargets && propagationTargets.length > 0) {
-      return (
-        <PropagateTo
-          targets={propagationTargets}
-          onPropagateGlobal={onPropagateGlobal}
-          onUnpropagateGlobal={onUnpropagateGlobal}
-          onPropagateProject={onPropagateProject}
-          onUnpropagateProject={onUnpropagateProject}
+  let distribution: React.ReactNode;
+  switch (skill.kind) {
+    case "agentCanonical":
+      distribution = (
+        <AgentMatrixCells
+          cells={skill.cells}
+          agents={agents}
+          onToggle={onToggleAgentCell}
         />
       );
+      break;
+    case "projectCustomIncoming":
+      distribution = (
+        <AgentMatrixCells
+          cells={skill.cells}
+          agents={agents}
+          sourceless
+          onToggle={(agent) =>
+            onProjectCustomIntent({
+              kind: "setAgentPlacement",
+              skillId: summary.skillId,
+              destination: { kind: "project", projectId: skill.targetProject.id },
+              agent,
+              enabled: skill.cells[agent] !== "target",
+            })
+          }
+        />
+      );
+      break;
+    case "projectCustomCanonical": {
+      if (mode === "project") {
+        distribution = (
+          <PropagateTo
+            skillId={summary.skillId}
+            targets={skill.destinations}
+            onIntent={onProjectCustomIntent}
+          />
+        );
+      } else {
+        const global = skill.destinations.find((target) => target.kind === "global");
+        distribution = global ? (
+          <AgentMatrixCells
+            cells={global.cells}
+            agents={agents}
+            sourceless
+            onToggle={(agent) =>
+              onProjectCustomIntent({
+                kind: "setAgentPlacement",
+                skillId: summary.skillId,
+                destination: { kind: "global" },
+                agent,
+                enabled: global.cells[agent] !== "target",
+              })
+            }
+          />
+        ) : null;
+      }
+      break;
     }
-    return (
-      <AgentMatrixCells
-        cells={skill.cells}
-        agents={agents}
-        onToggle={isIncoming ? (onToggleProjectCell ?? onToggleCell) : onToggleCell}
-        sourceless={isCustom}
-      />
-    );
-  }, [
-    isSourceCustomRow,
-    isIncoming,
-    isCustom,
-    propagationTargets,
-    onPropagateGlobal,
-    onUnpropagateGlobal,
-    onPropagateProject,
-    onUnpropagateProject,
-    skill.cells,
-    agents,
-    onToggleCell,
-    onToggleProjectCell,
-  ]);
+  }
 
   return (
     <div
@@ -306,21 +307,21 @@ export function SkillRow({
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-[14px] font-bold text-nexus-ink">{skill.name}</span>
-          {isCustom ? (
-            <SourceBadge label="Project source" title={sourceTooltip} />
+          <span className="text-[14px] font-bold text-nexus-ink">{summary.name}</span>
+          {skill.kind === "agentCanonical" ? (
+            <SourceBadge agent={skill.sourceAgent} />
           ) : (
-            <SourceBadge agent={skill.sourceAgent ?? srcAgentOf(skill.cells)} />
+            <SourceBadge label="Project source" title={sourceTooltip} />
           )}
         </div>
         <div className="mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] text-[#a99a89]">
-          {skill.desc}
+          {summary.desc}
         </div>
       </div>
-      {distributionCell}
+      {distribution}
       <div className="flex flex-col items-center gap-1">
-        <Toggle checked={skill.disabled} tone="warn" onChange={onToggleDmi} />
-        <span className="text-[10px] text-[#b3a999]">{skill.disabled ? "On" : "Off"}</span>
+        <Toggle checked={summary.disabled} tone="warn" onChange={onToggleDmi} />
+        <span className="text-[10px] text-[#b3a999]">{summary.disabled ? "On" : "Off"}</span>
       </div>
       <div className="flex flex-col items-end gap-[5px]">
         <span

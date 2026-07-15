@@ -3,12 +3,13 @@ use std::{env, ffi::OsString, fs, path::Path, sync::Arc};
 use nexus_core::{
     database::Database,
     services::{
+        app_config::AppConfigService,
         paths,
         project_symlinks::ProjectSymlinkInventory,
         projects::ProjectService,
         prompts::{PromptService, SetPromptTargetInput},
         skills::{
-            SetProjectSkillProjectInput, SetProjectSkillTargetInput, SetSkillTargetInput,
+            ProjectCustomSkillDestination, ProjectCustomSkillIntent, SetSkillTargetInput, SkillRow,
             SkillService,
         },
         symlink::create_symlink_placement,
@@ -176,7 +177,7 @@ fn lists_project_symlinks_by_project_display_order() {
 fn skips_project_skill_and_prompt_distribution_links() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let skills = SkillService::new(db.clone());
+    let skills = SkillService::new(db.clone(), AppConfigService::new(db.clone()));
     let prompts = PromptService::new(db.clone());
     let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
@@ -193,11 +194,17 @@ fn skips_project_skill_and_prompt_distribution_links() {
         .scan_skills()
         .expect("scan project skill")
         .into_iter()
-        .find(|skill| skill.project_id.as_deref() == Some(project.id.as_str()))
+        .find(|skill| matches!(
+            skill,
+            SkillRow::AgentCanonical {
+                context: nexus_core::services::skills::SkillContext::Project { project: row_project },
+                ..
+            } if row_project.id == project.id
+        ))
         .expect("find project skill");
     skills
         .set_skill_target(SetSkillTargetInput {
-            skill_id: skill.id,
+            skill_id: skill.skill().skill_id.clone(),
             agent: "CodeX".to_string(),
             enabled: true,
         })
@@ -245,7 +252,7 @@ fn skips_project_skill_and_prompt_distribution_links() {
 fn skips_project_custom_skill_propagation_placements_but_keeps_replacements_and_unrelated_links() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
-    let skills = SkillService::new(db.clone());
+    let skills = SkillService::new(db.clone(), AppConfigService::new(db.clone()));
     let inventory = ProjectSymlinkInventory::new(db);
     let root = TempDir::new().expect("create temp dir");
     let home = root.path().join("home");
@@ -270,44 +277,29 @@ fn skips_project_custom_skill_propagation_placements_but_keeps_replacements_and_
         .scan_skills()
         .expect("scan project custom skill")
         .into_iter()
-        .find(|skill| skill.source_kind == "project_custom")
+        .find(|skill| matches!(skill, SkillRow::ProjectCustomCanonical { .. }))
         .expect("find project custom skill")
-        .id;
+        .skill()
+        .skill_id
+        .clone();
 
     // Propagate to both the source/current Project and another Project, then
-    // fan each placement out to a second Agent.
-    skills
-        .set_project_skill_project(SetProjectSkillProjectInput {
-            skill_id: skill_id.clone(),
-            target_project_id: source_project.id.clone(),
-            default_agent: "Claude Code".to_string(),
-            enabled: true,
-        })
-        .expect("propagate to source project");
-    skills
-        .set_project_skill_target(SetProjectSkillTargetInput {
-            skill_id: skill_id.clone(),
-            target_project_id: source_project.id.clone(),
-            agent: "CodeX".to_string(),
-            enabled: true,
-        })
-        .expect("fan out source project placement");
-    skills
-        .set_project_skill_project(SetProjectSkillProjectInput {
-            skill_id: skill_id.clone(),
-            target_project_id: target_project.id.clone(),
-            default_agent: "Generic Agent".to_string(),
-            enabled: true,
-        })
-        .expect("propagate to other project");
-    skills
-        .set_project_skill_target(SetProjectSkillTargetInput {
-            skill_id,
-            target_project_id: target_project.id.clone(),
-            agent: "Pi".to_string(),
-            enabled: true,
-        })
-        .expect("fan out other project placement");
+    // fan each placement out to a second Agent through the single typed intent.
+    for (project_id, agent) in [
+        (source_project.id.clone(), "Claude Code"),
+        (source_project.id.clone(), "CodeX"),
+        (target_project.id.clone(), "Generic Agent"),
+        (target_project.id.clone(), "Pi"),
+    ] {
+        skills
+            .apply_project_custom_skill_intent(ProjectCustomSkillIntent::SetAgentPlacement {
+                skill_id: skill_id.clone(),
+                destination: ProjectCustomSkillDestination::Project { project_id },
+                agent: agent.to_string(),
+                enabled: true,
+            })
+            .expect("set Project custom Skill placement");
+    }
 
     let unrelated_source = root.path().join("unrelated-source");
     fs::create_dir_all(&unrelated_source).expect("create unrelated source");

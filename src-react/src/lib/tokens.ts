@@ -2,7 +2,7 @@
 // tints with alpha suffixes, quota thresholds) and therefore consumed via inline
 // `style`, not Tailwind classes. Mirrors prototype/nexus-data.js.
 
-import type { AgentName, CellRole, Cells, ProviderStatus, Skill } from "@/types";
+import type { AgentName, CellRole, Cells, ProviderStatus } from "@/types";
 import { AGENTS, AGENT_ORDER } from "@/config/agents";
 
 export { AGENT_ORDER } from "@/config/agents";
@@ -63,20 +63,10 @@ export function srcAgentOf(cells: Cells): AgentName {
   return AGENT_ORDER[0];
 }
 
-/** A Project custom Skill has its canonical source outside any Agent skills dir,
- *  so its Agent Matrix row carries no `source` cell. */
-export function isProjectCustomSkill(skill: Pick<Skill, "sourceKind">): boolean {
-  return skill.sourceKind === "project_custom";
-}
-
-/** Whether a Skill currently has at least one Agent placement (target cell).
- *  For a Project custom Skill this means it has been propagated to Global. */
-export function hasGlobalPlacement(cells: Cells): boolean {
-  return AGENT_ORDER.some((a) => cells[a] === "target");
-}
-
 /** Agents currently holding a placement (target cell), in canonical order. */
-export function targetAgentsOf(cells: Cells): AgentName[] {
+export function targetAgentsOf(
+  cells: Record<AgentName, "source" | "target" | "none">,
+): AgentName[] {
   return AGENT_ORDER.filter((a) => cells[a] === "target");
 }
 

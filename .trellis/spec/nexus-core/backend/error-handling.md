@@ -3,7 +3,7 @@
 ## 基础类型
 
 - 统一使用 `crate::error::{AppError, AppResult}`。
-- `AppError` 当前包含 `Validation`、`Database`、`Io`、`Internal`，并通过 serde tag/content 序列化给 Tauri 前端。参考 `src/error.rs`。
+- `AppError` 包含 `Validation`、`Database`、`Io`、`Reconciliation`、`Internal`，并通过 serde tag/content 序列化给 Tauri 前端。参考 `src/error.rs`。
 - `rusqlite::Error` 和 `std::io::Error` 已实现 `From`，service 中优先使用 `?` 传播。
 
 ## Validation 规则
@@ -16,6 +16,13 @@
 
 - 文件系统扫描要区分 NotFound 与真实错误。参考 `services/distribution.rs` 中 placement 不存在时返回 `Ok(false)`。
 - 执行 placement / copy / WebDAV 时，先准备计划和校验，再修改 DB 状态；失败时尽量回滚已经创建的 placement。
+
+## Reconciliation 错误
+
+- Project custom Skill 多 Placement intent 发生普通失败时先逆序补偿；补偿全部成功则保留原始 Validation / IO / Database kind。
+- 只有补偿本身失败才返回 `AppError::Reconciliation`，并在失败后持久化 `skill_propagation_reconciliations` evidence；错误 message 必须包含 evidence ID。
+- evidence 持久化也失败时，Reconciliation message 同时保留原始错误、补偿错误和 evidence 写入错误，不能相互覆盖。
+- evidence 不是真相源，不触发启动恢复；相同 typed intent 可以幂等重试并在成功后 resolve evidence。
 
 ## Internal 错误
 

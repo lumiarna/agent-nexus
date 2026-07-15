@@ -1,5 +1,5 @@
 import type { CSSProperties, MouseEvent } from "react";
-import type { AgentName, CellRole, Cells } from "@/types";
+import type { AgentName, CellRole, Cells, PlacementCells } from "@/types";
 import { AGENT_ORDER, agentColor } from "@/lib/tokens";
 import { AgentLogo } from "@/components/ui/agent-logo";
 import { cn } from "@/lib/utils";
@@ -113,7 +113,7 @@ export function AgentMatrixCells({
   agents = AGENT_ORDER,
   sourceless = false,
 }: {
-  cells: Cells;
+  cells: Cells | PlacementCells;
   onToggle: (agent: AgentName, event: MouseEvent<HTMLSpanElement>) => void;
   agents?: AgentName[];
   sourceless?: boolean;

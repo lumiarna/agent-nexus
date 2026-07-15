@@ -160,7 +160,9 @@ pub async fn run_task(state: State<'_, AppState>, id: String) -> AppResult<Task>
 - `Placement` 建立 + 失败回滚、扫描归并（upsert + 替换 distribution 行 + 清理失效）
 - `symlink_points_to`（判断某 agent 当前是否为 target）
 
-`Skill` / `Prompt` 作为 **adapter** 只提供差异：`Scope`（global/project）、Placement 原语（目录 link vs 文件 symlink）、`target_path` 计算规则、表名。一处不变量，两资产复用；新增可传播资产近零成本。
+`Skill` / `Prompt` 作为 **adapter** 只提供差异：`Scope`（global/project）、Placement 原语（目录 link vs 文件 symlink）、`target_path` 计算规则、表名。一处不变量，两资产复用。
+
+Project custom Skill 的 Global / Project 多 Placement 传播另由 crate-private `project_custom_skill_propagation` deep module 编排：core-owned eager `SkillRow` read model、typed destination / intent、Settings 默认入口 Agent、全量撤销、文件步骤逆序补偿与 reconciliation evidence 均留在 `SkillService` seam 后；它不泛化为 Prompt / Session 的 `AssetPropagation` port（ADR-0003）。
 
 ### 5. Provider quota — adapter trait + 内层 ports
 
@@ -233,7 +235,7 @@ type View = "provider" | "project" | "skill" | "prompt" | "session" | "sync" | "
 
 ## 数据库设计
 
-详见 [数据库 Schema 设计](<./Database Schema.md>)。要点：rusqlite 直写 SQL（无 ORM）；`database/schema.rs` 按 `CURRENT_SCHEMA_VERSION` 顺序执行 `migrate_to_vN`（现已演进至 v10），每次迁移独立事务；表命名对齐 `CONTEXT.md` glossary。
+详见 [数据库 Schema 设计](<./Database Schema.md>)。要点：rusqlite 直写 SQL（无 ORM）；`database/schema.rs` 按 `CURRENT_SCHEMA_VERSION` 顺序执行 `migrate_to_vN`（现已演进至 v21），每次迁移独立事务；表命名对齐 `CONTEXT.md` glossary。
 
 ## 实现状态
 

@@ -32,14 +32,14 @@ impl AppState {
             prompts: PromptService::new(db.clone()),
             projects: ProjectService::new(db.clone()),
             project_symlinks: ProjectSymlinkInventory::new(db.clone()),
-            provider_quota: ProviderQuotaService::new(app_config, request_logger.clone()),
+            provider_quota: ProviderQuotaService::new(app_config.clone(), request_logger.clone()),
             provider_trigger: ProviderTriggerService::new(
                 db.clone(),
                 AppConfigService::new(db.clone()),
                 request_logger.clone(),
             ),
             sessions: SessionService::new(db.clone(), request_logger.clone()),
-            skills: SkillService::new(db.clone()),
+            skills: SkillService::new(db.clone(), app_config),
             sync: SyncService::new(db, request_logger),
         }
     }

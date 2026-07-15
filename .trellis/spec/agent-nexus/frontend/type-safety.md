@@ -99,67 +99,60 @@ agent({
 ```
 - Pi 仍是 prompt-capable Agent，会出现在 global Prompt matrix；project Prompt matrix 继续由 Generic Agent 表示 `AGENTS.md` namespace。
 
-## Scenario: 共享 canonical-asset 列表中的派生 projection 行
+## Scenario: Project custom Skill 判别联合与 typed intent
 
 ### 1. Scope / Trigger
-- Trigger: 后端需要在同一个 list 响应中混入「派生投影行」——非 canonical asset，而是某 canonical asset 在另一上下文中的 placement 投影（本任务为 `project_custom` Skill 跨 Project 传播后在目标 Project 中出现的 incoming 行），前端用同一 DTO 渲染但写入型 command 必须指向 canonical asset。
+- Trigger：修改 Skill row、Project custom canonical / incoming 渲染、传播 modal、Skill query/mutation 或相关 IPC payload。
 
 ### 2. Signatures
-- Backend DTO `crates/nexus-core/src/services/skills.rs::Skill` 新增 optional 字段：
-  - `canonical_skill_id: Option<String>` —— projection 行的真实 backend `skills.id`；canonical 行为 `None`。
-  - `placement_scope: Option<String>`（`Some("project")`）、`placement_project_id`、`source_project_id`。
-  - projection 行的 `Skill::id` 是 composite display id（`{skill_id}::project::{target_project_id}`），仅作 React key。
-- Frontend type `src-react/src/types/index.ts::Skill` 同名 optional（camelCase）：`canonicalSkillId` / `placementScope` / `placementProjectId` / `sourceProjectId`。
-- Tauri commands `src-tauri/src/commands/skills.rs`：`set_project_skill_project` / `set_project_skill_target` 返回 `AppResult<Vec<Skill>>`（整条 list，因为 projection 行在服务端派生）。
+- `Skill` 是严格判别联合：
+  - `agentCanonical { rowKey, skill, context, sourceAgent, cells: AgentCells }`
+  - `projectCustomCanonical { rowKey, skill, sourceProject, destinations }`
+  - `projectCustomIncoming { rowKey, skill, sourceProject, targetProject, cells: PlacementCells }`
+- `skill.skillId` 在三 variant 中都是 canonical backend id；`rowKey` 只用于 React identity。
+- `AgentCells` 可含 `source | target | none`；`PlacementCells` 只能 `target | none`。
+- `ProjectCustomSkillDestination = { kind: "global" } | { kind: "project"; projectId: string }`。
+- `ProjectCustomSkillIntent = setTargetEnabled | setAgentPlacement`；mutation 返回 `{ changed, skills: Skill[] }`。
 
 ### 3. Contracts
-- `id` 仅作 React key 与展示；任何写后端的 command（mutation / `open_source` / `reveal_path`）必须传 `canonicalSkillId ?? id`。
-- projection 行：`placementScope === "project"`、`placementProjectId === target`、`sourceProjectId === canonical.projectId`，且无 source Agent cell（cells 只有 `target`/`none`）。
-- Project target mutation 返回整条 skill list，前端用整表替换 `skillKeys.all` cache 并 `invalidateQueries({ queryKey: projectKeys.all })`（projection 行改变 Project skill 计数）；不要对投影行做单行 `replaceSkill(current, next)`。
-- Project target placement（包括 source/current Project target）落点是目标 Project 默认 Agent 的 fixed project skills dir（`agent.skill.project_dir`），**绝不**落到目标 Project `customSkillsDirs`，否则会被扫描误识别为新 canonical source。
+- 页面必须按 `kind` exhaustive render / select；不得恢复 optional `canonicalSkillId`、`placementScope`、`placementProjectId` 或 composite identity fallback。
+- Project custom canonical 的 modal 直接消费 core eager `destinations`；页面不 join Skills、Projects、Settings，不读取默认入口 Agent，不循环撤销 cell。
+- incoming row 直接使用 `skill.skillId + targetProject.id` 构造 `setAgentPlacement` intent；Open / Reveal / DMI 也统一使用 `skill.skillId`。
+- 所有 Skill 数据 mutation 返回权威完整 catalog，并整体替换 `skillKeys.all`；Project custom intent 与显式 `scan_skills` 还 invalidate `projectKeys.all`。
+- `useSkillsQuery` 必须调用只读 `list_skills`；会扫描文件系统并改写 sources/distributions 的 `scan_skills` 只能由显式 Refresh mutation 调用。
+- record/batch record/delete/reorder/续认 Project Path 会改变 eager destination，成功后必须 invalidate `skillKeys.all`；纯 Git Base Folder 列表变化不需要。
 
 ### 4. Validation & Error Matrix
-- 用 display `id` 调 `set_project_skill_target` -> 后端找不到 canonical skill -> `Validation("skill was not found")`。
-- 用 display `id` 调 `open_source`/`reveal_path` -> 同上，永远打不开源 Project canonical。
-- `set_project_skill_project` 允许 `target_project_id == source_project_id`，用于把 Project Custom Source 传播到当前 Project 的 Agent project skills dir。
-- 对 `source_kind != project_custom` 的 skill 调 Project target 命令 -> `Validation("only Project custom Skills can be propagated to Project targets")`。
-- 目标 Agent 无 skill surface -> `Validation("<agent> does not support skill placement")`。
-- 目标路径已存在真实目录/非托管文件 -> `create_managed_directory_link` 失败，不覆盖、不合并、不改名。
+- Project custom cells 出现 `source` → TypeScript 类型错误；不得用 `as` / `any` 绕过。
+- 缺少 `projectId` 的 Project destination → payload 无法满足判别联合；不得传空字符串占位。
+- backend 返回 Validation / IO / Database / Reconciliation → mutation 保持失败，不能替换成功 cache 或伪造局部 row。
+- scan 失败 → 保留旧 Skill cache，不 invalidate 成功态 Project 数据。
+- 非 Tauri runtime 调用 intent → 由 typed API adapter 返回统一 runtime error，组件不直接调用 `invoke`。
 
 ### 5. Good/Base/Bad Cases
-- Good: 目标 Project projection 行（包括当前/source Project projection 行）toggle Agent -> `useSetProjectSkillTargetMutation` 传 `skillId: skill.canonicalSkillId ?? skill.id` + `targetProjectId: skill.placementProjectId`。
-- Base: canonical row（`canonicalSkillId` 为 `None`）继续走 `setSkillTarget`，`canonicalSkillId ?? id` 退化为 `id`，行为不变。
-- Bad: incoming 行 mutation 传 `skill.id`（display id）-> 后端 Validation 报 skill not found，placement 不产生。
+- Good：incoming row 点击 Agent cell，只提交一次 `setAgentPlacement`，成功后以响应中的完整 catalog 替换 cache。
+- Base：普通列表读取只调用 `list_skills`，窗口聚焦 refetch 不扫描文件系统。
+- Bad：`useSkillsQuery` 调用 `scan_skills`，导致普通 refetch 获取 mutation lock、改写数据库并触发跨领域副作用。
 
 ### 6. Tests Required
-- Backend `crates/nexus-core/tests/skill_service.rs`：
-  - `propagates_project_custom_skill_to_other_project` / `propagates_project_custom_skill_to_source_project`：assert 目标 placement 的 target_path 指向目标 Project 默认 Agent 的 fixed project skills dir，而非 `customSkillsDirs`。
-  - `target_project_incoming_row_fans_out_and_disappears`：assert incoming projection row 出现且 cells 无 `source`；移除最后一个 `target` 后 `list_skills` 不再含该行。
-  - `cross_project_propagation_rejects_agent_sourced_skill`：assert agent-sourced skill 调 `set_project_skill_project` 报 Validation。
-  - `cross_project_propagation_fails_when_target_path_exists`：assert 预占目录导致传播失败且原内容未被覆盖。
-  - `cross_project_placement_does_not_become_canonical_on_rescan`：assert 扫描后不新增 canonical Skill。
-- Frontend：`typecheck` 必过；`grep -n "canonicalSkillId ?? skill.id" src/components` 校验所有 mutation/open/reveal 路径都走 canonical id。
+- TypeScript fixture 固定三 variant camelCase wire shape，并证明 Placement cells 不能表达 `source`。
+- visibility / project selector 按 variant exhaustive。
+- SkillRow 测试只断言一次 typed intent 委托、不含 `defaultAgent`，不复制 target join 或补偿规则。
+- query 测试固定完整 catalog 替换、Project invalidation、list/scan 职责分离与失败不污染 cache。
 
 ### 7. Wrong vs Correct
 #### Wrong
 ```ts
-// 用 display id 写后端 —— 后端找不到 canonical skill
-await setProjectSkillTarget.mutateAsync({
-  skillId: skill.id, // "{uuid}::project::{targetId}"
-  targetProjectId: skill.placementProjectId!,
-  agent,
-  enabled: false,
-});
+// 普通 query 不得执行会改写 source/distribution 的 scan。
+useQuery({ queryKey: skillKeys.all, queryFn: () => skillsApi.scan() });
 ```
 
 #### Correct
 ```ts
-const canonicalId = skill.canonicalSkillId ?? skill.id;
-await setProjectSkillTarget.mutateAsync({
-  skillId: canonicalId,
-  targetProjectId: skill.placementProjectId!,
-  agent,
-  enabled: false,
+useQuery({ queryKey: skillKeys.all, queryFn: () => skillsApi.list() });
+useMutation({
+  mutationFn: () => skillsApi.scan(),
+  onSuccess: (skills) => queryClient.setQueryData(skillKeys.all, skills),
 });
 ```
 

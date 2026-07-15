@@ -81,8 +81,10 @@ pub struct AgentDisplayPreferences {
     pub disabled: Vec<String>,
     /// Default Global entry Agent used when a Project custom `Skill` (which has
     /// no `Source Agent`) is propagated to Global. `None` falls back to the
-    /// canonical-leftmost Agent (`Generic Agent`) in the front end. Must be a
+    /// canonical-leftmost Agent (`Generic Agent`) in core. Must be a
     /// Skill-capable, non-disabled Agent; disabling it clears this back to `None`.
+    /// Project custom Skill intent execution resolves this setting in core and
+    /// falls back to `Generic Agent` when it is absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_global_entry_agent: Option<String>,
 }

@@ -11,13 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/primitives";
 import { Segmented } from "@/components/ui/segmented";
 import { SkillRow } from "@/components/skill/SkillRow";
+import { useProjectCustomSkillIntent } from "@/components/skill/useProjectCustomSkillIntent";
+import { projectForSkillRow } from "@/components/skill/visibility";
 import { ScreenScroll } from "@/components/shell/screen";
 import { AGENTS } from "@/config/agents";
 import { promptsApi } from "@/lib/api/prompts";
 import { skillsApi } from "@/lib/api/skills";
 import { useNav } from "@/lib/nav";
-import { useDefaultGlobalEntryAgent } from "@/lib/query/agentPreferences";
-import { useSetProjectCustomSkillsDirsMutation, useSetProjectExtraPromptFilesMutation, useSetProjectSessionsDirMutation, useProjectsQuery } from "@/lib/query/projects";
+import { useSetProjectCustomSkillsDirsMutation, useSetProjectExtraPromptFilesMutation, useSetProjectSessionsDirMutation } from "@/lib/query/projects";
 import {
   useMovePromptSourceMutation,
   usePromptsQuery,
@@ -29,14 +30,11 @@ import {
 } from "@/lib/query/sessions";
 import {
   useMoveSkillSourceMutation,
-  useSetProjectSkillProjectMutation,
-  useSetProjectSkillTargetMutation,
   useSetSkillDisabledMutation,
   useSetSkillTargetMutation,
   useSkillsQuery,
 } from "@/lib/query/skills";
-import { isProjectCustomSkill, srcAgentOf, targetAgentsOf } from "@/lib/tokens";
-import { computePropagationTargets } from "@/components/skill/propagation";
+import { srcAgentOf } from "@/lib/tokens";
 import type { AgentName, Project, Prompt, Skill } from "@/types";
 import {
   matchesPromptGlob,
@@ -77,16 +75,12 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
   const setSkillTarget = useSetSkillTargetMutation();
   const moveSkillSource = useMoveSkillSourceMutation();
   const setSkillDisabled = useSetSkillDisabledMutation();
-  const setProjectSkillProject = useSetProjectSkillProjectMutation();
-  const setProjectSkillTarget = useSetProjectSkillTargetMutation();
+  const applyProjectCustomIntent = useProjectCustomSkillIntent(desktop);
   const setPromptTarget = useSetPromptTargetMutation();
   const movePromptSource = useMovePromptSourceMutation();
   const setCustomSkillsDirs = useSetProjectCustomSkillsDirsMutation();
   const setExtraPromptFiles = useSetProjectExtraPromptFilesMutation();
   const setSessionsDir = useSetProjectSessionsDirMutation();
-  const defaultGlobalEntry = useDefaultGlobalEntryAgent();
-  const projectsQuery = useProjectsQuery();
-
   const [detailSource, setDetailSource] = useState<DetailSource>("local");
   const [customDirsOpen, setCustomDirsOpen] = useState(false);
   const [extraFilesOpen, setExtraFilesOpen] = useState(false);
@@ -94,10 +88,7 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
 
   const skills = skillsQuery.data ?? [];
   const prompts = promptsQuery.data ?? [];
-  const activeProjects = (projectsQuery.data ?? [])
-    .filter((p) => p.status === "active")
-    .map((p) => ({ id: p.id, name: p.name }));
-  const dpSkills = skills.filter((k) => k.scope === "project" && k.projectId === dp.id);
+  const dpSkills = skills.filter((skill) => projectForSkillRow(skill)?.id === dp.id);
   const dpPrompts = prompts.filter((p) => p.scope === "project" && p.projectId === dp.id);
   const detailSessionsQuery = detailSource === "local" ? localSessionsQuery : cloudSessionsQuery;
   const detailSessions = detailSessionsQuery.data ?? [];
@@ -117,118 +108,20 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
     agent: AgentName,
     event: MouseEvent<HTMLSpanElement>,
   ) {
-    if (skill.cells[agent] === "source") return;
+    if (skill.kind !== "agentCanonical" || skill.cells[agent] === "source") return;
     if (!desktop) {
       toast("Desktop runtime required for changing skill targets");
       return;
     }
 
     try {
-      if (isMoveSourceModifier(event) && !isProjectCustomSkill(skill)) {
-        await moveSkillSource.mutateAsync({ skillId: skill.id, agent });
+      if (isMoveSourceModifier(event)) {
+        await moveSkillSource.mutateAsync({ skillId: skill.skill.skillId, agent });
         toast(`Source moved to ${agent}`);
         return;
       }
-
       await setSkillTarget.mutateAsync({
-        skillId: skill.id,
-        agent,
-        enabled: skill.cells[agent] !== "target",
-      });
-      toast(skill.cells[agent] === "target" ? "Target removed" : "Target linked");
-    } catch (error) {
-      toast(getErrorMessage(error));
-    }
-  }
-
-  async function propagateGlobal(skill: Skill, entryAgent: AgentName) {
-    if (!desktop) {
-      toast("Desktop runtime required for propagating skills");
-      return;
-    }
-
-    try {
-      await setSkillTarget.mutateAsync({ skillId: skill.id, agent: entryAgent, enabled: true });
-      toast(`Propagated to Global · ${entryAgent}`);
-    } catch (error) {
-      toast(getErrorMessage(error));
-    }
-  }
-
-  async function unpropagateGlobal(skill: Skill) {
-    if (!desktop) {
-      toast("Desktop runtime required for changing skill placements");
-      return;
-    }
-
-    try {
-      for (const agent of targetAgentsOf(skill.cells)) {
-        await setSkillTarget.mutateAsync({ skillId: skill.id, agent, enabled: false });
-      }
-      toast("Removed from Global");
-    } catch (error) {
-      toast(getErrorMessage(error));
-    }
-  }
-
-  async function propagateProject(skill: Skill, projectId: string, defaultAgent: AgentName) {
-    if (!desktop) {
-      toast("Desktop runtime required for propagating skills");
-      return;
-    }
-
-    try {
-      await setProjectSkillProject.mutateAsync({
-        skillId: skill.id,
-        targetProjectId: projectId,
-        defaultAgent,
-        enabled: true,
-      });
-      toast(`Propagated to Project · ${defaultAgent}`);
-    } catch (error) {
-      toast(getErrorMessage(error));
-    }
-  }
-
-  async function unpropagateProject(skill: Skill, projectId: string) {
-    if (!desktop) {
-      toast("Desktop runtime required for changing skill placements");
-      return;
-    }
-
-    try {
-      await setProjectSkillProject.mutateAsync({
-        skillId: skill.id,
-        targetProjectId: projectId,
-        defaultAgent: defaultGlobalEntry,
-        enabled: false,
-      });
-      toast("Removed from Project");
-    } catch (error) {
-      toast(getErrorMessage(error));
-    }
-  }
-
-  async function toggleProjectCell(
-    skill: Skill,
-    agent: AgentName,
-    _event: MouseEvent<HTMLSpanElement>,
-  ) {
-    if (!desktop) {
-      toast("Desktop runtime required for changing skill targets");
-      return;
-    }
-    const canonicalId = skill.canonicalSkillId ?? skill.id;
-    const targetProjectId = skill.placementProjectId;
-    if (!targetProjectId) {
-      toast("This skill row has no target Project");
-      return;
-    }
-
-    try {
-      await setProjectSkillTarget.mutateAsync({
-        skillId: canonicalId,
-        targetProjectId,
+        skillId: skill.skill.skillId,
         agent,
         enabled: skill.cells[agent] !== "target",
       });
@@ -243,13 +136,12 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
       toast("Desktop runtime required for changing skill settings");
       return;
     }
-
     try {
       await setSkillDisabled.mutateAsync({
-        id: skill.canonicalSkillId ?? skill.id,
-        disabled: !skill.disabled,
+        id: skill.skill.skillId,
+        disabled: !skill.skill.disabled,
       });
-      toast(!skill.disabled ? "Model invocation disabled" : "Model invocation enabled");
+      toast(!skill.skill.disabled ? "Model invocation disabled" : "Model invocation enabled");
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -317,7 +209,7 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
     }
 
     try {
-      await skillsApi.openSource(skill.canonicalSkillId ?? skill.id);
+      await skillsApi.openSource(skill.skill.skillId);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -330,7 +222,7 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
     }
 
     try {
-      await skillsApi.revealPath(skill.canonicalSkillId ?? skill.id);
+      await skillsApi.revealPath(skill.skill.skillId);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -416,29 +308,12 @@ export function ProjectDetailView({ project: dp, desktop, onBack }: ProjectDetai
         ) : dpSkills.length > 0 ? (
           dpSkills.map((k) => (
             <SkillRow
-              key={k.id}
+              key={k.rowKey}
               skill={k}
               mode="project"
-              projectName={dp.name}
-              sourceProjectName={
-                k.sourceProjectId
-                  ? activeProjects.find((p) => p.id === k.sourceProjectId)?.name
-                  : undefined
-              }
-              onToggleCell={(a, event) => void toggleCell(k, a, event)}
-              onToggleProjectCell={(a, event) => void toggleProjectCell(k, a, event)}
+              onToggleAgentCell={(agent, event) => void toggleCell(k, agent, event)}
+              onProjectCustomIntent={(intent) => void applyProjectCustomIntent(intent)}
               onToggleDmi={() => void toggleDmi(k)}
-              onPropagateGlobal={(entry) => void propagateGlobal(k, entry)}
-              onUnpropagateGlobal={() => void unpropagateGlobal(k)}
-              onPropagateProject={(projectId, defaultAgent) =>
-                void propagateProject(k, projectId, defaultAgent)
-              }
-              onUnpropagateProject={(projectId) => void unpropagateProject(k, projectId)}
-              propagationTargets={
-                isProjectCustomSkill(k) && !k.placementScope
-                  ? computePropagationTargets(k, skills, activeProjects, defaultGlobalEntry)
-                  : undefined
-              }
               onOpen={() => void openSkillSource(k)}
               onReveal={() => void revealSkillPath(k)}
             />

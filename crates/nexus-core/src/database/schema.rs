@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 
 use crate::error::{AppError, AppResult};
 
-const CURRENT_SCHEMA_VERSION: i64 = 20;
+const CURRENT_SCHEMA_VERSION: i64 = 21;
 
 /// Default Project custom skills directory — every Project scans `<root>/skills`
 /// as a Project custom source unless the user edits the list.
@@ -91,6 +91,9 @@ pub fn migrate(conn: &Connection) -> AppResult<()> {
         if current < 20 {
             migrate_to_v20(conn)?;
         }
+        if current < 21 {
+            migrate_to_v21(conn)?;
+        }
     }
 
     Ok(())
@@ -122,7 +125,7 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
         CREATE TABLE schema_version (
             version INTEGER NOT NULL
         );
-        INSERT INTO schema_version (version) VALUES (20);
+        INSERT INTO schema_version (version) VALUES (21);
 
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
@@ -323,6 +326,20 @@ fn migrate_to_v1(conn: &Connection) -> AppResult<()> {
             window_align_failure_count INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE skill_propagation_reconciliations (
+            id TEXT PRIMARY KEY,
+            skill_id TEXT NOT NULL,
+            destination_kind TEXT NOT NULL
+                CHECK (destination_kind IN ('global', 'project')),
+            target_project_id TEXT,
+            intent_json TEXT NOT NULL,
+            completed_steps_json TEXT NOT NULL,
+            failed_compensations_json TEXT NOT NULL,
+            observed_paths_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            resolved_at INTEGER
         );
 
         CREATE TABLE settings (
@@ -1001,9 +1018,9 @@ fn migrate_to_v18(conn: &Connection) -> AppResult<()> {
 /// a `project_custom` Skill express Global placements.
 ///
 /// Only `skills.source_kind = 'project_custom'` rows may write here (service-level
-/// invariant); `target_project_id` must differ from the source Skill's
-/// `skills.project_id`. Rows carry no `source` role — a target Project's incoming
-/// Skill row has no Agent source cell.
+/// invariant). `target_project_id` may equal the source Project so a Project
+/// Custom Source can be placed into that Project's fixed Agent skills dirs. Rows
+/// carry no `source` role — an incoming Skill row has no Agent source cell.
 fn migrate_to_v19(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
         r#"
@@ -1047,6 +1064,33 @@ fn migrate_to_v20(conn: &Connection) -> AppResult<()> {
         let _ = conn.execute("ROLLBACK", params![]);
     })?;
 
+    Ok(())
+}
+
+fn migrate_to_v21(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        r#"
+        BEGIN;
+        CREATE TABLE skill_propagation_reconciliations (
+            id TEXT PRIMARY KEY,
+            skill_id TEXT NOT NULL,
+            destination_kind TEXT NOT NULL
+                CHECK (destination_kind IN ('global', 'project')),
+            target_project_id TEXT,
+            intent_json TEXT NOT NULL,
+            completed_steps_json TEXT NOT NULL,
+            failed_compensations_json TEXT NOT NULL,
+            observed_paths_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            resolved_at INTEGER
+        );
+        UPDATE schema_version SET version = 21;
+        COMMIT;
+        "#,
+    )
+    .inspect_err(|_| {
+        let _ = conn.execute("ROLLBACK", params![]);
+    })?;
     Ok(())
 }
 
@@ -1246,6 +1290,7 @@ mod tests {
             .expect("collect task group columns");
         assert!(task_group_columns.contains(&"collapsed".to_string()));
         assert!(table_exists(&conn, "provider_schedule_settings"));
+        assert!(table_exists(&conn, "skill_propagation_reconciliations"));
     }
 
     #[test]
@@ -1283,6 +1328,26 @@ mod tests {
             .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
             .expect("read schema version");
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migrates_v20_with_skill_propagation_reconciliation_evidence() {
+        let conn = Connection::open_in_memory().expect("open in-memory connection");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (20);
+            "#,
+        )
+        .expect("seed v20 schema");
+
+        migrate(&conn).expect("migrate schema to v21");
+
+        assert!(table_exists(&conn, "skill_propagation_reconciliations"));
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .expect("read schema version");
+        assert_eq!(version, 21);
     }
 
     #[test]

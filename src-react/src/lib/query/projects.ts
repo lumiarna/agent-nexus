@@ -30,7 +30,10 @@ export function useRecordProjectMutation() {
   return useMutation({
     mutationFn: projectsApi.record,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: projectKeys.all });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: projectKeys.all }),
+        queryClient.invalidateQueries({ queryKey: skillKeys.all }),
+      ]);
     },
   });
 }
@@ -41,7 +44,10 @@ export function useRecordProjectsMutation() {
   return useMutation({
     mutationFn: (paths: string[]) => Promise.all(paths.map((path) => projectsApi.record(path))),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: projectKeys.all });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: projectKeys.all }),
+        queryClient.invalidateQueries({ queryKey: skillKeys.all }),
+      ]);
     },
   });
 }

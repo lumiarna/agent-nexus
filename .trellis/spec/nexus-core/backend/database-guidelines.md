@@ -54,77 +54,68 @@ conn.execute("UPDATE task_groups SET name = ?2 WHERE id = ?1", params![group_id,
 - 时间戳使用 Unix epoch seconds；主键多数为 UUID TEXT。
 - JSON/text list 字段只用于弱结构或简单配置，例如 `connection_params`、换行分隔的 `custom_skills_dirs` / `extra_prompt_files`。
 
-## Scenario: Cross-project `project_custom` Skill distribution
+## Scenario: Project custom Skill 传播 deep module
 
 ### 1. Scope / Trigger
-- Trigger: 为 `source_kind = project_custom` 的 Skill 增加跨 Project 传播（落到其他 Project 默认 Agent 的 fixed project skills dir），或改动 `skill_project_distributions` 表 / 关联 service / scan reconcile。
+- Trigger：修改 `source_kind = project_custom` Skill 的读取投影、Global / Project 传播、`skill_project_distributions`、补偿或 scan reconcile。
+- 只适用于 Project custom Skill；不得把 Prompt extras 或 Session Directory 抽入共同 seam（ADR-0003）。
 
 ### 2. Signatures
-- DB 表（`migrate_to_v19`）：
-  ```sql
-  CREATE TABLE skill_project_distributions (
-    skill_id TEXT NOT NULL,
-    target_project_id TEXT NOT NULL,
-    agent TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('target','none')),
-    target_path TEXT,
-    CHECK ((role='target' AND target_path IS NOT NULL) OR (role='none' AND target_path IS NULL)),
-    PRIMARY KEY (skill_id, target_project_id, agent),
-    FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE,
-    FOREIGN KEY (target_project_id) REFERENCES projects(id) ON DELETE CASCADE
-  );
-  ```
-- Service `crates/nexus-core/src/services/skills.rs`：
-  - `set_project_skill_project(SetProjectSkillProjectInput) -> AppResult<Vec<Skill>>`
-  - `set_project_skill_target(SetProjectSkillTargetInput) -> AppResult<Vec<Skill>>`
-  - `project_target_path_for_skill(target_project_path, canonical_path, agent) -> AppResult<PathBuf>`
-  - `reconcile_project_distributions()`（scan 后回收集已断链的 target row）
+- Read：`list_skills()` / `scan_skills() -> AppResult<Vec<SkillRow>>`；`SkillRow` 是 `agentCanonical | projectCustomCanonical | projectCustomIncoming` serde enum。
+- Write：`apply_project_custom_skill_intent(ProjectCustomSkillIntent) -> AppResult<ProjectCustomSkillMutationResult>`。
+- Intent 仅有 `setTargetEnabled` 与 `setAgentPlacement`；destination 仅有 typed `global | project { projectId }`，不接受 `defaultAgent` 或 target path。
+- Schema v21 新增 `skill_propagation_reconciliations(id, skill_id, destination_kind, target_project_id, intent_json, completed_steps_json, failed_compensations_json, observed_paths_json, created_at, resolved_at)`。
+- 旧 `set_project_skill_project` / `set_project_skill_target` 已删除；普通 `set_skill_target` 明确拒绝 Project custom Skill。
 
 ### 3. Contracts
-- 仅 `skills.source_kind = 'project_custom'` 可写入 `skill_project_distributions`（service 在 `project_skill_context` 校验）。
-- `target_project_id` 可以等于 canonical skill 的 `project_id`（source/current Project target）；目标 Project 必须存在且 `status = 'active'`。
-- 落点用目标 Agent `skill.project_dir`（fixed project skills dir），**绝不**用目标 Project `customSkillsDirs`；`agent.project_dir` 不可用时失败。
-- 托管链接复用 `create_managed_directory_link` / `remove_managed_directory_link_if_present`；目标路径已存在真实目录/非托管文件即失败，不覆盖、不合并、不改名。
-- scan 重建 canonical sources 时，`discover_skill_sources` 跳过 symlink/junction，跨 Project placement 不会被误识别为 canonical source；scan 只会 reconcile `skill_project_distributions` 中断链的 target row。
-- `Skill` DTO 在 projection 行上用 composite display id `{skill_id}::project::{target_project_id}`，并带 `canonical_skill_id` 指向真实 backend id（前端 mutation 必须 canonical id，见 `agent-nexus/frontend/type-safety.md` 的同主题 Scenario）。
+- 每个 row 都有只用于渲染的 `rowKey` 和 canonical `skill.skillId`；调用者不再解释 composite id。
+- Agent canonical cells 使用 `AgentCellRole`（可含且恰有一个 `source`）；Project custom canonical / incoming cells 使用 `PlacementCellRole`（只能 `target | none`）。
+- canonical row eager 返回唯一 Global state 与全部有效 Project destination；有效 Project = DB `active` 且当前 Project Path 可解析、存在。健康 source Project 也必须包含。
+- incoming 仅在 destination 至少一个 live target 时存在；source Project 可同时有 canonical row 与指向自身的 incoming row。
+- `SetTargetEnabled(true)` 在 destination 为空时由后端读取最新 Settings 默认入口 Agent；未设置回退 `Generic Agent`，并重新校验 Skill capability 与 disabled 状态。
+- 所有领域与路径 preflight 在写入前完成；文件步骤全部成功后才在单个 transaction 替换 Distribution rows、resolve evidence、构建完整 catalog并 commit。commit 后不再执行 fallible catalog read。
+- 任一步失败时逆序补偿；补偿成功保留原错误且 DB 不变，补偿失败返回 `Reconciliation` 并写 evidence。evidence 无 FK、不是 Distribution 真相源，也不承担启动恢复。
+- 同一个私有 Skill mutation lock 覆盖 Project custom intent、scan/reconcile、普通 target、source relocation 与 DMI。
+- Project destination 使用目标 Agent fixed project skills dir，绝不用目标 Project `custom_skills_dirs`；managed Placement 必须实际指向 canonical source 才可删除或从 Inventory 隐藏。
 
 ### 4. Validation & Error Matrix
-- skill 不存在 -> `Validation("skill was not found")`
-- `source_kind != project_custom` -> `Validation("only Project custom Skills can be propagated to Project targets")`
-- canonical skill 无 `project_id` -> `Validation("skill has no source Project")`
-- target Project 不存在/非 active -> `Validation("target project was not found or is not active")`
-- Agent 无 skill surface -> `Validation("<agent> does not support skill placement")`
-- 目标路径被预占 -> managed link 创建失败，原内容保留
+- Skill 不存在 → `Validation("skill was not found")`。
+- `source_kind != project_custom` → `Validation("only Project custom Skills accept propagation intents")`。
+- canonical Skill 无 source Project → `Validation("skill has no source Project")`。
+- target Project 不存在、hidden、stale 或 path 缺失 → `Validation("target project was not found or is not effectively active")`，且不得创建目录。
+- Agent 未知或无 Skill surface → `Validation("unknown agent: ...")` / `Validation("<Agent> does not support skill placement")`。
+- target path 被非托管内容占用或 managed Placement 已被替换 → Validation，原内容不得覆盖或删除。
+- 正向步骤失败且补偿成功 → 返回原始 Validation / IO / Database；补偿也失败 → `Reconciliation`，message 包含 evidence ID。
 
 ### 5. Good/Base/Bad Cases
-- Good: 源 Project custom Skill 传播到当前/source Project 或另一 active Project，目标默认 Agent project skills dir 出现托管链接，`list_skills` 返回该目标 Project 的 projection row。源侧取消时该目标 Project 全部 Agent placement 与目标 row 一并清除。
-- Base: 只传播到 Global 时走既有 `skill_distributions`，与 v19 改动无关。
-- Bad: 把 placement `target_path` 落到目标 `customSkillsDirs` -> rescan 会把它当新 canonical source，偷换 canonical 身份。
+- Good：一次 `setTargetEnabled(false)` 删除 destination 全部 placements；DB 只在文件步骤全成功后提交，返回完整 catalog。
+- Base：相同 intent 重试时，正确既有 Placement或已缺失 Placement视为已完成并继续收敛。
+- Bad：页面逐 Agent 循环 mutation，或先提交 Distribution rows 再执行文件步骤，都会暴露部分成功状态。
 
 ### 6. Tests Required
-- `crates/nexus-core/tests/skill_service.rs`：
-  - `propagates_project_custom_skill_to_global_and_keeps_single_source` 不回归
-  - `propagates_project_custom_skill_to_other_project` assert target_path 指向目标默认 Agent fixed project dir
-  - `target_project_incoming_row_fans_out_and_disappears` assert cells 无 source、末位移除后行消失
-  - `cancelling_target_project_removes_all_its_placements` assert 删除该 target Project 全部 placements
-  - `cross_project_placement_does_not_become_canonical_on_rescan`
-  - `cross_project_propagation_fails_when_target_path_exists`
-  - `cross_project_propagation_rejects_agent_sourced_skill`
+- serde camelCase、三 row variants、两种 cell role 与 Project custom 无 source。
+- Global、source Project、跨 Project、fan-out、末位删除、全量撤销、默认 Agent、幂等重试与路径冲突。
+- stale / hidden / missing path 排除与拒绝；rescan 不把 managed Placement 当 canonical source。
+- 文件步骤失败逆序补偿、补偿失败 evidence / Reconciliation、catalog/commit rollback，以及 intent 与 scan 共享锁的并发回归。
+- fresh DB 与 v20→v21 migration 均创建 evidence 表；Project Symlink Inventory 保持 managed identity 校验。
 
 ### 7. Wrong vs Correct
 #### Wrong
 ```rust
-// 把跨 Project placement 落到 customSkillsDirs
-let target = resolve_custom_dir(&target_root.path, custom_dir)?.join(dir_name);
-// 或：target_project_id 不校验直接写
-self.db.execute("INSERT INTO skill_project_distributions ...")
+// 先写 DB，再逐个创建 Placement：中途失败会留下部分提交。
+replace_distribution_rows(&conn, &desired)?;
+for placement in desired { create_link(placement)?; }
 ```
 
 #### Correct
 ```rust
-let target_root = self.project_root(&target_project_id)?;
-let target_path = project_target_path_for_skill(&target_root.path, &context.canonical_path, default_agent)?;
-// 校验 source_kind=project_custom + target!=source + Agent skill-capable，再走 write_target
+let plan = preflight_all_paths(current, desired)?;
+let completed = execute_files_with_undo(&plan)?;
+let tx = conn.transaction()?;
+replace_distribution_rows(&tx, &plan.desired)?;
+let catalog = catalog_from_connection(&tx)?;
+tx.commit()?;
+return Ok(catalog);
 ```
 
 ## Scenario: Agent Matrix source move for Skill / Prompt

@@ -60,13 +60,14 @@ describe("scan queries invalidate the projects list", () => {
     await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
   });
 
-  it("useSkillsQuery triggers a projects refetch", async () => {
-    vi.spyOn(skillsApi, "scan").mockResolvedValue([]);
+  it("useSkillsQuery reads without triggering a projects refetch (scan does)", async () => {
+    vi.spyOn(skillsApi, "list").mockResolvedValue([]);
     const { fetchProjects, Wrapper } = makeHarness();
 
     renderHook(() => useSkillsQuery(), { wrapper: Wrapper });
 
-    await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+    // list_skills is a read — it does not invalidate projects
+    await waitFor(() => expect(fetchProjects).not.toHaveBeenCalled());
   });
 
   it("usePromptsQuery triggers a projects refetch", async () => {

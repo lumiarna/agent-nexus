@@ -3,20 +3,20 @@ use tauri::State;
 use nexus_core::{
     error::AppResult,
     services::skills::{
-        MoveSkillSourceInput, SetProjectSkillProjectInput, SetProjectSkillTargetInput,
-        SetSkillTargetInput, Skill,
+        MoveSkillSourceInput, ProjectCustomSkillIntent, ProjectCustomSkillMutationResult,
+        SetSkillTargetInput, SkillRow,
     },
 };
 
 use crate::store::AppState;
 
 #[tauri::command]
-pub fn list_skills(state: State<'_, AppState>) -> AppResult<Vec<Skill>> {
+pub fn list_skills(state: State<'_, AppState>) -> AppResult<Vec<SkillRow>> {
     state.skills.list_skills()
 }
 
 #[tauri::command]
-pub fn scan_skills(state: State<'_, AppState>) -> AppResult<Vec<Skill>> {
+pub fn scan_skills(state: State<'_, AppState>) -> AppResult<Vec<SkillRow>> {
     state.skills.scan_skills()
 }
 
@@ -24,7 +24,7 @@ pub fn scan_skills(state: State<'_, AppState>) -> AppResult<Vec<Skill>> {
 pub fn set_skill_target(
     state: State<'_, AppState>,
     input: SetSkillTargetInput,
-) -> AppResult<Skill> {
+) -> AppResult<Vec<SkillRow>> {
     state.skills.set_skill_target(input)
 }
 
@@ -32,7 +32,7 @@ pub fn set_skill_target(
 pub fn move_skill_source(
     state: State<'_, AppState>,
     input: MoveSkillSourceInput,
-) -> AppResult<Skill> {
+) -> AppResult<Vec<SkillRow>> {
     state.skills.move_skill_source(input)
 }
 
@@ -41,7 +41,7 @@ pub fn set_skill_disabled(
     state: State<'_, AppState>,
     id: String,
     disabled: bool,
-) -> AppResult<Skill> {
+) -> AppResult<Vec<SkillRow>> {
     state.skills.set_skill_disabled(id, disabled)
 }
 
@@ -55,23 +55,10 @@ pub fn reveal_skill_path(state: State<'_, AppState>, id: String) -> AppResult<()
     state.skills.reveal_skill_path(id)
 }
 
-/// Source-side: propagate a Project custom Skill to (or cancel it from) a
-/// target Project. Returns the full skill list so the UI can refetch the
-/// incoming target-Project projection rows.
 #[tauri::command]
-pub fn set_project_skill_project(
+pub fn apply_project_custom_skill_intent(
     state: State<'_, AppState>,
-    input: SetProjectSkillProjectInput,
-) -> AppResult<Vec<Skill>> {
-    state.skills.set_project_skill_project(input)
-}
-
-/// Target-side: toggle a single Agent placement inside an incoming target
-/// Project Skill row.
-#[tauri::command]
-pub fn set_project_skill_target(
-    state: State<'_, AppState>,
-    input: SetProjectSkillTargetInput,
-) -> AppResult<Vec<Skill>> {
-    state.skills.set_project_skill_target(input)
+    intent: ProjectCustomSkillIntent,
+) -> AppResult<ProjectCustomSkillMutationResult> {
+    state.skills.apply_project_custom_skill_intent(intent)
 }

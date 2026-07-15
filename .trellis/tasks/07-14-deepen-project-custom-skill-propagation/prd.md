@@ -44,23 +44,23 @@
 
 ## Acceptance Criteria
 
-- [ ] `Skill` 跨层类型明确区分 agent canonical、Project custom canonical 与 Project custom incoming 三种 row，且每种 row 都有稳定 `rowKey` 与 canonical `skillId`。
-- [ ] Rust/JSON/TypeScript contract tests 证明 enum variant 字段使用 camelCase，Agent cells 与 Placement cells 使用不同 role 类型。
-- [ ] Project custom canonical / incoming row 的 cells 在类型和 core 测试中均不允许 `source`。
-- [ ] Project custom canonical row一次返回 Global 与所有可传播 Project destination states，包括健康的 source Project 自身；Global 状态只表示一次。
-- [ ] stale、hidden 或 Project Path 不存在的 Project 不出现在 eager targets，相关 intent 返回 validation error 且不创建目录。
-- [ ] SkillPage 与 ProjectDetailView 不再重复 Project custom Skill 传播编排，也不读取默认入口 Agent来构造写入参数。
-- [ ] 调用者不再使用 `canonicalSkillId ?? id`、`placementScope` 或 `placementProjectId` 发起动作。
-- [ ] 旧 Project custom Skill 写入 commands、前端 payload、query hooks 和 `components/skill/propagation.ts` 被移除。
-- [ ] 一次撤销可原子移除某个 Global / Project destination 的全部 placements；中途失败时数据库保持原状态，已执行文件步骤被逆序补偿。
-- [ ] 补偿失败返回 reconciliation error、持久化 evidence；再次提交同一 intent 可以根据实际 Placement 状态继续收敛。
-- [ ] core interface 测试覆盖 Global、source Project、跨 Project、Agent fan-out、末位删除、幂等重试、路径冲突、文件失败、数据库失败与补偿失败。
-- [ ] 页面测试只验证渲染与 intent 委托，不复制 projection 或补偿规则。
-- [ ] Project custom Skill 的 managed placements 继续不会被 scan 当作 canonical source，也不会泄漏到 Project Symlink Inventory。
-- [ ] scan/reconcile 与任意 Skill mutation 共享写入锁；并发回归测试证明 intent 与 scan 不会互相删除或覆盖 Distribution 状态。
-- [ ] 所有 Skill 数据 mutation 成功后使用权威完整 catalog 替换 cache；Project custom intent 还会正确失效 Project counts。
-- [ ] transaction 内先完成完整 catalog 构建再 commit；catalog 构建失败或 commit 失败都会 rollback DB 并补偿文件系统，commit 后不再执行会改变成功结果的 fallible 读取。
-- [ ] deletion test 复核表明删除深化后的 module 会让身份、target projection、写入计划与补偿复杂度重新扩散到多个调用者。
+- [x] `Skill` 跨层类型明确区分 agent canonical、Project custom canonical 与 Project custom incoming 三种 row，且每种 row 都有稳定 `rowKey` 与 canonical `skillId`。
+- [x] Rust/JSON/TypeScript contract tests 证明 enum variant 字段使用 camelCase，Agent cells 与 Placement cells 使用不同 role 类型。
+- [x] Project custom canonical / incoming row 的 cells 在类型和 core 测试中均不允许 `source`。
+- [x] Project custom canonical row一次返回 Global 与所有可传播 Project destination states，包括健康的 source Project 自身；Global 状态只表示一次。
+- [x] stale、hidden 或 Project Path 不存在的 Project 不出现在 eager targets，相关 intent 返回 validation error 且不创建目录。
+- [x] SkillPage 与 ProjectDetailView 不再重复 Project custom Skill 传播编排，也不读取默认入口 Agent来构造写入参数。
+- [x] 调用者不再使用 `canonicalSkillId ?? id`、`placementScope` 或 `placementProjectId` 发起动作。
+- [x] 旧 Project custom Skill 写入 commands、前端 payload、query hooks 和 `components/skill/propagation.ts` 被移除。
+- [x] 一次撤销可原子移除某个 Global / Project destination 的全部 placements；中途失败时数据库保持原状态，已执行文件步骤被逆序补偿。
+- [x] 补偿失败返回 reconciliation error、持久化 evidence；再次提交同一 intent 可以根据实际 Placement 状态继续收敛。
+- [x] core interface 测试覆盖 Global、source Project、跨 Project、Agent fan-out、末位删除、幂等重试、路径冲突、文件失败、数据库失败与补偿失败。
+- [x] 页面测试只验证渲染与 intent 委托，不复制 projection 或补偿规则。
+- [x] Project custom Skill 的 managed placements 继续不会被 scan 当作 canonical source，也不会泄漏到 Project Symlink Inventory。
+- [x] scan/reconcile 与任意 Skill mutation 共享写入锁；并发回归测试证明 intent 与 scan 不会互相删除或覆盖 Distribution 状态。
+- [x] 所有 Skill 数据 mutation 成功后使用权威完整 catalog 替换 cache；Project custom intent 还会正确失效 Project counts。
+- [x] transaction 内先完成完整 catalog 构建再 commit；catalog 构建失败或 commit 失败都会 rollback DB 并补偿文件系统，commit 后不再执行会改变成功结果的 fallible 读取。
+- [x] deletion test 复核表明删除深化后的 module 会让身份、target projection、写入计划与补偿复杂度重新扩散到多个调用者。
 
 ## Out of Scope
 

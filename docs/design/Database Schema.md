@@ -270,6 +270,31 @@ node_modules');
 INSERT INTO settings (key, value) VALUES ('project_symlink_max_depth', '3');
 ```
 
+## Schema v21：Project custom Skill 传播补偿 evidence
+
+`skill_propagation_reconciliations` 仅记录同进程补偿实际失败后的诊断 evidence：
+
+```sql
+CREATE TABLE skill_propagation_reconciliations (
+    id TEXT PRIMARY KEY,
+    skill_id TEXT NOT NULL,
+    destination_kind TEXT NOT NULL
+        CHECK (destination_kind IN ('global', 'project')),
+    target_project_id TEXT,
+    intent_json TEXT NOT NULL,
+    completed_steps_json TEXT NOT NULL,
+    failed_compensations_json TEXT NOT NULL,
+    observed_paths_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER
+);
+```
+
+- 不设置 `skills` / `projects` foreign key：canonical row 被删除后 evidence 仍需保留用于诊断。
+- 表不是 Distribution 真相源，不预写 operation journal，不参与启动或 scan 恢复。
+- 相同 Skill + destination 的 typed intent 成功后填写 `resolved_at`；当前不暴露 Repair/query command 或 UI。
+- Project custom intent 的正常 Distribution 真相仍在 `skill_distributions`（Global）与 `skill_project_distributions`（Project）。
+
 ## 迁移策略
 
 参考 cc-switch 的 `database/schema.rs` 模式：

@@ -13,6 +13,8 @@ pub enum AppError {
     Database(String),
     #[error("io error: {0}")]
     Io(String),
+    #[error("reconciliation error: {0}")]
+    Reconciliation(String),
     #[error("{0}")]
     Internal(String),
 }
