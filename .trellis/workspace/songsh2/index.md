@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-07-11
+- **Total Sessions**: 8
+- **Last Active**: 2026-07-15
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~247 | Active |
+| `journal-1.md` | ~281 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-07-15 | 深化 Distribution source relocation | `f631cad` | `main` |
 | 7 | 2026-07-11 | Sync Task Group 支持 inline 重命名 | `98ca3db` | `main` |
 | 6 | 2026-07-10 | CodeX Window Alignment 实现与打磨 | `086a76c`, `3af0a3e` | `main` |
 | 5 | 2026-07-09 | Ctrl 点击 Agent 矩阵移动 source | `4e3f816` | `main` |
