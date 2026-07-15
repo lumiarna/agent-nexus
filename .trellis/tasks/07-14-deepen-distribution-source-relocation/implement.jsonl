@@ -1,1 +1,6 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/nexus-core/backend/index.md","reason":"定位 nexus-core 后端规范入口与本任务必读依据。"}
+{"file":".trellis/spec/nexus-core/backend/directory-structure.md","reason":"约束 Distribution deep module、Skill/Prompt adapter seam 与禁止新增 pass-through/persistence adapter。"}
+{"file":".trellis/spec/nexus-core/backend/database-guidelines.md","reason":"约束 Agent Matrix source 唯一性、文件系统先行操作的补偿及同一 SQLite transaction 更新。"}
+{"file":".trellis/spec/nexus-core/backend/error-handling.md","reason":"约束原始错误分类、补偿失败的 Reconciliation 语义及不得静默吞错。"}
+{"file":".trellis/spec/nexus-core/backend/quality-guidelines.md","reason":"约束 TempDir/Windows placement 测试、deep module 组织和验证命令。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"要求复用既有 services/distribution.rs，而非在 Skill/Prompt 外层复制规则。"}

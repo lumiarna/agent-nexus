@@ -529,6 +529,39 @@ fn managed_project_placement_never_becomes_a_canonical_skill_on_rescan() {
 
 #[test]
 #[serial]
+fn moves_global_agent_skill_source_with_directory_placement() {
+    let db = Arc::new(Database::open_in_memory().expect("open database"));
+    let skills = service(db);
+    let root = TempDir::new().expect("temp dir");
+    let home = isolate_home(&root);
+    let source = home.join(".agents/skills/global-skill");
+    let target = home.join(".codex/skills/global-skill");
+    write_skill(&source, "---\nname: global-skill\n---\n");
+    let rows = skills.scan_skills().expect("scan global Skill");
+    let id = rows[0].skill().skill_id.clone();
+
+    let moved = skills
+        .move_skill_source(MoveSkillSourceInput {
+            skill_id: id.clone(),
+            agent: "CodeX".to_string(),
+        })
+        .expect("move global Skill source");
+    let moved = moved
+        .iter()
+        .find(|row| row.skill().skill_id == id)
+        .expect("moved Skill row");
+    let SkillRow::AgentCanonical { cells, .. } = moved else {
+        panic!("expected Agent canonical Skill");
+    };
+
+    assert_eq!(cells["CodeX"], AgentCellRole::Source);
+    assert_eq!(cells["Generic Agent"], AgentCellRole::Target);
+    assert!(target.join("SKILL.md").is_file());
+    assert_link_points_to(&target, &source);
+}
+
+#[test]
+#[serial]
 fn retained_mutations_return_authoritative_catalog_and_reject_custom_target_command() {
     let db = Arc::new(Database::open_in_memory().expect("open database"));
     let projects = ProjectService::new(db.clone());

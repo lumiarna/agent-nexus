@@ -1,1 +1,6 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file":".trellis/spec/nexus-core/backend/index.md","reason":"检查 nexus-core 领域层总体规范与必读依据。"}
+{"file":".trellis/spec/nexus-core/backend/directory-structure.md","reason":"检查 relocation 是否真正深化 Distribution module，且 adapter 只保留真实差异。"}
+{"file":".trellis/spec/nexus-core/backend/database-guidelines.md","reason":"检查 source 唯一性、事务范围、placement 补偿和既有 source move contract。"}
+{"file":".trellis/spec/nexus-core/backend/error-handling.md","reason":"检查 Validation/Io/Database 保留与补偿失败 Reconciliation 报告。"}
+{"file":".trellis/spec/nexus-core/backend/quality-guidelines.md","reason":"检查测试边界、Windows SQLite/placement 约定和全量验证命令。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查共同状态机是否只实现一次，未形成新重复 helper。"}

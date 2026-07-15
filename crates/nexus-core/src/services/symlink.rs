@@ -158,8 +158,55 @@ pub fn create_managed_directory_link(source: &Path, target: &Path) -> AppResult<
     create_symlink_placement(source, target)
 }
 
-pub fn remove_managed_directory_link_if_present(_source: &Path, target: &Path) -> AppResult<()> {
-    remove_symlink_if_present(target)
+pub fn remove_managed_directory_link_if_present(source: &Path, target: &Path) -> AppResult<()> {
+    if managed_directory_placement_points_to(target, source)? {
+        remove_symlink(target)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn managed_directory_placement_points_to(
+    target: &Path,
+    source: &Path,
+) -> AppResult<bool> {
+    let metadata = match fs::symlink_metadata(target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.file_type().is_symlink() && !is_junction(target) {
+        return Ok(false);
+    }
+    placement_resolves_to(target, source)
+}
+
+pub(crate) fn managed_file_placement_points_to(target: &Path, source: &Path) -> AppResult<bool> {
+    let metadata = match fs::symlink_metadata(target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() || is_junction(target) {
+        return placement_resolves_to(target, source);
+    }
+    if metadata.is_file() {
+        return same_file_entry(source, target);
+    }
+    Ok(false)
+}
+
+fn placement_resolves_to(target: &Path, source: &Path) -> AppResult<bool> {
+    let resolved_target = match target.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let resolved_source = match source.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(resolved_target == resolved_source)
 }
 
 pub fn remove_managed_file_link_if_present(source: &Path, target: &Path) -> AppResult<()> {
@@ -170,7 +217,10 @@ pub fn remove_managed_file_link_if_present(source: &Path, target: &Path) -> AppR
     };
 
     if metadata.file_type().is_symlink() || is_junction(target) {
-        return remove_symlink(target);
+        if managed_file_placement_points_to(target, source)? {
+            remove_symlink(target)?;
+        }
+        return Ok(());
     }
 
     if metadata.is_file() && same_file_entry(source, target)? {
@@ -383,6 +433,34 @@ mod tests {
     }
 
     #[test]
+    fn directory_removal_does_not_delete_a_replaced_placement() {
+        let root = tempfile::TempDir::new().expect("create temp dir");
+        let source = root.path().join("source");
+        let replacement = root.path().join("replacement");
+        let target = root.path().join("target");
+        fs::create_dir_all(&source).expect("create source dir");
+        fs::create_dir_all(&replacement).expect("create replacement dir");
+        create_managed_directory_link(&replacement, &target).expect("create replacement link");
+
+        remove_managed_directory_link_if_present(&source, &target)
+            .expect("ignore replaced placement");
+
+        assert!(managed_directory_placement_points_to(&target, &replacement)
+            .expect("replacement remains"));
+    }
+
+    #[test]
+    fn recognizes_managed_hard_link_identity() {
+        let root = tempfile::TempDir::new().expect("create temp dir");
+        let source = root.path().join("source.txt");
+        let target = root.path().join("target.txt");
+        fs::write(&source, "x").expect("write source file");
+        fs::hard_link(&source, &target).expect("create hard link");
+
+        assert!(managed_file_placement_points_to(&target, &source).expect("recognize hard link"));
+    }
+
+    #[test]
     fn removes_managed_hard_link_target_without_deleting_source() {
         let root = tempfile::TempDir::new().expect("create temp dir");
         let source = root.path().join("source.txt");
@@ -396,6 +474,24 @@ mod tests {
         assert!(source.exists());
         assert!(!target.exists());
         assert_eq!(fs::read_to_string(&source).expect("read source"), "x");
+    }
+
+    #[test]
+    fn does_not_remove_replaced_file_placement() {
+        let root = tempfile::TempDir::new().expect("create temp dir");
+        let source = root.path().join("source.txt");
+        let replacement = root.path().join("replacement.txt");
+        let target = root.path().join("target.txt");
+        fs::write(&source, "source").expect("write source file");
+        fs::write(&replacement, "replacement").expect("write replacement file");
+        create_managed_file_link(&replacement, &target).expect("create replacement link");
+
+        remove_managed_file_link_if_present(&source, &target)
+            .expect("ignore replaced file placement");
+
+        assert!(
+            managed_file_placement_points_to(&target, &replacement).expect("replacement remains")
+        );
     }
 
     #[test]

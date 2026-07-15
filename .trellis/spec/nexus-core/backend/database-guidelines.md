@@ -121,54 +121,65 @@ return Ok(catalog);
 ## Scenario: Agent Matrix source move for Skill / Prompt
 
 ### 1. Scope / Trigger
-- Trigger: 为 `Skill` 或 `Prompt` 的 Agent Matrix 增加/维护“移动 Source Agent”能力，涉及 service command、`*_distributions` source/target 角色、canonical 文件/目录移动和 managed placement 回滚。
+- Trigger: 为 `Skill` 或 `Prompt` 的 Agent Matrix 增加/维护“移动 Source Agent”能力，涉及 canonical 文件/目录移动、`*_distributions` source/target 角色、Prompt extra 登记或任一失败补偿。
+- 共同 preflight、remove → rename → place-old-source → persist 顺序、role transaction 与逆序补偿必须留在 `services/distribution.rs`；Skill/Prompt service 只作为两个真实 asset adapter。
 
 ### 2. Signatures
 - Core service:
-  - `SkillService::move_skill_source(MoveSkillSourceInput { skill_id, agent }) -> AppResult<Skill>`
+  - `SkillService::move_skill_source(MoveSkillSourceInput { skill_id, agent }) -> AppResult<Vec<SkillRow>>`
   - `PromptService::move_prompt_source(MovePromptSourceInput { prompt_id, agent }) -> AppResult<Prompt>`
-- Tauri command:
-  - `move_skill_source(input: MoveSkillSourceInput) -> AppResult<Skill>`
-  - `move_prompt_source(input: MovePromptSourceInput) -> AppResult<Prompt>`
-- Frontend IPC payload uses camelCase: `{ skillId, agent }` / `{ promptId, agent }`.
+- Distribution seam:
+  - `distribution::relocate_source(adapter, asset_id, target_agent) -> AppResult<RelocationOutcome>`
+  - `SourceRelocationAdapter::plan_relocation(...) -> AppResult<RelocationPlan<_>>` 只能读取、校验和计算。
+  - `SourceRelocationAdapter::persist_asset_move(&Transaction, ...) -> AppResult<()>` 只更新资产特有字段。
+- Tauri command 返回形状与 Core service 相同；Frontend IPC payload 使用 camelCase：`{ skillId, agent }` / `{ promptId, agent }`。
 
 ### 3. Contracts
 - 只允许 agent-sourced canonical asset 移动 source；`project_custom` Skill 没有 Agent source，不能通过该命令赋予 source。
-- 移动后必须恰好一个 `source` row：目标 Agent 变 `source`，旧 source Agent 变 `target`，旧 canonical path 成为指向新 canonical path 的 managed placement。
-- 若目标 Agent 原本是 `target`，先移除目标 managed placement，再把 canonical source 移动到目标 path；不能覆盖非托管文件/目录。
-- 文件系统操作早于 DB 写入时必须有回滚思路：DB 更新失败要尽力移回 canonical path、移除新建旧 source placement，并恢复原目标 target placement。
-- Prompt project extra file 从 `AGENTS*.md` / `CLAUDE*.md` namespace 互换时，必须同步更新 `projects.extra_prompt_files`，否则 rescan 后 canonical row 会丢失。
+- 调用者不得手工编排 remove、rename、placement、role update 或 rollback；内部 plan、runtime seam 与 typed undo journal 不进入调用 interface。
+- destructive mutation 前同时校验数据库记录与实际 placement 身份。目标只有实际指向旧 canonical source 时才是 managed target；被普通内容、其他 symlink/junction 或其他 hard link 替换时不得删除。
+- 固定顺序为：完整 preflight → 移除既有 managed target → rename canonical source → 在旧 source path 建 placement → transaction 内更新资产字段与 Distribution roles → commit。
+- 资产字段、Prompt `projects.extra_prompt_files` 登记、旧 source=`target` 和新 source=`source` 必须在同一 transaction 中提交；transaction 内重新校验当前 source，写入后验证恰好一个 source。
+- 成功后目标 Agent 是唯一 `source`，旧 source Agent 是 `target`，旧 canonical path 是指向新 canonical path 的 managed placement；其他 Agent role 不变。
+- Prompt project extra file 在 `AGENTS*.md` / `CLAUDE*.md` namespace 间 stem-swap 时，必须在同一 transaction 中更新 `projects.extra_prompt_files`，否则 rescan 后 canonical row 会丢失。
+- 任一步失败时 typed journal 逆序补偿；补偿全部成功保留原始错误 kind。补偿自身失败仍继续尝试剩余 undo，最终返回 `AppError::Reconciliation`，message 包含原始失败、失败补偿步骤与相关路径；不得用 `let _ = ...` 静默吞错。
+- 本场景不持久化 journal，也不承诺进程崩溃或连续 I/O 故障后的自动恢复。
 
 ### 4. Validation & Error Matrix
 - asset 不存在 -> `Validation("skill was not found")` / `Validation("prompt was not found")`
 - Skill `source_kind != 'agent'` -> `Validation("only Agent-sourced Skills can move source")`
 - 目标 Agent 无对应 surface -> validation error (`does not support skill placement` / `does not support prompt targets`)
-- 目标 Agent 已是当前 source -> 返回当前 asset，不做破坏性操作
-- 目标 path 存在非托管内容或真实 IO 错误 -> 返回错误，不覆盖，尽力恢复已移除 target placement
+- 目标 Agent 已是当前 source -> `RelocationOutcome::Unchanged`，service 返回当前 authoritative read model，不产生 mutation
+- DB target row 存在但 placement 已缺失 -> 按 vacant target 收敛
+- target path 存在非托管或被替换内容 -> Validation/IO，绝不覆盖或删除
+- 正向步骤失败且补偿成功 -> 返回原始 Validation / IO / Database
+- 任一补偿失败 -> `Reconciliation`，保留原始错误与所有补偿失败上下文
 
 ### 5. Good/Base/Bad Cases
-- Good: Ctrl-click `target` cell 后目标 Agent 唯一 `source`，旧 source 是 `target`，旧 canonical path 是 managed link。
-- Base: 普通点击仍走 `set_skill_target` / `set_prompt_target`，只切换 target/none，不移动 canonical path。
-- Bad: 只更新 DB 的 `source_agent` 而不移动 canonical 文件/目录；下一次 scan 会按真实文件位置把 source 又识别回旧 Agent。
+- Good: Ctrl-click managed `target` 后，Distribution module 一次编排完成文件步骤与 transaction；目标 Agent 唯一 `source`，旧 source 是可用 `target`。
+- Base: 普通点击仍走 `set_skill_target` / `set_prompt_target`；同 source relocation 是无副作用 no-op；缺失的陈旧 target placement 可收敛。
+- Bad: Skill/Prompt 各自复制完整状态机、只按 DB role 删除 target path、先提交 role 再移动文件，或补偿时静默忽略错误。
 
 ### 6. Tests Required
-- `crates/nexus-core/tests/skill_service.rs`: agent-sourced Skill move source，assert source 唯一、旧 source 变 target、旧 source path link 指向新 canonical path。
-- `crates/nexus-core/tests/skill_service.rs`: Project custom Skill 调 move source 被拒绝。
-- `crates/nexus-core/tests/prompt_service.rs`: global/project Prompt move source，assert source 唯一、旧 source target link、内容仍可读。
-- Extra prompt case：移动 project extra prompt 后 assert `projects.extra_prompt_files` 从旧相对路径更新到新相对路径，并且 rescan 后 row 保留。
+- `services::distribution` module tests：共同覆盖 no-op、vacant/managed/conflicting target、remove/rename/place-old-source、资产 DB/role DB 失败、严格逆序补偿和补偿失败 `Reconciliation`；断言可观测文件状态及 source 唯一性，而不只断言调用顺序。
+- `crates/nexus-core/tests/skill_service.rs`：global/project agent-sourced Skill directory move、Project custom Skill 拒绝、旧 source placement 指向新 canonical source。
+- `crates/nexus-core/tests/prompt_service.rs`：global/project Prompt file move、primary/extra stem-swap、内容可读、extra 登记更新与 rescan 保留。
+- `services::symlink` tests：文件 symlink 与 Windows hard-link fallback 的 managed identity、replacement 不删除和安全移除。
+- 共同失败矩阵只在 Distribution seam 测试一次；asset tests 只保留真实物理差异与端到端成功路径。
 
 ### 7. Wrong vs Correct
 #### Wrong
 ```rust
-// 只改 DB，不移动 canonical source；scan 会按文件系统事实覆盖回来。
-UPDATE skills SET source_agent = 'Claude Code' WHERE id = ?1;
+// 仅凭 DB role 删除路径，并在两个 service 中复制状态机；替换内容可能被删除，补偿也会漂移。
+if target_was_target { fs::remove_file(&new_path)?; }
+fs::rename(&old_path, &new_path)?;
+update_roles(&conn)?;
 ```
 
 #### Correct
 ```rust
-// 先移除目标 managed target，移动 canonical path，创建旧 source placement，
-// 再在事务中更新 canonical_path/source_agent 与 distribution rows；失败则尽力回滚文件系统。
-service.move_skill_source(MoveSkillSourceInput { skill_id, agent })?;
+// Adapter 只计划和持久化资产差异；Distribution 隐藏身份检查、顺序、transaction 与补偿。
+distribution::relocate_source(self, asset_id, target_agent)?;
 ```
 
 ## 常见错误 / anti-pattern

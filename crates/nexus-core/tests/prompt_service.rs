@@ -347,6 +347,33 @@ fn toggles_global_prompt_distribution_target_link() {
 
 #[test]
 #[serial]
+fn moves_global_prompt_source_with_the_target_agents_file_name() {
+    let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
+    let prompts = PromptService::new(db);
+
+    with_isolated_home(|home| {
+        let source_file = home.join(".codex/AGENTS.md");
+        let target_file = home.join(".claude/CLAUDE.md");
+        write_prompt(&source_file, "# Global instructions\n");
+        let scanned = prompts.scan_prompts().expect("scan global prompt");
+
+        let moved = prompts
+            .move_prompt_source(MovePromptSourceInput {
+                prompt_id: scanned[0].id.clone(),
+                agent: "Claude Code".to_string(),
+            })
+            .expect("move global source to Claude Code");
+
+        assert_eq!(moved.scope, "global");
+        assert_eq!(moved.name, "CLAUDE.md");
+        assert_eq!(moved.cells["Claude Code"], "source");
+        assert_eq!(moved.cells["CodeX"], "target");
+        assert_file_distribution_tracks_source_writes(&target_file, &source_file);
+    });
+}
+
+#[test]
+#[serial]
 fn moves_project_prompt_source_and_turns_previous_source_into_target() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
