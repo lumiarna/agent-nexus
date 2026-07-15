@@ -57,10 +57,10 @@ async fn codex_models_are_supported_when_auth_exists() {
     let capability = service
         .list_provider_trigger_models("codex")
         .await
-        .expect_err("without mocked network the request should fail after support is detected");
+        .expect("should succeed when auth exists");
 
-    let message = format!("{capability:?}");
-    assert!(message.contains("CodeX models") || message.contains("chatgpt.com"));
+    assert!(capability.supported, "codex should be supported with auth");
+    assert!(!capability.models.is_empty(), "expected at least one CodeX model");
 }
 
 #[test]
