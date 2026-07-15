@@ -4,7 +4,7 @@ use std::{
 };
 
 use serde::Deserialize;
-use time::{format_description::well_known::Rfc3339, Month, OffsetDateTime, UtcOffset};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::{
     error::{AppError, AppResult},
@@ -146,8 +146,9 @@ pub fn codex_quota_from_usage_response(
 }
 
 /// Map the available rate-limit reset credits to value-only windows, soonest
-/// expiry first. Each credit becomes one row showing its title and expiry date;
-/// redeemed or expired credits are dropped.
+/// expiry first. Each credit becomes one row carrying its title and exact expiry;
+/// redeemed or expired credits are dropped. The frontend formats the timestamp
+/// in the user's local time zone.
 pub fn codex_reset_credit_windows(response: CodexResetCreditsResponse) -> Vec<ProviderQuotaWindow> {
     let mut credits = response
         .credits
@@ -169,18 +170,15 @@ pub fn codex_reset_credit_windows(response: CodexResetCreditsResponse) -> Vec<Pr
                 .title
                 .filter(|title| !title.trim().is_empty())
                 .unwrap_or_else(|| "Reset credit".to_string());
-            let value_label = credit
-                .expires_at
-                .as_deref()
-                .and_then(format_reset_credit_expiry)
-                .unwrap_or_else(|| "Available".to_string());
             ProviderQuotaWindow {
                 label,
                 kind: ProviderQuotaWindowKind::Rolling,
                 used: 0,
-                value_label: Some(value_label),
+                value_label: Some("Available".to_string()),
                 value_only: true,
-                reset_at: None,
+                reset_at: credit
+                    .expires_at
+                    .filter(|expiry| parse_rfc3339(expiry).is_some()),
                 unlimited: false,
             }
         })
@@ -189,32 +187,6 @@ pub fn codex_reset_credit_windows(response: CodexResetCreditsResponse) -> Vec<Pr
 
 fn parse_rfc3339(value: &str) -> Option<OffsetDateTime> {
     OffsetDateTime::parse(value, &Rfc3339).ok()
-}
-
-fn format_reset_credit_expiry(expires_at: &str) -> Option<String> {
-    let expiry = parse_rfc3339(expires_at)?.to_offset(UtcOffset::UTC);
-    Some(format!(
-        "Expires {} {}",
-        month_abbreviation(expiry.month()),
-        expiry.day()
-    ))
-}
-
-fn month_abbreviation(month: Month) -> &'static str {
-    match month {
-        Month::January => "Jan",
-        Month::February => "Feb",
-        Month::March => "Mar",
-        Month::April => "Apr",
-        Month::May => "May",
-        Month::June => "Jun",
-        Month::July => "Jul",
-        Month::August => "Aug",
-        Month::September => "Sep",
-        Month::October => "Oct",
-        Month::November => "Nov",
-        Month::December => "Dec",
-    }
 }
 
 fn derive_snapshot(

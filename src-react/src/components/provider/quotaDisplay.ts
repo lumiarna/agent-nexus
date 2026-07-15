@@ -57,9 +57,9 @@ export function formatProviderQuotaDisplay(
       const pace = computePace(window, options.now ?? new Date());
       return {
         label: window.label,
-        usedLabel: window.valueLabel ?? (window.unlimited ? "Unlimited" : `${window.used}%`),
+        usedLabel: formatWindowValue(window, options),
         used: window.used,
-        reset: formatWindowReset(window, options),
+        reset: valueOnly ? "" : formatWindowReset(window, options),
         unlimited: window.unlimited ?? false,
         ...(valueOnly ? { valueOnly } : {}),
         ...(pace != null ? { pace } : {}),
@@ -69,6 +69,41 @@ export function formatProviderQuotaDisplay(
 }
 
 const WEEKLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function formatWindowValue(
+  window: ProviderQuotaWindowInput,
+  options: ProviderQuotaDisplayOptions,
+): string {
+  if (
+    window.valueOnly &&
+    window.resetAt &&
+    (!window.valueLabel || window.valueLabel === "Available")
+  ) {
+    return formatLocalExpiryTime(window.resetAt, options.timeZone) ?? window.valueLabel ?? "Available";
+  }
+  return window.valueLabel ?? (window.unlimited ? "Unlimited" : `${window.used}%`);
+}
+
+function formatLocalExpiryTime(expiresAt: string, timeZone?: string): string | undefined {
+  const expiry = new Date(expiresAt);
+  if (Number.isNaN(expiry.getTime())) return undefined;
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  }).formatToParts(expiry);
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  const hour = parts.find((part) => part.type === "hour")?.value;
+  const minute = parts.find((part) => part.type === "minute")?.value;
+
+  if (!month || !day || !hour || !minute) return undefined;
+  return `Expires ${month} ${day} ${hour}:${minute}`;
+}
 
 /** Share of the window already elapsed, as a 0–100 percent, for placing the pace
  *  marker. Only weekly/monthly windows qualify: their length is a protocol fact

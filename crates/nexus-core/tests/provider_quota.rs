@@ -588,11 +588,18 @@ fn codex_reset_credits_map_available_credits_to_value_only_windows() {
     // Redeemed credits are dropped; available ones are sorted soonest-expiry first.
     assert_eq!(windows.len(), 2);
     assert_eq!(windows[0].label, "Full reset (Weekly + 5 hr)");
-    assert_eq!(windows[0].value_label.as_deref(), Some("Expires Jul 15"));
+    assert_eq!(windows[0].value_label.as_deref(), Some("Available"));
     assert!(windows[0].value_only);
     assert_eq!(windows[0].used, 0);
-    assert_eq!(windows[0].reset_at, None);
-    assert_eq!(windows[1].value_label.as_deref(), Some("Expires Jul 22"));
+    assert_eq!(
+        windows[0].reset_at.as_deref(),
+        Some("2026-07-15T19:22:24.080059Z")
+    );
+    assert_eq!(windows[1].value_label.as_deref(), Some("Available"));
+    assert_eq!(
+        windows[1].reset_at.as_deref(),
+        Some("2026-07-22T19:22:24.080059Z")
+    );
 }
 
 #[test]

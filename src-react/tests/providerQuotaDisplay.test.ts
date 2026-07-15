@@ -100,6 +100,37 @@ test("Copilot unlimited window renders an Unlimited label", () => {
   });
 });
 
+test("Codex reset credits render expiry in local 24-hour time to the minute", () => {
+  const provider = {
+    primary: null,
+    windows: [
+      {
+        label: "Full reset (Weekly + 5 hr)",
+        used: 0,
+        kind: "rolling",
+        valueLabel: "Available",
+        valueOnly: true,
+        resetAt: "2026-07-15T19:22:24.080059Z",
+      },
+    ],
+  };
+
+  assert.deepEqual(formatProviderQuotaDisplay(provider, { timeZone: "Asia/Shanghai" }), {
+    primaryLabel: "",
+    primaryCaption: "",
+    windows: [
+      {
+        label: "Full reset (Weekly + 5 hr)",
+        usedLabel: "Expires Jul 16 03:22",
+        used: 0,
+        reset: "",
+        unlimited: false,
+        valueOnly: true,
+      },
+    ],
+  });
+});
+
 test("balance-only windows render the backend value label without a primary percent", () => {
   const provider = {
     primary: null,
