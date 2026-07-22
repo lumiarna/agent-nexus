@@ -5,26 +5,56 @@ use std::{
 
 use crate::error::{AppError, AppResult};
 
+/// Return the native home directory used by every local path consumer.
+///
+/// On Windows, `USERPROFILE` is authoritative because Git Bash may expose a
+/// POSIX-style `HOME` (for example, `/c/Users/name`) that native applications
+/// cannot consume. `HOME` remains a fallback for Windows environments without
+/// `USERPROFILE`. Other platforms use `HOME` only.
 pub fn home_dir() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .or_else(|| env::var_os("USERPROFILE"))
+    #[cfg(windows)]
+    {
+        env_dir("USERPROFILE").or_else(|| env_dir("HOME"))
+    }
+    #[cfg(not(windows))]
+    {
+        env_dir("HOME")
+    }
+}
+
+fn env_dir(variable: &str) -> Option<PathBuf> {
+    env::var_os(variable)
+        .filter(|path| !path.is_empty())
         .map(PathBuf::from)
+}
+
+fn unresolved_home_error() -> AppError {
+    #[cfg(windows)]
+    let message = "cannot resolve '~': USERPROFILE and HOME environment variables are not set";
+    #[cfg(not(windows))]
+    let message = "cannot resolve '~': HOME environment variable is not set";
+
+    AppError::Validation(message.to_string())
 }
 
 pub fn resolve_local_path(raw: &str) -> AppResult<PathBuf> {
     if raw == "~" {
-        return home_dir().ok_or_else(|| {
-            AppError::Validation(
-                "cannot resolve '~': HOME environment variable is not set".to_string(),
-            )
-        });
+        return home_dir().ok_or_else(unresolved_home_error);
     }
-    if let Some(rest) = raw.strip_prefix("~/") {
-        return home_dir().map(|home| home.join(rest)).ok_or_else(|| {
-            AppError::Validation(
-                "cannot resolve '~': HOME environment variable is not set".to_string(),
-            )
-        });
+    let home_relative = raw.strip_prefix("~/").or_else(|| {
+        #[cfg(windows)]
+        {
+            raw.strip_prefix(r"~\")
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    });
+    if let Some(rest) = home_relative {
+        return home_dir()
+            .map(|home| home.join(rest))
+            .ok_or_else(unresolved_home_error);
     }
     if let Some(path) = expand_supported_env_path(raw)? {
         return Ok(path);
@@ -88,6 +118,9 @@ pub fn collapse_home(path: &str) -> String {
     }
     if let Some(rest) = path.strip_prefix(&home) {
         if rest.starts_with('/') || rest.starts_with('\\') {
+            #[cfg(windows)]
+            return format!("~/{}", rest[1..].replace('\\', "/"));
+            #[cfg(not(windows))]
             return format!("~{rest}");
         }
     }
@@ -115,17 +148,35 @@ mod tests {
     use std::{env, path::Path};
     use tempfile::TempDir;
 
-    fn with_home<F: FnOnce(&Path)>(home: &TempDir, f: F) {
-        let previous = env::var_os("HOME");
-        env::set_var("HOME", home.path());
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(home.path())));
-        match previous {
+    fn with_home_vars<F: FnOnce()>(home: Option<&Path>, userprofile: Option<&Path>, f: F) {
+        let previous_home = env::var_os("HOME");
+        let previous_userprofile = env::var_os("USERPROFILE");
+        match home {
+            Some(path) => env::set_var("HOME", path),
+            None => env::remove_var("HOME"),
+        }
+        match userprofile {
+            Some(path) => env::set_var("USERPROFILE", path),
+            None => env::remove_var("USERPROFILE"),
+        }
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+
+        match previous_home {
             Some(value) => env::set_var("HOME", value),
             None => env::remove_var("HOME"),
+        }
+        match previous_userprofile {
+            Some(value) => env::set_var("USERPROFILE", value),
+            None => env::remove_var("USERPROFILE"),
         }
         if let Err(payload) = result {
             std::panic::resume_unwind(payload);
         }
+    }
+
+    fn with_home<F: FnOnce(&Path)>(home: &TempDir, f: F) {
+        with_home_vars(Some(home.path()), Some(home.path()), || f(home.path()));
     }
 
     #[test]
@@ -186,6 +237,41 @@ mod tests {
             resolve_local_path("plain").expect("resolve plain"),
             PathBuf::from("plain")
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[serial]
+    fn shared_home_resolver_prefers_userprofile_over_git_bash_home() {
+        with_home_vars(
+            Some(Path::new("/c/Users/SONGSH2")),
+            Some(Path::new(r"C:\Users\SONGSH2")),
+            || {
+                assert_eq!(home_dir(), Some(PathBuf::from(r"C:\Users\SONGSH2")));
+                assert_eq!(
+                    resolve_local_path("~/.pi/agent").expect("resolve config root"),
+                    PathBuf::from(r"C:\Users\SONGSH2\.pi\agent")
+                );
+                assert_eq!(
+                    resolve_local_path(r"~\.pi\agent").expect("resolve collapsed Windows path"),
+                    PathBuf::from(r"C:\Users\SONGSH2\.pi\agent")
+                );
+                assert_eq!(collapse_home(r"C:\Users\SONGSH2\.pi\agent"), "~/.pi/agent");
+            },
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[serial]
+    fn shared_home_resolver_falls_back_to_home_without_userprofile() {
+        with_home_vars(Some(Path::new(r"C:\FallbackHome")), None, || {
+            assert_eq!(home_dir(), Some(PathBuf::from(r"C:\FallbackHome")));
+            assert_eq!(
+                resolve_local_path("~/config").expect("resolve fallback home"),
+                PathBuf::from(r"C:\FallbackHome\config")
+            );
+        });
     }
 
     #[cfg(windows)]

@@ -1,5 +1,11 @@
 use std::{env, ffi::OsString, fs, path::Path, sync::Arc};
 
+#[cfg(unix)]
+use nexus_core::services::{
+    prompts::{PromptService, SetPromptTargetInput},
+    skills::SetSkillTargetInput,
+    symlink::create_symlink_placement,
+};
 use nexus_core::{
     database::Database,
     services::{
@@ -7,12 +13,7 @@ use nexus_core::{
         paths,
         project_symlinks::ProjectSymlinkInventory,
         projects::ProjectService,
-        prompts::{PromptService, SetPromptTargetInput},
-        skills::{
-            ProjectCustomSkillDestination, ProjectCustomSkillIntent, SetSkillTargetInput, SkillRow,
-            SkillService,
-        },
-        symlink::create_symlink_placement,
+        skills::{ProjectCustomSkillDestination, ProjectCustomSkillIntent, SkillRow, SkillService},
     },
 };
 use serial_test::serial;
@@ -50,7 +51,8 @@ fn git_repo(parent: &TempDir, name: &str) -> String {
 }
 
 fn display_path(path: &Path) -> String {
-    paths::path_to_string(path, "path").expect("display path")
+    let path = paths::path_to_string(path, "path").expect("display path");
+    paths::collapse_home(&path)
 }
 
 fn create_directory_link(source: &Path, target: &Path) {
@@ -79,6 +81,7 @@ fn write_skill(dir: &Path) {
 }
 
 #[test]
+#[serial]
 fn lists_and_deletes_registered_project_symlinks() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -124,6 +127,7 @@ fn lists_and_deletes_registered_project_symlinks() {
 }
 
 #[test]
+#[serial]
 fn lists_project_symlinks_by_project_display_order() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -174,6 +178,7 @@ fn lists_project_symlinks_by_project_display_order() {
 
 #[cfg(unix)]
 #[test]
+#[serial]
 fn skips_project_skill_and_prompt_distribution_links() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());

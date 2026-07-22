@@ -1,4 +1,11 @@
+use std::{fs, io::ErrorKind, path::PathBuf};
+
 use serde::Serialize;
+
+use crate::{
+    error::{AppError, AppResult},
+    services::paths::resolve_local_path,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -165,6 +172,35 @@ pub fn agent_by_name(name: &str) -> Option<&'static AgentCapabilitySurface> {
     AGENT_CAPABILITY_SURFACES
         .iter()
         .find(|agent| agent.name == name)
+}
+
+/// Resolve and validate a canonical Agent's configuration root.
+pub fn resolve_agent_config_root(name: &str) -> AppResult<PathBuf> {
+    let agent = agent_by_name(name)
+        .ok_or_else(|| AppError::Validation(format!("unknown agent: {name}")))?;
+    let config_root = resolve_local_path(agent.config_dir)?;
+    let metadata = match fs::metadata(&config_root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Err(AppError::Validation(format!(
+                "config root for {name} does not exist: {}",
+                config_root.display()
+            )));
+        }
+        Err(error) => {
+            return Err(AppError::Io(format!(
+                "failed to inspect config root for {name} at {}: {error}",
+                config_root.display()
+            )));
+        }
+    };
+    if !metadata.is_dir() {
+        return Err(AppError::Validation(format!(
+            "config root for {name} is not a directory: {}",
+            config_root.display()
+        )));
+    }
+    Ok(config_root)
 }
 
 pub fn agent_order_index(name: &str) -> Option<usize> {

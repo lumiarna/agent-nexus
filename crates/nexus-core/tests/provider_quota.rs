@@ -165,8 +165,9 @@ async fn provider_quota_service_lists_and_dispatches_custom_provider_without_api
         }"#,
     )
     .expect("write OpenCode config");
-    let previous_home = env::var_os("HOME");
+    let previous_home = (env::var_os("HOME"), env::var_os("USERPROFILE"));
     env::set_var("HOME", temp_home.path());
+    env::set_var("USERPROFILE", temp_home.path());
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
@@ -178,7 +179,8 @@ async fn provider_quota_service_lists_and_dispatches_custom_provider_without_api
         .await
         .expect("dispatch custom provider");
 
-    restore_env_var("HOME", previous_home);
+    restore_env_var("HOME", previous_home.0);
+    restore_env_var("USERPROFILE", previous_home.1);
 
     assert_eq!(providers.len(), 1);
     assert_eq!(providers[0].id, "custom-gateway");
@@ -230,10 +232,11 @@ async fn provider_quota_service_ignores_opencode_config_env_overrides() {
 
     let previous_config_file = env::var_os("OPENCODE_CONFIG_FILE");
     let previous_config_dir = env::var_os("OPENCODE_CONFIG_DIR");
-    let previous_home = env::var_os("HOME");
+    let previous_home = (env::var_os("HOME"), env::var_os("USERPROFILE"));
     env::set_var("OPENCODE_CONFIG_FILE", &override_file);
     env::set_var("OPENCODE_CONFIG_DIR", &override_dir);
     env::set_var("HOME", temp_home.path());
+    env::set_var("USERPROFILE", temp_home.path());
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
@@ -243,7 +246,8 @@ async fn provider_quota_service_ignores_opencode_config_env_overrides() {
 
     restore_env_var("OPENCODE_CONFIG_FILE", previous_config_file);
     restore_env_var("OPENCODE_CONFIG_DIR", previous_config_dir);
-    restore_env_var("HOME", previous_home);
+    restore_env_var("HOME", previous_home.0);
+    restore_env_var("USERPROFILE", previous_home.1);
 
     assert_eq!(providers.len(), 1);
     assert_eq!(providers[0].id, "custom-gateway");
@@ -332,8 +336,9 @@ async fn provider_quota_service_dispatches_qoder_adapter_without_session_cookie(
 async fn provider_quota_service_dispatches_minimax_token_plan_cn_adapter_without_credentials() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let temp_home = tempfile::tempdir().expect("create temp home");
-    let previous_home = env::var_os("HOME");
+    let previous_home = (env::var_os("HOME"), env::var_os("USERPROFILE"));
     env::set_var("HOME", temp_home.path());
+    env::set_var("USERPROFILE", temp_home.path());
 
     let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
@@ -341,7 +346,8 @@ async fn provider_quota_service_dispatches_minimax_token_plan_cn_adapter_without
         .await
         .expect("dispatch MiniMax Token Plan CN adapter");
 
-    restore_env_var("HOME", previous_home);
+    restore_env_var("HOME", previous_home.0);
+    restore_env_var("USERPROFILE", previous_home.1);
 
     assert_eq!(snapshot.provider_id, "minimax-token");
     assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
@@ -355,8 +361,9 @@ async fn provider_quota_service_dispatches_minimax_token_plan_cn_adapter_without
 async fn provider_quota_service_dispatches_deepseek_adapter_without_credentials() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let temp_home = tempfile::tempdir().expect("create temp home");
-    let previous_home = env::var_os("HOME");
+    let previous_home = (env::var_os("HOME"), env::var_os("USERPROFILE"));
     env::set_var("HOME", temp_home.path());
+    env::set_var("USERPROFILE", temp_home.path());
 
     let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
@@ -364,7 +371,8 @@ async fn provider_quota_service_dispatches_deepseek_adapter_without_credentials(
         .await
         .expect("dispatch DeepSeek adapter");
 
-    restore_env_var("HOME", previous_home);
+    restore_env_var("HOME", previous_home.0);
+    restore_env_var("USERPROFILE", previous_home.1);
 
     assert_eq!(snapshot.provider_id, "deepseek");
     assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
@@ -378,8 +386,9 @@ async fn provider_quota_service_dispatches_deepseek_adapter_without_credentials(
 async fn provider_quota_service_dispatches_openrouter_adapter_without_credentials() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let temp_home = tempfile::tempdir().expect("create temp home");
-    let previous_home = env::var_os("HOME");
+    let previous_home = (env::var_os("HOME"), env::var_os("USERPROFILE"));
     env::set_var("HOME", temp_home.path());
+    env::set_var("USERPROFILE", temp_home.path());
 
     let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
     let snapshot = service
@@ -387,7 +396,8 @@ async fn provider_quota_service_dispatches_openrouter_adapter_without_credential
         .await
         .expect("dispatch OpenRouter adapter");
 
-    restore_env_var("HOME", previous_home);
+    restore_env_var("HOME", previous_home.0);
+    restore_env_var("USERPROFILE", previous_home.1);
 
     assert_eq!(snapshot.provider_id, "openrouter");
     assert_eq!(snapshot.status, ProviderQuotaStatus::NoCreds);
@@ -409,9 +419,10 @@ async fn configured_provider_credentials_ignore_opencode_auth_file_env() {
     )
     .expect("write env override auth file");
 
-    let previous_home = env::var_os("HOME");
+    let previous_home = (env::var_os("HOME"), env::var_os("USERPROFILE"));
     let previous_auth_file = env::var_os("OPENCODE_AUTH_FILE");
     env::set_var("HOME", temp_home.path());
+    env::set_var("USERPROFILE", temp_home.path());
     env::set_var("OPENCODE_AUTH_FILE", &override_file);
 
     let service = ProviderQuotaService::new(AppConfigService::new(db), request_logger());
@@ -420,7 +431,8 @@ async fn configured_provider_credentials_ignore_opencode_auth_file_env() {
         .await
         .expect("dispatch DeepSeek adapter");
 
-    restore_env_var("HOME", previous_home);
+    restore_env_var("HOME", previous_home.0);
+    restore_env_var("USERPROFILE", previous_home.1);
     restore_env_var("OPENCODE_AUTH_FILE", previous_auth_file);
 
     assert_eq!(snapshot.provider_id, "deepseek");

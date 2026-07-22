@@ -34,6 +34,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::agent_capabilities::list_agent_capabilities,
+            commands::agent_capabilities::open_agent_config_root,
             commands::app::get_desktop_health,
             commands::app::get_platform,
             commands::projects::list_git_base_folders,

@@ -1,3 +1,4 @@
+import type { AgentName } from "../../types/index.js";
 import { invokeCommand } from "./tauri.js";
 
 export interface SkillCapabilitySurface {
@@ -16,7 +17,7 @@ export interface ProviderCapabilitySurface {
 }
 
 export interface AgentCapabilitySurface {
-  name: string;
+  name: AgentName;
   abbr: string;
   color: string;
   configDir: string;
@@ -28,5 +29,9 @@ export interface AgentCapabilitySurface {
 export const agentCapabilitiesApi = {
   list(): Promise<AgentCapabilitySurface[]> {
     return invokeCommand<AgentCapabilitySurface[]>("list_agent_capabilities");
+  },
+
+  openConfigRoot(name: AgentName): Promise<void> {
+    return invokeCommand<void>("open_agent_config_root", { name });
   },
 };

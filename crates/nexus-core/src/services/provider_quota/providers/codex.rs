@@ -1,14 +1,11 @@
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 
 use serde::Deserialize;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::{
     error::{AppError, AppResult},
-    services::{app_config::AppConfigService, outbound_request_log::OutboundRequestLogger},
+    services::{app_config::AppConfigService, outbound_request_log::OutboundRequestLogger, paths},
 };
 
 use super::super::{
@@ -287,7 +284,7 @@ fn parse_codex_credentials(content: &str, path: &Path) -> AppResult<Option<Codex
         access_token: access_token.to_string(),
         account_id,
         plan,
-        source: path_to_display(path),
+        source: paths::collapse_home(&paths::path_to_string(path, "CodeX credentials path")?),
     }))
 }
 
@@ -403,16 +400,6 @@ async fn codex_get(
         .text()
         .await
         .map_err(|error| ProviderQuotaPollError::Request(error.to_string()))
-}
-
-fn path_to_display(path: &Path) -> String {
-    let Some(home) = env::var_os("HOME").map(PathBuf::from) else {
-        return path.to_string_lossy().into_owned();
-    };
-    match path.strip_prefix(&home) {
-        Ok(rest) => format!("~/{}", rest.to_string_lossy()),
-        Err(_) => path.to_string_lossy().into_owned(),
-    }
 }
 
 fn status(status: ProviderQuotaStatus, message: &str) -> ProviderQuotaSnapshot {

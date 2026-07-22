@@ -1,10 +1,17 @@
-use std::{fs, path::Path, sync::Arc};
+use std::{
+    env,
+    ffi::OsString,
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use nexus_core::{
     database::Database,
     services::{paths, projects::ProjectService},
 };
 use rusqlite::params;
+use serial_test::serial;
 use tempfile::TempDir;
 
 fn git_repo(parent: &TempDir, name: &str) -> String {
@@ -15,10 +22,44 @@ fn git_repo(parent: &TempDir, name: &str) -> String {
 
 fn canonical_display_path(path: impl AsRef<Path>) -> String {
     let path = fs::canonicalize(path).expect("canonicalize path");
-    paths::path_to_string(&path, "path").expect("display path")
+    let path = paths::path_to_string(&path, "path").expect("display path");
+    paths::collapse_home(&path)
+}
+
+struct TestHomeGuard {
+    previous_home: Option<OsString>,
+    previous_userprofile: Option<OsString>,
+}
+
+impl TestHomeGuard {
+    fn set(home: &Path) -> Self {
+        let guard = Self {
+            previous_home: env::var_os("HOME"),
+            previous_userprofile: env::var_os("USERPROFILE"),
+        };
+        let home =
+            PathBuf::from(paths::path_to_string(home, "test home").expect("display test home"));
+        env::set_var("HOME", &home);
+        env::set_var("USERPROFILE", &home);
+        guard
+    }
+}
+
+impl Drop for TestHomeGuard {
+    fn drop(&mut self) {
+        match self.previous_home.take() {
+            Some(value) => env::set_var("HOME", value),
+            None => env::remove_var("HOME"),
+        }
+        match self.previous_userprofile.take() {
+            Some(value) => env::set_var("USERPROFILE", value),
+            None => env::remove_var("USERPROFILE"),
+        }
+    }
 }
 
 #[test]
+#[serial]
 fn defaults_custom_skills_dirs_to_skills_and_replaces_with_dedup() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -48,6 +89,7 @@ fn defaults_custom_skills_dirs_to_skills_and_replaces_with_dedup() {
 }
 
 #[test]
+#[serial]
 fn new_project_inherits_global_project_defaults() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -84,6 +126,7 @@ fn new_project_inherits_global_project_defaults() {
 }
 
 #[test]
+#[serial]
 fn project_defaults_reject_invalid_entries_and_keep_empty_list() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -107,6 +150,7 @@ fn project_defaults_reject_invalid_entries_and_keep_empty_list() {
 }
 
 #[test]
+#[serial]
 fn rejects_custom_skills_dir_that_is_a_fixed_agent_dir() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -121,6 +165,7 @@ fn rejects_custom_skills_dir_that_is_a_fixed_agent_dir() {
 }
 
 #[test]
+#[serial]
 fn defaults_extra_prompt_files_to_empty_and_accepts_matching_globs() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -151,6 +196,7 @@ fn defaults_extra_prompt_files_to_empty_and_accepts_matching_globs() {
 }
 
 #[test]
+#[serial]
 fn rejects_extra_prompt_file_that_does_not_match_a_prompt_glob() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -169,6 +215,7 @@ fn rejects_extra_prompt_file_that_does_not_match_a_prompt_glob() {
 }
 
 #[test]
+#[serial]
 fn rejects_extra_prompt_file_that_collides_with_a_primary_prompt() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -189,6 +236,7 @@ fn rejects_extra_prompt_file_that_collides_with_a_primary_prompt() {
 }
 
 #[test]
+#[serial]
 fn sets_sessions_dir_and_restores_default_when_cleared() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -212,6 +260,7 @@ fn sets_sessions_dir_and_restores_default_when_cleared() {
 }
 
 #[test]
+#[serial]
 fn records_git_project_and_lists_it_by_folder_key() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -232,6 +281,7 @@ fn records_git_project_and_lists_it_by_folder_key() {
 }
 
 #[test]
+#[serial]
 fn recording_same_project_key_updates_path_without_duplicate() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -252,6 +302,7 @@ fn recording_same_project_key_updates_path_without_duplicate() {
 }
 
 #[test]
+#[serial]
 fn re_recording_moved_project_restores_active_status() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -282,6 +333,7 @@ fn re_recording_moved_project_restores_active_status() {
 }
 
 #[test]
+#[serial]
 fn reorders_projects_and_persists_display_order() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -312,6 +364,7 @@ fn reorders_projects_and_persists_display_order() {
 }
 
 #[test]
+#[serial]
 fn rejects_incomplete_project_display_order() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -336,6 +389,7 @@ fn rejects_incomplete_project_display_order() {
 }
 
 #[test]
+#[serial]
 fn lists_project_as_stale_when_its_path_no_longer_exists() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -359,6 +413,7 @@ fn lists_project_as_stale_when_its_path_no_longer_exists() {
 }
 
 #[test]
+#[serial]
 fn hidden_status_survives_even_when_path_no_longer_exists() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let service = ProjectService::new(db.clone());
@@ -389,6 +444,7 @@ fn hidden_status_survives_even_when_path_no_longer_exists() {
 }
 
 #[test]
+#[serial]
 fn records_git_base_folder_and_stores_canonical_path() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -407,7 +463,7 @@ fn records_git_base_folder_and_stores_canonical_path() {
 }
 
 #[test]
-#[serial_test::serial]
+#[serial]
 fn records_git_base_folder_with_tilde_path() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -417,13 +473,8 @@ fn records_git_base_folder_with_tilde_path() {
     let home_path = fs::canonicalize(home.path()).expect("canonicalize home");
     fs::create_dir_all(home_path.join("Vault")).expect("create vault dir");
 
-    let previous = std::env::var_os("HOME");
-    std::env::set_var("HOME", &home_path);
+    let _home_guard = TestHomeGuard::set(&home_path);
     let recorded = service.record_git_base_folder("~/Vault".to_string());
-    match previous {
-        Some(value) => std::env::set_var("HOME", value),
-        None => std::env::remove_var("HOME"),
-    }
 
     let recorded = recorded.expect("record git base folder with tilde");
     // Stored canonical, displayed collapsed back to `~`.
@@ -431,7 +482,7 @@ fn records_git_base_folder_with_tilde_path() {
 }
 
 #[test]
-#[serial_test::serial]
+#[serial]
 fn scans_tilde_base_folder_resolves_home_and_collapses_display() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -439,16 +490,11 @@ fn scans_tilde_base_folder_resolves_home_and_collapses_display() {
     let home_path = fs::canonicalize(home.path()).expect("canonicalize home");
     fs::create_dir_all(home_path.join("Vault/repo/.git")).expect("create repo under vault");
 
-    let previous = std::env::var_os("HOME");
-    std::env::set_var("HOME", &home_path);
+    let _home_guard = TestHomeGuard::set(&home_path);
     let scan = (|| {
         service.record_git_base_folder("~/Vault".to_string())?;
         service.scan_git_base_folders()
     })();
-    match previous {
-        Some(value) => std::env::set_var("HOME", value),
-        None => std::env::remove_var("HOME"),
-    }
 
     let scan = scan.expect("scan tilde base folder");
     assert_eq!(scan.len(), 1);
@@ -458,6 +504,7 @@ fn scans_tilde_base_folder_resolves_home_and_collapses_display() {
 }
 
 #[test]
+#[serial]
 fn scans_registered_base_folders_and_marks_recorded_projects() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -487,6 +534,7 @@ fn scans_registered_base_folders_and_marks_recorded_projects() {
 }
 
 #[test]
+#[serial]
 fn removes_git_base_folder_without_deleting_projects() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -510,6 +558,7 @@ fn removes_git_base_folder_without_deleting_projects() {
 }
 
 #[test]
+#[serial]
 fn deletes_project_and_removes_it_from_list() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());
@@ -524,6 +573,7 @@ fn deletes_project_and_removes_it_from_list() {
 }
 
 #[test]
+#[serial]
 fn deleting_project_cascades_to_skills_and_sessions() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let service = ProjectService::new(db.clone());
@@ -561,6 +611,7 @@ fn deleting_project_cascades_to_skills_and_sessions() {
 }
 
 #[test]
+#[serial]
 fn list_projects_counts_same_local_and_cloud_session_once() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let service = ProjectService::new(db.clone());
@@ -590,6 +641,7 @@ fn list_projects_counts_same_local_and_cloud_session_once() {
 }
 
 #[test]
+#[serial]
 fn rejects_empty_project_id_on_delete() {
     let db = Database::open_in_memory().expect("open in-memory database");
     let service = ProjectService::new(db.into());

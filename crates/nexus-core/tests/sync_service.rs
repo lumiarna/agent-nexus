@@ -1,8 +1,10 @@
 use std::{
-    env, fs,
+    env,
+    ffi::OsString,
+    fs,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread::JoinHandle,
 };
@@ -22,6 +24,38 @@ use tempfile::TempDir;
 
 fn request_logger() -> OutboundRequestLogger {
     OutboundRequestLogger::for_test().expect("create request logger")
+}
+
+struct TestHomeGuard {
+    previous_home: Option<OsString>,
+    previous_userprofile: Option<OsString>,
+}
+
+impl TestHomeGuard {
+    fn set(home: &Path) -> Self {
+        let guard = Self {
+            previous_home: env::var_os("HOME"),
+            previous_userprofile: env::var_os("USERPROFILE"),
+        };
+        let home =
+            PathBuf::from(paths::path_to_string(home, "test home").expect("display test home"));
+        env::set_var("HOME", &home);
+        env::set_var("USERPROFILE", &home);
+        guard
+    }
+}
+
+impl Drop for TestHomeGuard {
+    fn drop(&mut self) {
+        match self.previous_home.take() {
+            Some(value) => env::set_var("HOME", value),
+            None => env::remove_var("HOME"),
+        }
+        match self.previous_userprofile.take() {
+            Some(value) => env::set_var("USERPROFILE", value),
+            None => env::remove_var("USERPROFILE"),
+        }
+    }
 }
 
 fn set_project_symlink_ignored_dirs(db: &Database, value: &str) {
@@ -77,11 +111,16 @@ fn create_directory_link(source: &Path, target: &Path) {
 
 fn canonical_display_path(path: impl AsRef<Path>) -> String {
     let path = fs::canonicalize(path).expect("canonicalize path");
-    paths::path_to_string(&path, "path").expect("display path")
+    let path = paths::path_to_string(&path, "path").expect("display path");
+    paths::collapse_home(&path)
 }
 
 fn display_path(path: &Path) -> String {
     paths::path_to_string(path, "path").expect("display path")
+}
+
+fn collapsed_display_path(path: &Path) -> String {
+    paths::collapse_home(&display_path(path))
 }
 
 fn normalized_display_path(path: &Path) -> String {
@@ -198,6 +237,7 @@ fn find_header_end(data: &[u8]) -> Option<usize> {
 }
 
 #[test]
+#[serial]
 fn lists_session_backup_copy_task_from_project_template() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -235,16 +275,11 @@ fn session_backup_source_is_collapsed_to_tilde_for_display() {
     // Canonicalize so the recorded (canonical) project path lands under $HOME.
     let home = fs::canonicalize(root.path()).expect("canonicalize home");
 
-    let previous_home = env::var_os("HOME");
-    env::set_var("HOME", &home);
+    let _home_guard = TestHomeGuard::set(&home);
     let result = (|| {
         projects.record_project(git_repo(&root, "agent-nexus"))?;
         sync.list_session_backups()
     })();
-    match previous_home {
-        Some(value) => env::set_var("HOME", value),
-        None => env::remove_var("HOME"),
-    }
 
     let backups = result.expect("list session backups");
     assert_eq!(backups.len(), 1);
@@ -254,6 +289,7 @@ fn session_backup_source_is_collapsed_to_tilde_for_display() {
 }
 
 #[test]
+#[serial]
 fn project_template_does_not_reinterpret_variable_values() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -272,6 +308,7 @@ fn project_template_does_not_reinterpret_variable_values() {
 }
 
 #[test]
+#[serial]
 fn session_backup_schedule_survives_template_reconciliation() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -293,6 +330,7 @@ fn session_backup_schedule_survives_template_reconciliation() {
 }
 
 #[tokio::test]
+#[serial]
 async fn automatically_pushes_due_session_backup_and_records_status() {
     let (url, requests, server) = spawn_webdav_server(vec![
         http_response("201 Created"),
@@ -349,6 +387,7 @@ async fn automatically_pushes_due_session_backup_and_records_status() {
 }
 
 #[tokio::test]
+#[serial]
 async fn skips_due_session_backup_when_local_sessions_directory_is_missing() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -371,6 +410,7 @@ async fn skips_due_session_backup_when_local_sessions_directory_is_missing() {
 }
 
 #[tokio::test]
+#[serial]
 async fn manually_running_session_backup_skips_missing_local_sessions_directory() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -394,6 +434,7 @@ async fn manually_running_session_backup_skips_missing_local_sessions_directory(
 }
 
 #[test]
+#[serial]
 fn saves_and_reads_webdav_settings() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -418,6 +459,7 @@ fn saves_and_reads_webdav_settings() {
 }
 
 #[test]
+#[serial]
 fn defaults_blank_webdav_remote_root() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -435,6 +477,7 @@ fn defaults_blank_webdav_remote_root() {
 }
 
 #[tokio::test]
+#[serial]
 async fn tests_webdav_connection_and_creates_remote_root() {
     let (url, requests, server) = spawn_webdav_server(vec![
         http_response("207 Multi-Status"),
@@ -460,6 +503,7 @@ async fn tests_webdav_connection_and_creates_remote_root() {
 }
 
 #[tokio::test]
+#[serial]
 async fn runs_local_file_copy_task_to_webdav() {
     let (url, requests, server) = spawn_webdav_server(vec![
         http_response("201 Created"),
@@ -519,6 +563,7 @@ async fn runs_local_file_copy_task_to_webdav() {
 }
 
 #[tokio::test]
+#[serial]
 async fn runs_due_local_to_cloud_copy_task_on_schedule() {
     let (url, requests, server) = spawn_webdav_server(vec![
         http_response("201 Created"),
@@ -581,8 +626,7 @@ async fn runs_local_file_copy_task_with_tilde_source_to_webdav() {
     fs::create_dir_all(&home).expect("create home dir");
     let source_file = home.join("keymap.json");
     fs::write(&source_file, "keymap = '[]'\n").expect("write source file");
-    let previous_home = env::var_os("HOME");
-    env::set_var("HOME", &home);
+    let _home_guard = TestHomeGuard::set(&home);
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -614,10 +658,6 @@ async fn runs_local_file_copy_task_with_tilde_source_to_webdav() {
         .run_task(created.tasks[0].id.clone())
         .await
         .expect("run tilde source task");
-    match previous_home {
-        Some(value) => env::set_var("HOME", value),
-        None => env::remove_var("HOME"),
-    }
 
     server.join().expect("join webdav server");
     let requests = requests.lock().expect("lock request log");
@@ -685,6 +725,7 @@ async fn runs_local_file_copy_task_with_appdata_source_to_webdav() {
 }
 
 #[tokio::test]
+#[serial]
 async fn runs_local_directory_copy_task_to_webdav() {
     let (url, requests, server) = spawn_webdav_server(vec![
         http_response("201 Created"),
@@ -733,6 +774,7 @@ async fn runs_local_directory_copy_task_to_webdav() {
 }
 
 #[test]
+#[serial]
 fn creates_symlink_placement_and_lists_custom_task_group() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -784,8 +826,7 @@ fn creates_symlink_placement_with_tilde_paths() {
     let source_dir = home.join("source");
     fs::create_dir_all(&source_dir).expect("create source dir");
     let target_link = home.join("target-link");
-    let previous_home = env::var_os("HOME");
-    env::set_var("HOME", &home);
+    let _home_guard = TestHomeGuard::set(&home);
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -802,11 +843,6 @@ fn creates_symlink_placement_with_tilde_paths() {
     })
     .expect("create task group");
 
-    match previous_home {
-        Some(value) => env::set_var("HOME", value),
-        None => env::remove_var("HOME"),
-    }
-
     let groups = sync.list_task_groups().expect("list task groups");
     assert_eq!(groups[0].tasks[0].source, "~/source");
     assert_eq!(groups[0].tasks[0].target, "~/target-link");
@@ -814,6 +850,7 @@ fn creates_symlink_placement_with_tilde_paths() {
 }
 
 #[test]
+#[serial]
 fn lists_symlink_task_with_present_link_state_when_placement_exists() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -840,6 +877,7 @@ fn lists_symlink_task_with_present_link_state_when_placement_exists() {
 }
 
 #[test]
+#[serial]
 fn marks_symlink_task_link_state_missing_when_placement_removed_manually() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -882,8 +920,7 @@ fn derives_link_state_for_tilde_target() {
     let source_dir = home.join("source");
     fs::create_dir_all(&source_dir).expect("create source dir");
     let link = home.join("link");
-    let previous_home = env::var_os("HOME");
-    env::set_var("HOME", &home);
+    let _home_guard = TestHomeGuard::set(&home);
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -911,14 +948,11 @@ fn derives_link_state_for_tilde_target() {
     let groups = sync
         .list_task_groups()
         .expect("list task groups after remove");
-    match previous_home {
-        Some(value) => env::set_var("HOME", value),
-        None => env::remove_var("HOME"),
-    }
     assert_eq!(groups[0].tasks[0].link_state, "missing");
 }
 
 #[test]
+#[serial]
 fn rejects_cloud_to_cloud_task() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -941,6 +975,7 @@ fn rejects_cloud_to_cloud_task() {
 }
 
 #[test]
+#[serial]
 fn creates_local_to_cloud_copy_task_with_scheduled_cron() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -968,6 +1003,7 @@ fn creates_local_to_cloud_copy_task_with_scheduled_cron() {
 }
 
 #[test]
+#[serial]
 fn updates_copy_task_schedule_and_lists_the_saved_value() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -997,6 +1033,7 @@ fn updates_copy_task_schedule_and_lists_the_saved_value() {
 }
 
 #[test]
+#[serial]
 fn group_schedule_bulk_applies_to_copy_tasks_and_re_overrides_per_task_schedule() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1079,6 +1116,7 @@ fn group_schedule_bulk_applies_to_copy_tasks_and_re_overrides_per_task_schedule(
 }
 
 #[test]
+#[serial]
 fn group_schedule_rejects_unknown_group() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1088,6 +1126,7 @@ fn group_schedule_rejects_unknown_group() {
 }
 
 #[test]
+#[serial]
 fn deletes_symlink_task_and_its_local_symlink_placement() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1118,6 +1157,7 @@ fn deletes_symlink_task_and_its_local_symlink_placement() {
 }
 
 #[test]
+#[serial]
 fn deletes_task_group_and_its_symlink_placements() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1156,8 +1196,7 @@ fn deletes_task_and_removes_tilde_target_link() {
     let source_dir = home.join("source");
     fs::create_dir_all(&source_dir).expect("create source dir");
     let link = home.join("link");
-    let previous_home = env::var_os("HOME");
-    env::set_var("HOME", &home);
+    let _home_guard = TestHomeGuard::set(&home);
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1178,10 +1217,6 @@ fn deletes_task_and_removes_tilde_target_link() {
 
     sync.delete_task(created.tasks[0].id.clone())
         .expect("delete task");
-    match previous_home {
-        Some(value) => env::set_var("HOME", value),
-        None => env::remove_var("HOME"),
-    }
     assert!(!link.exists(), "tilde target link removed by delete_task");
 }
 
@@ -1194,8 +1229,7 @@ fn deletes_task_group_and_removes_tilde_target_link() {
     let source_dir = home.join("source");
     fs::create_dir_all(&source_dir).expect("create source dir");
     let link = home.join("link");
-    let previous_home = env::var_os("HOME");
-    env::set_var("HOME", &home);
+    let _home_guard = TestHomeGuard::set(&home);
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1216,10 +1250,6 @@ fn deletes_task_group_and_removes_tilde_target_link() {
 
     sync.delete_task_group(created.id.clone())
         .expect("delete task group");
-    match previous_home {
-        Some(value) => env::set_var("HOME", value),
-        None => env::remove_var("HOME"),
-    }
     assert!(
         !link.exists(),
         "tilde target link removed by delete_task_group"
@@ -1227,6 +1257,7 @@ fn deletes_task_group_and_removes_tilde_target_link() {
 }
 
 #[test]
+#[serial]
 fn deletes_task_group_with_copy_task_without_touching_source() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1264,6 +1295,7 @@ fn deletes_task_group_with_copy_task_without_touching_source() {
 }
 
 #[test]
+#[serial]
 fn deletes_mixed_task_group_cleans_symlink_but_preserves_copy_source() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1315,6 +1347,7 @@ fn deletes_mixed_task_group_cleans_symlink_but_preserves_copy_source() {
 }
 
 #[test]
+#[serial]
 fn deletes_unknown_task_group_id_is_idempotent() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1327,6 +1360,7 @@ fn deletes_unknown_task_group_id_is_idempotent() {
 }
 
 #[test]
+#[serial]
 fn task_group_collapsed_defaults_and_round_trips() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1368,6 +1402,7 @@ fn task_group_collapsed_defaults_and_round_trips() {
 }
 
 #[test]
+#[serial]
 fn set_task_group_collapsed_rejects_unknown_and_system_groups() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     {
@@ -1392,6 +1427,7 @@ fn set_task_group_collapsed_rejects_unknown_and_system_groups() {
 }
 
 #[test]
+#[serial]
 fn renames_task_group_successfully() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1423,6 +1459,7 @@ fn renames_task_group_successfully() {
 }
 
 #[test]
+#[serial]
 fn rename_task_group_rejects_blank_name() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1448,6 +1485,7 @@ fn rename_task_group_rejects_blank_name() {
 }
 
 #[test]
+#[serial]
 fn rename_task_group_rejects_unknown_group_id() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1460,6 +1498,7 @@ fn rename_task_group_rejects_unknown_group_id() {
 }
 
 #[test]
+#[serial]
 fn rename_task_group_rejects_system_group_id() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -1478,6 +1517,7 @@ fn rename_task_group_rejects_system_group_id() {
 }
 
 #[test]
+#[serial]
 fn adds_symlink_task_to_existing_group_and_creates_placement() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1531,6 +1571,7 @@ fn adds_symlink_task_to_existing_group_and_creates_placement() {
 }
 
 #[test]
+#[serial]
 fn adds_copy_task_appended_after_existing_tasks() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1582,6 +1623,7 @@ fn adds_copy_task_appended_after_existing_tasks() {
 }
 
 #[test]
+#[serial]
 fn create_task_group_normalizes_saved_paths_to_forward_slashes() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1609,6 +1651,7 @@ fn create_task_group_normalizes_saved_paths_to_forward_slashes() {
 }
 
 #[test]
+#[serial]
 fn add_task_normalizes_saved_paths_to_forward_slashes() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1650,6 +1693,7 @@ fn add_task_normalizes_saved_paths_to_forward_slashes() {
 }
 
 #[test]
+#[serial]
 fn rejects_add_task_to_unknown_group() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1672,6 +1716,7 @@ fn rejects_add_task_to_unknown_group() {
 }
 
 #[test]
+#[serial]
 fn rejects_add_cloud_to_cloud_task_without_creating_placement() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1714,6 +1759,7 @@ fn rejects_add_cloud_to_cloud_task_without_creating_placement() {
 }
 
 #[test]
+#[serial]
 fn rejects_add_scheduled_link_task_without_creating_placement() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -1757,6 +1803,7 @@ fn rejects_add_scheduled_link_task_without_creating_placement() {
 }
 
 #[test]
+#[serial]
 fn project_symlink_inventory_skips_symlinks_managed_by_sync_task() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -1822,8 +1869,7 @@ fn project_symlink_inventory_skips_symlinks_managed_by_sync_task() {
 #[serial]
 fn project_symlink_inventory_skips_task_managed_tilde_target() {
     let root = TempDir::new().expect("create temp dir");
-    let previous_home = env::var_os("HOME");
-    env::set_var("HOME", root.path());
+    let _home_guard = TestHomeGuard::set(root.path());
 
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -1857,11 +1903,6 @@ fn project_symlink_inventory_skips_task_managed_tilde_target() {
         .list_project_symlinks()
         .expect("list project symlinks");
 
-    match previous_home {
-        Some(value) => env::set_var("HOME", value),
-        None => env::remove_var("HOME"),
-    }
-
     assert!(
         links.is_empty(),
         "task-managed tilde target should be hidden from inventory, got {links:?}"
@@ -1869,6 +1910,7 @@ fn project_symlink_inventory_skips_task_managed_tilde_target() {
 }
 
 #[test]
+#[serial]
 fn project_symlink_inventory_keeps_unmanaged_link_with_same_source_as_task() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -1927,6 +1969,7 @@ fn project_symlink_inventory_keeps_unmanaged_link_with_same_source_as_task() {
 }
 
 #[test]
+#[serial]
 fn deletes_scanned_project_symlink_without_task_record() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -1960,6 +2003,7 @@ fn deletes_scanned_project_symlink_without_task_record() {
 }
 
 #[test]
+#[serial]
 fn lists_project_symlinks_with_registered_source_and_target_projects() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -1995,7 +2039,7 @@ fn lists_project_symlinks_with_registered_source_and_target_projects() {
     assert_eq!(links[0].source_path, canonical_display_path(source_dir));
     assert_eq!(
         links[0].target_path,
-        display_path(
+        collapsed_display_path(
             &fs::canonicalize(Path::new(&target_repo).parent().unwrap())
                 .unwrap()
                 .join("target-project/shared-skill")
@@ -2009,6 +2053,7 @@ fn lists_project_symlinks_with_registered_source_and_target_projects() {
 }
 
 #[test]
+#[serial]
 fn does_not_expand_children_inside_directory_symlink() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -2039,7 +2084,7 @@ fn does_not_expand_children_inside_directory_symlink() {
     );
     assert_eq!(
         links[0].target_path,
-        display_path(
+        collapsed_display_path(
             &fs::canonicalize(Path::new(&target_repo).parent().unwrap())
                 .unwrap()
                 .join("target-project/external-source")
@@ -2049,6 +2094,7 @@ fn does_not_expand_children_inside_directory_symlink() {
 }
 
 #[test]
+#[serial]
 fn skips_configured_directories_when_scanning_project_symlinks() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     set_project_symlink_ignored_dirs(&db, ".git\n.venv\nnode_modules\nvendor");
@@ -2085,7 +2131,7 @@ fn skips_configured_directories_when_scanning_project_symlinks() {
     assert_eq!(links.len(), 1);
     assert_eq!(
         links[0].target_path,
-        display_path(
+        collapsed_display_path(
             &fs::canonicalize(Path::new(&target_repo).parent().unwrap())
                 .unwrap()
                 .join("target-project/src/shared")
@@ -2094,6 +2140,7 @@ fn skips_configured_directories_when_scanning_project_symlinks() {
 }
 
 #[test]
+#[serial]
 fn skips_common_build_output_dirs_by_default() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -2129,6 +2176,7 @@ fn skips_common_build_output_dirs_by_default() {
 }
 
 #[test]
+#[serial]
 fn respects_max_depth_setting() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     set_project_symlink_max_depth(&db, "2");
@@ -2184,6 +2232,7 @@ fn respects_max_depth_setting() {
 }
 
 #[test]
+#[serial]
 fn skips_links_beyond_default_max_depth_without_setting_override() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let projects = ProjectService::new(db.clone());
@@ -2222,6 +2271,7 @@ fn skips_links_beyond_default_max_depth_without_setting_override() {
 
 #[cfg(unix)]
 #[test]
+#[serial]
 fn continues_scan_when_subdirectory_is_inaccessible() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -2259,6 +2309,7 @@ fn continues_scan_when_subdirectory_is_inaccessible() {
 }
 
 #[tokio::test]
+#[serial]
 async fn runs_local_to_local_file_copy_to_nonexistent_target() {
     let root = TempDir::new().expect("create temp dir");
     let source_file = root.path().join("source.txt");
@@ -2294,6 +2345,7 @@ async fn runs_local_to_local_file_copy_to_nonexistent_target() {
 }
 
 #[tokio::test]
+#[serial]
 async fn runs_local_to_local_directory_copy_to_nonexistent_target() {
     let root = TempDir::new().expect("create temp dir");
     let source_dir = root.path().join("source");
@@ -2336,6 +2388,7 @@ async fn runs_local_to_local_directory_copy_to_nonexistent_target() {
 }
 
 #[tokio::test]
+#[serial]
 async fn runs_local_to_local_directory_copy_embeds_into_existing_directory_target() {
     let root = TempDir::new().expect("create temp dir");
     let source_dir = root.path().join("source");
@@ -2395,6 +2448,7 @@ async fn runs_local_to_local_directory_copy_embeds_into_existing_directory_targe
 }
 
 #[tokio::test]
+#[serial]
 async fn runs_local_to_local_copy_rejects_missing_source_with_validation() {
     let root = TempDir::new().expect("create temp dir");
     let missing_source = root.path().join("nope.txt");
@@ -2435,6 +2489,7 @@ async fn runs_local_to_local_copy_rejects_missing_source_with_validation() {
 }
 
 #[tokio::test]
+#[serial]
 async fn session_backup_skips_unchanged_files_and_pushes_only_changed() {
     let (url, requests, server) = spawn_webdav_server(vec![
         http_response("201 Created"),
@@ -2509,6 +2564,7 @@ async fn session_backup_skips_unchanged_files_and_pushes_only_changed() {
 }
 
 #[tokio::test]
+#[serial]
 async fn runs_cloud_to_local_file_pull_task() {
     let (url, _requests, server) = spawn_webdav_server(vec![http_get_response("theme = 'dark'\n")]);
     let root = TempDir::new().expect("create temp dir");
@@ -2551,6 +2607,7 @@ async fn runs_cloud_to_local_file_pull_task() {
 }
 
 #[tokio::test]
+#[serial]
 async fn runs_cloud_to_local_directory_pull_task() {
     let (url, _requests, server) = spawn_webdav_server(vec![
         http_multistatus_response(&[
@@ -2636,6 +2693,7 @@ fn create_link_group(sync: &SyncService, name: &str, links: &[(&Path, &Path)]) -
 }
 
 #[test]
+#[serial]
 fn reorder_task_groups_persists_new_order() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -2664,6 +2722,7 @@ fn reorder_task_groups_persists_new_order() {
 }
 
 #[test]
+#[serial]
 fn reorder_task_groups_rejects_incomplete_order() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());
@@ -2678,6 +2737,7 @@ fn reorder_task_groups_rejects_incomplete_order() {
 }
 
 #[test]
+#[serial]
 fn reorder_tasks_persists_new_order_within_group() {
     let db = Arc::new(Database::open_in_memory().expect("open in-memory database"));
     let sync = SyncService::new(db, request_logger());

@@ -1,18 +1,21 @@
 use std::{
-    env, fs,
-    path::{Path, PathBuf},
+    fs,
+    path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(target_os = "macos")]
-use std::process::Command;
+use std::{path::Path, process::Command};
 
 use serde::Deserialize;
 
 use crate::{
-    error::{AppError, AppResult},
-    services::{app_config::AppConfigService, outbound_request_log::OutboundRequestLogger},
+    error::AppResult,
+    services::{app_config::AppConfigService, outbound_request_log::OutboundRequestLogger, paths},
 };
+
+#[cfg(target_os = "macos")]
+use crate::error::AppError;
 
 use super::super::{
     shared::{
@@ -26,6 +29,7 @@ use super::super::{
 
 pub(crate) const PROVIDER_ID: &str = "claude";
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+#[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 const OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const OAUTH_REFRESH_URL: &str = "https://platform.claude.com/v1/oauth/token";
@@ -371,6 +375,7 @@ fn read_keychain_account(service: &str) -> Option<String> {
     extract_keychain_account(&stderr)
 }
 
+#[cfg(target_os = "macos")]
 fn extract_keychain_account(text: &str) -> Option<String> {
     let needle = "\"acct\"<blob>=\"";
     let start = text.find(needle)? + needle.len();
@@ -429,7 +434,11 @@ fn parse_claude_code_credentials(
     content: &str,
     path: PathBuf,
 ) -> AppResult<Option<ClaudeCodeCredentials>> {
-    parse_claude_code_credentials_from_source(content, path_to_display(&path), Some(path), None)
+    let source = paths::collapse_home(&paths::path_to_string(
+        &path,
+        "Claude Code credentials path",
+    )?);
+    parse_claude_code_credentials_from_source(content, source, Some(path), None)
 }
 
 fn parse_claude_code_credentials_from_source(
@@ -546,16 +555,6 @@ pub(crate) fn is_token_expiring_soon(expires_at: Option<i64>) -> bool {
         .unwrap_or_default()
         .as_millis() as i64;
     now >= expires_at - 60_000
-}
-
-fn path_to_display(path: &Path) -> String {
-    let Some(home) = env::var_os("HOME").map(PathBuf::from) else {
-        return path.to_string_lossy().into_owned();
-    };
-    match path.strip_prefix(&home) {
-        Ok(rest) => format!("~/{}", rest.to_string_lossy()),
-        Err(_) => path.to_string_lossy().into_owned(),
-    }
 }
 
 fn status(status: ProviderQuotaStatus, message: &str) -> ProviderQuotaSnapshot {

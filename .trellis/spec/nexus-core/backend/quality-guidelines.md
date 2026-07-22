@@ -33,6 +33,27 @@ node scripts/with-sqlite.mjs cargo test -p nexus-core
 - 深模块优先：Distribution、Provider quota derive、cron、Transfer seam 已是本项目模式，不要在外层散落重复规则。
 - 新增外部副作用时，只在必要边界加轻量 port；不要全面六边形化，也不要为 `Database` 造 trait。
 
+## Scenario: 共享本地路径与系统打开边界
+
+### 1. Scope / Trigger
+- Trigger：修改任何本地路径输入/展示、home 目录语义、Provider credential path，或 Open / Reveal 行为。
+
+### 2. Signatures
+- `services::paths::{home_dir, resolve_local_path, collapse_home}`
+- `services::system_open::{open_path, reveal_path}`
+
+### 3. Contracts
+- `resolve_local_path` 是本地路径字符串展开的唯一入口；`~`、`%APPDATA%`、`%LOCALAPPDATA%` 不得在领域 service 或 command 中另写解析器。
+- `home_dir` 是 home 语义的唯一来源：Windows 优先原生 `USERPROFILE`，缺失/空值时才回退 `HOME`；非 Windows 使用 `HOME`。Provider、Project、Sync、Skill/Prompt 与 `collapse_home` 必须共享该规则。
+- `collapse_home` 是绝对 home path 转 `~` 展示的唯一入口，不得直接读取 `HOME` 后自行 `strip_prefix`。
+- 所有路径 Open / Reveal 副作用必须经过 `system_open`；`open_path` 与 `reveal_path` 都必须在启动 `open` / `explorer` / `xdg-open` 前拒绝不存在目标。
+- 领域层仍负责额外语义，例如 Agent Config Root 必须是目录；`system_open` 的通用存在性保护属于副作用边界，即使形成防竞态的二次检查也不能删除。
+
+### 4. Tests Required
+- `services::paths`：Windows `USERPROFILE` 优先于 Git Bash 风格 `HOME=/c/Users/...`，并覆盖 `resolve_local_path` 与 `collapse_home`。
+- 所有修改 `HOME` / `USERPROFILE` 的测试必须同时保存和恢复两者（优先 RAII guard，确保 panic 时也恢复）。同一 integration-test executable 内，修改环境的测试及会读取 home/path display 的测试必须共用 `serial_test` 锁；只给 writer 标 `#[serial]` 仍会与未标注 reader 并发并产生不稳定结果。
+- `services::system_open`：Open 与 Reveal 都以缺失目标做纯失败测试，证明不会启动系统 handler。
+
 ## Scenario: Agent display preferences invariants
 
 ### 1. Scope / Trigger

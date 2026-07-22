@@ -10,6 +10,7 @@ import {
   useWebdavSettingsQuery,
 } from "@/lib/query/sync";
 import { fallbackAgentCapabilities } from "@/lib/agentCapabilities";
+import { agentCapabilitiesApi } from "@/lib/api/agentCapabilities";
 import { useAgentCapabilitiesQuery } from "@/lib/query/agentCapabilities";
 import {
   useAgentPreferences,
@@ -119,6 +120,14 @@ export function SettingsPage() {
         defaultGlobalEntryAgent: name,
       });
       toast(`Default Global entry · ${name}`);
+    } catch (error) {
+      toast(getErrorMessage(error));
+    }
+  }
+
+  async function openConfigRoot(name: AgentName) {
+    try {
+      await agentCapabilitiesApi.openConfigRoot(name);
     } catch (error) {
       toast(getErrorMessage(error));
     }
@@ -275,13 +284,13 @@ export function SettingsPage() {
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {agents
-              .filter((a) => a.skill && !disabledAgents.has(a.name as AgentName))
+              .filter((a) => a.skill && !disabledAgents.has(a.name))
               .map((a) => {
-                const active = defaultGlobalEntry === (a.name as AgentName);
+                const active = defaultGlobalEntry === a.name;
                 return (
                   <button
                     key={a.name}
-                    onClick={() => void selectDefaultGlobalEntry(a.name as AgentName)}
+                    onClick={() => void selectDefaultGlobalEntry(a.name)}
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-[9px] border px-2.5 py-1.5 text-[12px] font-semibold transition-colors",
                       active
@@ -290,7 +299,7 @@ export function SettingsPage() {
                     )}
                     style={active ? { borderColor: a.color, background: a.color + "1c" } : undefined}
                   >
-                    <AgentLogo agent={a.name as AgentName} className="h-3.5 w-3.5" />
+                    <AgentLogo agent={a.name} className="h-3.5 w-3.5" />
                     {a.name}
                   </button>
                 );
@@ -300,7 +309,7 @@ export function SettingsPage() {
 
         <div className="mt-4 flex flex-col gap-3">
           {agents.map((a) => {
-            const name = a.name as AgentName;
+            const name = a.name;
             const locked = name === "Generic Agent";
             const disabled = disabledAgents.has(name);
             return (
@@ -346,9 +355,20 @@ export function SettingsPage() {
                     <div className="font-mono text-[9.5px] font-semibold tracking-[.04em] text-[#c3b9a8]">
                       {d.key}
                     </div>
-                    <div className="mt-[3px] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
-                      {d.value}
-                    </div>
+                    {d.key === "CONFIG_ROOT" ? (
+                      <button
+                        type="button"
+                        title={`Open ${a.name} config root in file manager`}
+                        onClick={() => void openConfigRoot(name)}
+                        className="mt-[3px] block max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055] hover:text-nexus-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nexus-accent/50"
+                      >
+                        {d.value}
+                      </button>
+                    ) : (
+                      <div className="mt-[3px] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-[#6a6055]">
+                        {d.value}
+                      </div>
+                    )}
                     {d.derivedFrom ? (
                       <div className="mt-0.5 text-[9.5px] text-[#bca37a]">derived from {d.derivedFrom}</div>
                     ) : null}

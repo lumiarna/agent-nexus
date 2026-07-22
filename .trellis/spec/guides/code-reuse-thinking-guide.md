@@ -18,6 +18,8 @@ grep -R "要修改或新增的值" src-react src-tauri crates/nexus-core docs CO
 - 前端 server state：`src-react/src/lib/query/<domain>.ts`，不要创建页面级服务端数据镜像。
 - 前端纯规则：领域目录内的 dependency-free module，例如 `components/sync/taskRules.ts`。
 - Rust 通用 helper：`crates/nexus-core/src/services/util.rs`、`paths.rs`、`system_open.rs`。
+  - 本地路径字符串统一由 `paths::resolve_local_path` 解析；`~` 的根统一来自 `paths::home_dir`（Windows 原生 `USERPROFILE` 优先，`HOME` 仅回退），展示折叠统一用 `paths::collapse_home`。不得在 Provider、Project、Sync、Skill/Prompt 或功能 command 中直接读取 `HOME` 并复制展开/折叠规则。
+  - 所有“用默认应用打开 / 在文件管理器中揭示”的 OS 副作用统一走 `system_open::{open_path,reveal_path}`；两者都必须在启动 handler 前拒绝不存在目标。command/domain 不得直接启动 `open`、`explorer` 或 `xdg-open`。
 - Agent capability：`crates/nexus-core/src/services/agent_capabilities.rs` 与前端 `config/agents.ts`。
 - Skill / Prompt 传播：`services/distribution.rs`，不要复制 Agent Matrix 不变量。
 - Sync 生命周期：`services/sync/`，不要在 command 或 UI 重写领域规则。
@@ -27,7 +29,8 @@ grep -R "要修改或新增的值" src-react src-tauri crates/nexus-core docs CO
 - 同一个 `Agent` 名称、配置目录或 prompt/skill 路径被手写第二次。
 - 同一个 mutation 成功后需要失效多个 query。
 - 同一个 `Project` list/string 配置需要 trim、去重、校验。
-- 同一个 path display / `~` collapse / Windows separator 逻辑被复制。
+- 同一个 path display / `~` collapse / Windows separator 逻辑被复制，或路径消费者绕过 `resolve_local_path` / `home_dir` 直接读取环境变量。
+- `system_open.rs` 以外出现用于打开路径的 `Command::new("open" | "explorer" | "xdg-open")`。
 - 同一个 Sync action/location/schedule 规则同时出现在 create 和 add task 表单。
 
 ## 常见 anti-pattern

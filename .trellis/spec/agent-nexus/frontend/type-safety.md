@@ -156,6 +156,64 @@ useMutation({
 });
 ```
 
+## 场景：Settings Agent Config Root 打开目录
+
+### 1. 范围 / 触发条件
+
+- 触发条件：Settings 中的 Agent `CONFIG_ROOT` 需要在文件管理器中打开。
+
+### 2. 签名
+
+- Capability wire type：`AgentCapabilitySurface.name: AgentName`；Settings 不得把任意 `string` 强制断言成 canonical Agent。
+- 前端 typed API：`agentCapabilitiesApi.openConfigRoot(name: AgentName): Promise<void>`。
+- Tauri command：`open_agent_config_root(name: String) -> AppResult<()>`。
+- Core helper：`resolve_agent_config_root(name: &str) -> AppResult<PathBuf>`，内部只使用共享 `services::paths::resolve_local_path`。
+
+### 3. 契约
+
+- 前端仅传递 `AgentName` canonical 名称，不能传递用户可控的路径。
+- `services::paths::home_dir` / `resolve_local_path` 是本地路径的唯一共享解析链：Windows 优先原生 `USERPROFILE`、缺失时回退 `HOME`，非 Windows 只使用 `HOME`；Config Root 不得新增功能专用 resolver。
+- Core 通过 `agent_by_name` 取 capability 的 `config_dir`，使用共享 resolver 展开并验证目录；Tauri shell 只以既有 `services::system_open::open_path` 打开，不新增第二套 opener。
+- 非 Tauri runtime 由 `invokeCommand` 统一返回 desktop runtime 错误，Settings 页面 toast 该错误。
+
+### 4. 校验与错误矩阵
+
+- 未知 Agent 名称 -> `Validation("unknown agent: ...")`，不访问文件系统。
+- Config Root 不存在 -> 明确的 `config root ... does not exist` 错误，不启动文件管理器。
+- Config Root 不是目录 -> 明确的 `config root ... is not a directory` 错误。
+- 系统 opener 的任意目标不存在或 OS 启动失败 -> 传播明确 `AppResult`，由页面 toast。
+- 浏览器预览 -> `Agent Nexus desktop runtime is required for this action.`。
+
+### 5. 正常 / 基础 / 错误案例
+
+- 正常：点击 `Pi` 的 `CONFIG_ROOT`，API 传递 `"Pi"`，core 打开展开后的 `~/.pi/agent` 目录。
+- 基础：`CONFIG_ROOT` 以外的 Agent 路径继续只是展示文本。
+- 错误：前端将 `configDir` 或任意输入路径作为 command 参数，导致 desktop shell 成为任意路径打开接口。
+- 错误：为 Explorer 单独实现 `HOME` 转换或新 opener，造成其他路径消费者继续使用不同语义。
+
+### 6. 必需测试
+
+- `services::paths` 单元测试：Windows 下 `HOME=/c/Users/...` 与 `USERPROFILE=C:\Users\...` 并存时，共享 `resolve_local_path` 必须使用 `USERPROFILE`。
+- `crates/nexus-core/tests/agent_capabilities.rs`：创建真实目录后断言 canonical Agent 配置根；覆盖未知 Agent、目录缺失和目标不是目录。
+- `services::system_open` 单元测试：缺失目标在启动系统 handler 前失败。
+- `src-react/tests/component/settingsConfigRootOpen.test.tsx`：点击路径传递 canonical Agent 名；浏览器预览显示统一 runtime toast。
+
+### 7. 错误与正确示例
+
+#### 错误
+
+```ts
+invokeCommand("open_agent_config_root", { path: agent.configDir });
+```
+
+#### 正确
+
+```ts
+agentCapabilitiesApi.openConfigRoot("Generic Agent");
+```
+
+后端以 canonical Agent 名称查找 capability，经唯一共享路径解析器与唯一 system opener 打开配置根目录，避免调用方指定文件系统目标。
+
 ## 验证
 
 - `src-react/package.json` 提供 `typecheck`：`tsc --noEmit`。

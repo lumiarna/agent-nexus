@@ -1,6 +1,30 @@
+use std::{env, fs, panic, path::Path};
+
 use nexus_core::services::agent_capabilities::{
     agent_by_name, agent_capability_surfaces, list_agent_capability_surfaces,
+    resolve_agent_config_root,
 };
+use serial_test::serial;
+use tempfile::TempDir;
+
+fn with_home<F: FnOnce(&Path)>(home: &TempDir, f: F) {
+    let previous_home = env::var_os("HOME");
+    let previous_userprofile = env::var_os("USERPROFILE");
+    env::set_var("HOME", home.path());
+    env::set_var("USERPROFILE", home.path());
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| f(home.path())));
+    match previous_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+    match previous_userprofile {
+        Some(value) => env::set_var("USERPROFILE", value),
+        None => env::remove_var("USERPROFILE"),
+    }
+    if let Err(payload) = result {
+        panic::resume_unwind(payload);
+    }
+}
 
 #[test]
 fn defines_agent_capability_surfaces_in_canonical_order() {
@@ -93,6 +117,63 @@ fn defines_agent_capability_surfaces_in_canonical_order() {
     );
     assert_eq!(pi.prompt.expect("pi prompt surface").project_file, None);
     assert!(pi.provider.is_none());
+}
+
+#[test]
+#[serial]
+fn resolves_existing_config_roots_from_canonical_agent_names() {
+    let home = tempfile::tempdir().expect("create temporary home");
+    with_home(&home, |home| {
+        for (name, relative_path) in [
+            ("Generic Agent", ".agents"),
+            ("Claude Code", ".claude"),
+            ("CodeX", ".codex"),
+            ("Copilot", ".github"),
+            ("OpenCode", ".config/opencode"),
+            ("Pi", ".pi/agent"),
+            ("Qoder", ".qoder"),
+        ] {
+            let expected = home.join(relative_path);
+            fs::create_dir_all(&expected).expect("create config root");
+            assert_eq!(
+                resolve_agent_config_root(name).expect("resolve canonical config root"),
+                expected
+            );
+        }
+    });
+
+    let error = resolve_agent_config_root("untrusted/path").expect_err("reject unknown agent");
+    assert!(error.to_string().contains("unknown agent: untrusted/path"));
+}
+
+#[test]
+#[serial]
+fn rejects_missing_config_root() {
+    let home = tempfile::tempdir().expect("create temporary home");
+    with_home(&home, |_| {
+        let error = resolve_agent_config_root("Pi").expect_err("reject missing config root");
+
+        assert!(error
+            .to_string()
+            .contains("config root for Pi does not exist"));
+        assert!(error.to_string().contains(".pi"));
+    });
+}
+
+#[test]
+#[serial]
+fn rejects_config_root_that_is_not_a_directory() {
+    let home = tempfile::tempdir().expect("create temporary home");
+    with_home(&home, |home| {
+        fs::write(home.join(".agents"), "not a directory").expect("write config root file");
+
+        let error = resolve_agent_config_root("Generic Agent")
+            .expect_err("reject config root that is not a directory");
+
+        assert!(error
+            .to_string()
+            .contains("config root for Generic Agent is not a directory"));
+    });
 }
 
 #[test]

@@ -60,7 +60,10 @@ async fn codex_models_are_supported_when_auth_exists() {
         .expect("should succeed when auth exists");
 
     assert!(capability.supported, "codex should be supported with auth");
-    assert!(!capability.models.is_empty(), "expected at least one CodeX model");
+    assert!(
+        !capability.models.is_empty(),
+        "expected at least one CodeX model"
+    );
 }
 
 #[test]
